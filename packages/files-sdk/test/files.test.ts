@@ -139,4 +139,36 @@ describe("Files class", () => {
     expect(out.method).toBe("PUT");
     expect(out.url).toMatch(/^https:\/\/fake\.local/u);
   });
+
+  test("empty key is rejected at the SDK boundary", async () => {
+    const files = new Files({ adapter: fakeAdapter() });
+    try {
+      await files.upload("", "x");
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(FilesError);
+      expect((error as FilesError).message).toMatch(/non-empty/u);
+    }
+  });
+
+  test("null bytes in keys are rejected at the SDK boundary", async () => {
+    const files = new Files({ adapter: fakeAdapter() });
+    try {
+      await files.download("foo\0bar");
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(FilesError);
+      expect((error as FilesError).message).toMatch(/null bytes/u);
+    }
+  });
+
+  test("copy validates both source and destination keys", async () => {
+    const files = new Files({ adapter: fakeAdapter() });
+    try {
+      await files.copy("a.txt", "");
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect((error as FilesError).message).toMatch(/copy destination/u);
+    }
+  });
 });

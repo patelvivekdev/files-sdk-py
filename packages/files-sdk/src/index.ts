@@ -113,6 +113,20 @@ const run = async <T>(fn: () => Promise<T>): Promise<T> => {
   }
 };
 
+// Catch the obviously-broken cases at the SDK boundary so callers get a
+// useful error from us instead of an opaque provider 400. We deliberately
+// don't try to be exhaustive (length, allowed characters, leading slashes)
+// — those rules differ across S3/R2/Vercel and we'd rather surface real
+// provider errors than enforce the strictest superset.
+const assertValidKey = (key: string, label = "key"): void => {
+  if (typeof key !== "string" || key.length === 0) {
+    throw new FilesError("Provider", `${label} must be a non-empty string`);
+  }
+  if (key.includes("\0")) {
+    throw new FilesError("Provider", `${label} must not contain null bytes`);
+  }
+};
+
 export class Files<A extends Adapter = Adapter> {
   readonly #adapter: A;
 
@@ -129,22 +143,28 @@ export class Files<A extends Adapter = Adapter> {
   }
 
   upload(key: string, body: Body, opts?: UploadOptions): Promise<UploadResult> {
+    assertValidKey(key);
     return run(() => this.#adapter.upload(key, body, opts));
   }
 
   download(key: string, opts?: DownloadOptions): Promise<StoredFile> {
+    assertValidKey(key);
     return run(() => this.#adapter.download(key, opts));
   }
 
   head(key: string): Promise<StoredFile> {
+    assertValidKey(key);
     return run(() => this.#adapter.head(key));
   }
 
   delete(key: string): Promise<void> {
+    assertValidKey(key);
     return run(() => this.#adapter.delete(key));
   }
 
   copy(from: string, to: string): Promise<void> {
+    assertValidKey(from, "copy source");
+    assertValidKey(to, "copy destination");
     return run(() => this.#adapter.copy(from, to));
   }
 
@@ -153,14 +173,17 @@ export class Files<A extends Adapter = Adapter> {
   }
 
   url(key: string): Promise<string> {
+    assertValidKey(key);
     return run(() => this.#adapter.url(key));
   }
 
   signedUrl(key: string, opts: SignOptions): Promise<string> {
+    assertValidKey(key);
     return run(() => this.#adapter.signedUrl(key, opts));
   }
 
   signedUploadUrl(key: string, opts: SignUploadOptions): Promise<SignedUpload> {
+    assertValidKey(key);
     return run(() => this.#adapter.signedUploadUrl(key, opts));
   }
 }
