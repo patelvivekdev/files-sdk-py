@@ -92,6 +92,14 @@ export const Adapters = () => (
           dev or other hosts.
         </p>
         <CodeBlock code={VERCEL_BLOB_EXAMPLE} lang="ts" />
+        <p>
+          <span className="text-foreground">Limitations.</span>{" "}
+          <code>signedUrl</code> and <code>signedUploadUrl</code> both throw —
+          blob URLs are public and don't expire, and browser uploads go through{" "}
+          <code>handleUpload()</code> from <code>@vercel/blob/client</code>{" "}
+          instead of presigned URLs. User <code>metadata</code> isn't supported
+          by the underlying API, so it round-trips as <code>undefined</code>.
+        </p>
       </TabsContent>
     </Tabs>
   </section>

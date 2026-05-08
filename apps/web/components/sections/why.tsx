@@ -6,7 +6,7 @@ export const Why = () => (
     <p>
       Object storage SDKs are all subtly different. <code>files-sdk</code>{" "}
       exposes the slice that's the same everywhere — upload, download, list,
-      delete, sign — behind a single class, and gets out of the way for anything
+      delete — behind a single class, and gets out of the way for anything
       provider-specific.
     </p>
     <ul>

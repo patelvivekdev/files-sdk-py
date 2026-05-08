@@ -83,7 +83,9 @@ export const ApiReference = () => (
           <li className="px-4 py-3">
             <code>metadata</code> — <code>Record&lt;string, string&gt;</code>,
             optional. Provider user-metadata, returned by <code>head</code> and{" "}
-            <code>list</code>.
+            <code>list</code> where the provider supports it. Vercel Blob does
+            not expose user metadata, so it round-trips as{" "}
+            <code>undefined</code>.
           </li>
         </ul>
       </div>
@@ -177,6 +179,13 @@ export const ApiReference = () => (
         returns a discriminated shape so callers can handle PUT- and POST-style
         flows uniformly.
       </p>
+      <p>
+        On Vercel Blob, both <code>signedUrl</code> and{" "}
+        <code>signedUploadUrl</code> throw: blob URLs are public and don't
+        expire, so signing is meaningless — call <code>url()</code> instead. For
+        browser uploads, use <code>handleUpload()</code> from{" "}
+        <code>@vercel/blob/client</code>.
+      </p>
       <CodeBlock code={URL_EXAMPLE} lang="ts" />
       <div className="flex flex-col gap-2">
         <Heading as="h4">Sign options</Heading>
@@ -191,7 +200,13 @@ export const ApiReference = () => (
           </li>
           <li className="px-4 py-3">
             <code>maxSize</code> — number of bytes, optional.{" "}
-            <code>signedUploadUrl</code> only.
+            <code>signedUploadUrl</code> only.{" "}
+            <span className="text-foreground">Strongly recommended.</span>{" "}
+            Without it, the signed URL has no server-side size cap — anyone with
+            the URL can upload an arbitrarily large file until{" "}
+            <code>expiresIn</code> elapses. With it, the adapter switches to a
+            presigned POST form that enforces the size via{" "}
+            <code>content-length-range</code>.
           </li>
         </ul>
       </div>
