@@ -10,7 +10,7 @@ const files = new Files({
 });
 
 await files.upload("hello.txt", "world");
-const file = await files.download("hello.txt");`,
+const url = await files.signedUrl("hello.txt", { expiresIn: 60 });`,
     id: "s3",
     label: "S3",
     lang: "tsx",
@@ -38,7 +38,7 @@ const files = new Files({
 });
 
 await files.upload("hello.txt", "world");
-const { items } = await files.list({ prefix: "hello" });`,
+const url = await files.signedUrl("hello.txt", { expiresIn: 60 });`,
     id: "vercel-blob",
     label: "Vercel Blob",
     lang: "tsx",
@@ -48,10 +48,7 @@ const { items } = await files.list({ prefix: "hello" });`,
 import { minio } from "files-sdk/minio";
 
 const files = new Files({
-  adapter: minio({
-    bucket: "uploads",
-    endpoint: "http://localhost:9000",
-  }),
+  adapter: minio({ bucket: "uploads", endpoint: "http://localhost:9000" }),
 });
 
 await files.upload("hello.txt", "world");
