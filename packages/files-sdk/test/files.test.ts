@@ -120,6 +120,12 @@ describe("Files class", () => {
     expect(files.raw).toBe(adapter.raw);
   });
 
+  test("adapter getter returns the underlying adapter", () => {
+    const adapter = fakeAdapter();
+    const files = new Files({ adapter });
+    expect(files.adapter).toBe(adapter);
+  });
+
   test("signedUrl returns a string", async () => {
     const files = new Files({ adapter: fakeAdapter() });
     await files.upload("k.txt", "v");

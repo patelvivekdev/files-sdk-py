@@ -14,7 +14,7 @@ import { sdkStreamMixin } from "@smithy/util-stream";
 import { mockClient } from "aws-sdk-client-mock";
 
 import { Files, FilesError } from "../src/index.js";
-import { s3 } from "../src/s3/index.js";
+import { mapS3Error, s3 } from "../src/s3/index.js";
 
 const s3Mock = mockClient(S3Client);
 
@@ -194,6 +194,297 @@ describe("s3 adapter", () => {
       throw new Error("should have thrown");
     } catch (error) {
       expect((error as FilesError).code).toBe("Unauthorized");
+    }
+  });
+
+  test("upload normalizes Uint8Array bodies and forwards content length", async () => {
+    s3Mock.on(PutObjectCommand).resolves({});
+    const adapter = s3({ bucket: "b", region: "us-east-1" });
+    const result = await adapter.upload("k", new Uint8Array([1, 2, 3]));
+    expect(result.size).toBe(3);
+    const calls = s3Mock.commandCalls(PutObjectCommand);
+    const [{ input }] = firstCall(calls).args;
+    expect(input.Body).toBeInstanceOf(Uint8Array);
+    expect(input.ContentType).toBe("application/octet-stream");
+    expect(input.ContentLength).toBe(3);
+  });
+
+  test("upload normalizes ArrayBuffer bodies", async () => {
+    s3Mock.on(PutObjectCommand).resolves({});
+    const adapter = s3({ bucket: "b", region: "us-east-1" });
+    const ab = new Uint8Array([1, 2, 3, 4]).buffer;
+    const result = await adapter.upload("k", ab);
+    expect(result.size).toBe(4);
+    const [{ input }] = firstCall(s3Mock.commandCalls(PutObjectCommand)).args;
+    expect(input.ContentLength).toBe(4);
+  });
+
+  test("upload normalizes ArrayBufferView (DataView) bodies", async () => {
+    s3Mock.on(PutObjectCommand).resolves({});
+    const adapter = s3({ bucket: "b", region: "us-east-1" });
+    const view = new DataView(new Uint8Array([1, 2, 3, 4, 5]).buffer);
+    const result = await adapter.upload("k", view);
+    expect(result.size).toBe(5);
+  });
+
+  test("upload normalizes Blob bodies and uses Blob.type as default", async () => {
+    s3Mock.on(PutObjectCommand).resolves({});
+    const adapter = s3({ bucket: "b", region: "us-east-1" });
+    const blob = new Blob([new Uint8Array([1, 2])], { type: "image/png" });
+    const result = await adapter.upload("k", blob);
+    expect(result.contentType).toBe("image/png");
+    expect(result.size).toBe(2);
+  });
+
+  test("upload accepts ReadableStream bodies (no contentLength)", async () => {
+    s3Mock.on(PutObjectCommand).resolves({});
+    const adapter = s3({ bucket: "b", region: "us-east-1" });
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new Uint8Array([1, 2]));
+        c.close();
+      },
+    });
+    await adapter.upload("k", stream);
+    const [{ input }] = firstCall(s3Mock.commandCalls(PutObjectCommand)).args;
+    expect(input.ContentLength).toBeUndefined();
+    expect(input.Body).toBe(stream);
+  });
+
+  test("download as stream returns a streaming StoredFile", async () => {
+    s3Mock.on(GetObjectCommand).resolves({
+      Body: streamBody("streamed") as unknown as undefined,
+      ContentLength: 8,
+      ContentType: "text/plain",
+    });
+    const adapter = s3({ bucket: "b", region: "us-east-1" });
+    const got = await adapter.download("a.txt", { as: "stream" });
+    const reader = got.stream().getReader();
+    const chunks: Uint8Array[] = [];
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (value) {
+        chunks.push(value);
+      }
+    }
+    const total = chunks.reduce((sum, c) => sum + c.byteLength, 0);
+    expect(total).toBe(8);
+  });
+
+  test("head's lazy body factory fetches via GetObjectCommand", async () => {
+    s3Mock
+      .on(HeadObjectCommand)
+      .resolves({ ContentLength: 5, ContentType: "text/plain", ETag: '"e"' });
+    s3Mock.on(GetObjectCommand).resolves({
+      Body: streamBody("hello") as unknown as undefined,
+      ContentLength: 5,
+    });
+    const adapter = s3({ bucket: "b", region: "us-east-1" });
+    const info = await adapter.head("k");
+    expect(await info.text()).toBe("hello");
+    expect(s3Mock.commandCalls(GetObjectCommand)).toHaveLength(1);
+  });
+
+  test("list items lazily fetch their body via GetObjectCommand", async () => {
+    s3Mock.on(ListObjectsV2Command).resolves({
+      Contents: [
+        { ETag: '"1"', Key: "a.txt", LastModified: new Date(), Size: 5 },
+      ],
+      IsTruncated: false,
+    });
+    s3Mock.on(GetObjectCommand).resolves({
+      Body: streamBody("hello") as unknown as undefined,
+      ContentLength: 5,
+    });
+    const adapter = s3({ bucket: "b", region: "us-east-1" });
+    const out = await adapter.list();
+    const [item] = out.items;
+    if (!item) {
+      throw new Error("expected at least one item");
+    }
+    expect(await item.text()).toBe("hello");
+  });
+
+  test("signedUrl returns a presigned GET URL", async () => {
+    const adapter = s3({
+      bucket: "b",
+      credentials: { accessKeyId: "AKID", secretAccessKey: "SECRET" },
+      region: "us-east-1",
+    });
+    const url = await adapter.signedUrl("k.txt", { expiresIn: 60 });
+    expect(url).toContain("X-Amz-Signature=");
+    expect(url).toContain("k.txt");
+  });
+
+  test("signedUploadUrl returns method PUT with content-type header when no maxSize", async () => {
+    const adapter = s3({
+      bucket: "b",
+      credentials: { accessKeyId: "AKID", secretAccessKey: "SECRET" },
+      region: "us-east-1",
+    });
+    const out = await adapter.signedUploadUrl("k.txt", {
+      contentType: "text/plain",
+      expiresIn: 60,
+    });
+    expect(out.method).toBe("PUT");
+    if (out.method === "PUT") {
+      expect(out.url).toContain("X-Amz-Signature=");
+      expect(out.headers).toEqual({ "Content-Type": "text/plain" });
+    }
+  });
+
+  test("signedUploadUrl returns method POST with fields when maxSize is set", async () => {
+    const adapter = s3({
+      bucket: "b",
+      credentials: { accessKeyId: "AKID", secretAccessKey: "SECRET" },
+      region: "us-east-1",
+    });
+    const out = await adapter.signedUploadUrl("k.txt", {
+      contentType: "image/png",
+      expiresIn: 60,
+      maxSize: 1024,
+    });
+    expect(out.method).toBe("POST");
+    if (out.method === "POST") {
+      expect(typeof out.url).toBe("string");
+      expect(out.fields).toBeDefined();
+      expect(out.fields["Content-Type"]).toBe("image/png");
+    }
+  });
+
+  test("PreconditionFailed maps to Conflict", async () => {
+    s3Mock.on(DeleteObjectCommand).rejects(
+      Object.assign(new Error("conflict"), {
+        $metadata: { httpStatusCode: 412 },
+        name: "PreconditionFailed",
+      })
+    );
+    const adapter = s3({ bucket: "b", region: "us-east-1" });
+    try {
+      await adapter.delete("k");
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect((error as FilesError).code).toBe("Conflict");
+    }
+  });
+
+  test("upload error is mapped to Provider for unknown S3 errors", async () => {
+    s3Mock.on(PutObjectCommand).rejects(
+      Object.assign(new Error("server error"), {
+        $metadata: { httpStatusCode: 500 },
+        name: "InternalError",
+      })
+    );
+    const adapter = s3({ bucket: "b", region: "us-east-1" });
+    try {
+      await adapter.upload("k", "x");
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect((error as FilesError).code).toBe("Provider");
+      expect((error as FilesError).message).toBe("server error");
+    }
+  });
+
+  test("copy AccessDenied maps to Unauthorized", async () => {
+    s3Mock.on(CopyObjectCommand).rejects(
+      Object.assign(new Error("denied"), {
+        $metadata: { httpStatusCode: 403 },
+        name: "AccessDenied",
+      })
+    );
+    const adapter = s3({ bucket: "b", region: "us-east-1" });
+    try {
+      await adapter.copy("a", "b");
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect((error as FilesError).code).toBe("Unauthorized");
+    }
+  });
+
+  test("head error: 404 maps to NotFound", async () => {
+    s3Mock.on(HeadObjectCommand).rejects(
+      Object.assign(new Error("nope"), {
+        $metadata: { httpStatusCode: 404 },
+        name: "NotFound",
+      })
+    );
+    const adapter = s3({ bucket: "b", region: "us-east-1" });
+    try {
+      await adapter.head("missing");
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect((error as FilesError).code).toBe("NotFound");
+    }
+  });
+
+  test("list error: 500 maps to Provider", async () => {
+    s3Mock.on(ListObjectsV2Command).rejects(
+      Object.assign(new Error("oops"), {
+        $metadata: { httpStatusCode: 500 },
+      })
+    );
+    const adapter = s3({ bucket: "b", region: "us-east-1" });
+    try {
+      await adapter.list();
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect((error as FilesError).code).toBe("Provider");
+      expect((error as FilesError).message).toBe("oops");
+    }
+  });
+
+  test("mapS3Error falls back to default message when err has no message", () => {
+    const err = mapS3Error({ $metadata: { httpStatusCode: 500 } });
+    expect(err.code).toBe("Provider");
+    expect(err.message).toBe("S3 error");
+  });
+
+  test("mapS3Error returns the same FilesError instance when given one", () => {
+    const original = new FilesError("Conflict", "boom");
+    expect(mapS3Error(original)).toBe(original);
+  });
+
+  test("download as stream falls back to an empty stream when Body is undefined", async () => {
+    s3Mock.on(GetObjectCommand).resolves({
+      ContentLength: 0,
+      ContentType: "text/plain",
+    });
+    const adapter = s3({ bucket: "b", region: "us-east-1" });
+    const got = await adapter.download("a.txt", { as: "stream" });
+    const reader = got.stream().getReader();
+    const { done } = await reader.read();
+    expect(done).toBe(true);
+  });
+
+  test("signedUrl: presigner errors are mapped via mapS3Error", async () => {
+    const adapter = s3({
+      bucket: "b",
+      credentials: { accessKeyId: "AKID", secretAccessKey: "SECRET" },
+      region: "us-east-1",
+    });
+    try {
+      await adapter.signedUrl("k.txt", { expiresIn: 10_000_000 });
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(FilesError);
+    }
+  });
+
+  test("signedUploadUrl PUT path: presigner errors are mapped via mapS3Error", async () => {
+    const adapter = s3({
+      bucket: "b",
+      credentials: { accessKeyId: "AKID", secretAccessKey: "SECRET" },
+      region: "us-east-1",
+    });
+    // SigV4 caps expiresIn at 604800 seconds; anything larger throws.
+    try {
+      await adapter.signedUploadUrl("k.txt", { expiresIn: 10_000_000 });
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(FilesError);
     }
   });
 

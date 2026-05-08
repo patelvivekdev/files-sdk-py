@@ -21,6 +21,25 @@ describe("r2 adapter — HTTP path", () => {
     expect(endpoint?.hostname).toBe("acct.r2.cloudflarestorage.com");
   });
 
+  test("missing credentials throws at construction even with accountId set", () => {
+    const oldKey = process.env.R2_ACCESS_KEY_ID;
+    const oldSecret = process.env.R2_SECRET_ACCESS_KEY;
+    delete process.env.R2_ACCESS_KEY_ID;
+    delete process.env.R2_SECRET_ACCESS_KEY;
+    try {
+      expect(() => r2({ accountId: "ACCT", bucket: "uploads" })).toThrow(
+        /credentials/u
+      );
+    } finally {
+      if (oldKey) {
+        process.env.R2_ACCESS_KEY_ID = oldKey;
+      }
+      if (oldSecret) {
+        process.env.R2_SECRET_ACCESS_KEY = oldSecret;
+      }
+    }
+  });
+
   test("missing accountId throws at construction", () => {
     const oldId = process.env.R2_ACCOUNT_ID;
     const oldKey = process.env.R2_ACCESS_KEY_ID;
@@ -240,6 +259,185 @@ describe("r2 adapter — Workers binding path", () => {
       throw new Error("should have thrown");
     } catch (error) {
       expect((error as FilesError).code).toBe("Provider");
+    }
+  });
+
+  test("signedUploadUrl from binding throws Provider", async () => {
+    const { bucket } = fakeBinding();
+    const files = new Files({ adapter: r2({ binding: bucket as never }) });
+    try {
+      await files.signedUploadUrl("a.txt", { expiresIn: 60 });
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect((error as FilesError).code).toBe("Provider");
+    }
+  });
+
+  test("url from binding throws Provider with helpful guidance", async () => {
+    const { bucket } = fakeBinding();
+    const files = new Files({ adapter: r2({ binding: bucket as never }) });
+    try {
+      await files.url("a.txt");
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect((error as FilesError).code).toBe("Provider");
+      expect((error as FilesError).message).toMatch(/r2\.dev|custom domain/u);
+    }
+  });
+
+  test("upload via binding accepts Uint8Array, ArrayBuffer, Blob, ReadableStream", async () => {
+    const { bucket } = fakeBinding();
+    const files = new Files({ adapter: r2({ binding: bucket as never }) });
+    await files.upload("u8.bin", new Uint8Array([1, 2, 3]));
+    await files.upload("ab.bin", new Uint8Array([1, 2, 3, 4]).buffer);
+    await files.upload(
+      "blob.bin",
+      new Blob([new Uint8Array([1, 2])], { type: "image/png" })
+    );
+    await files.upload(
+      "stream.bin",
+      new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(new Uint8Array([1, 2, 3, 4, 5]));
+          c.close();
+        },
+      })
+    );
+    const list = await files.list();
+    const keys = list.items.map((i) => i.key).toSorted();
+    expect(keys).toEqual(["ab.bin", "blob.bin", "stream.bin", "u8.bin"]);
+  });
+
+  test("upload with ArrayBufferView body normalizes correctly", async () => {
+    const { bucket } = fakeBinding();
+    const files = new Files({ adapter: r2({ binding: bucket as never }) });
+    const view = new DataView(new Uint8Array([1, 2, 3, 4]).buffer);
+    const result = await files.upload("v.bin", view);
+    expect(result.size).toBe(4);
+  });
+
+  test("binding list filters by prefix and maps StoredFiles", async () => {
+    const { bucket } = fakeBinding();
+    const files = new Files({ adapter: r2({ binding: bucket as never }) });
+    await files.upload("a/1.txt", "1", { contentType: "text/plain" });
+    await files.upload("a/2.txt", "2", { contentType: "text/plain" });
+    await files.upload("b/3.txt", "3", { contentType: "text/plain" });
+    const out = await files.list({ prefix: "a/" });
+    expect(out.items.map((i) => i.key).toSorted()).toEqual([
+      "a/1.txt",
+      "a/2.txt",
+    ]);
+  });
+
+  test("binding copy throws NotFound when source is missing", async () => {
+    const { bucket } = fakeBinding();
+    const files = new Files({ adapter: r2({ binding: bucket as never }) });
+    try {
+      await files.copy("missing.txt", "dest.txt");
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect((error as FilesError).code).toBe("NotFound");
+    }
+  });
+
+  test("binding download as stream returns a streaming StoredFile", async () => {
+    const { bucket } = fakeBinding();
+    const files = new Files({ adapter: r2({ binding: bucket as never }) });
+    await files.upload("a.txt", "stream-me", { contentType: "text/plain" });
+    const got = await files.download("a.txt", { as: "stream" });
+    const reader = got.stream().getReader();
+    const chunks: Uint8Array[] = [];
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (value) {
+        chunks.push(value);
+      }
+    }
+    const total = chunks.reduce((sum, c) => sum + c.byteLength, 0);
+    expect(total).toBe("stream-me".length);
+  });
+
+  test("binding upload error is mapped to Provider via mapR2Error", async () => {
+    const { bucket } = fakeBinding();
+    bucket.put = (() => Promise.reject(new Error("put failed"))) as never;
+    const files = new Files({ adapter: r2({ binding: bucket as never }) });
+    try {
+      await files.upload("a.txt", "x");
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(FilesError);
+      expect((error as FilesError).code).toBe("Provider");
+      expect((error as FilesError).message).toBe("put failed");
+    }
+  });
+
+  test("binding head exposes a lazy body that fetches via get()", async () => {
+    const { bucket } = fakeBinding();
+    const files = new Files({ adapter: r2({ binding: bucket as never }) });
+    await files.upload("h.txt", "lazy-body", { contentType: "text/plain" });
+    const info = await files.head("h.txt");
+    expect(await info.text()).toBe("lazy-body");
+  });
+
+  test("binding list items expose lazy bodies that fetch via get()", async () => {
+    const { bucket } = fakeBinding();
+    const files = new Files({ adapter: r2({ binding: bucket as never }) });
+    await files.upload("x/1.txt", "first", { contentType: "text/plain" });
+    const out = await files.list({ prefix: "x/" });
+    const [item] = out.items;
+    if (!item) {
+      throw new Error("expected at least one item");
+    }
+    expect(await item.text()).toBe("first");
+  });
+
+  test("binding upload error: existing FilesError passes through unchanged", async () => {
+    const { bucket } = fakeBinding();
+    const original = new FilesError("Conflict", "already exists");
+    bucket.put = (() => Promise.reject(original)) as never;
+    const files = new Files({ adapter: r2({ binding: bucket as never }) });
+    try {
+      await files.upload("a.txt", "x");
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect(error).toBe(original);
+    }
+  });
+
+  test("binding head's lazy body returns empty bytes when get races and returns null", async () => {
+    const { bucket } = fakeBinding();
+    const files = new Files({ adapter: r2({ binding: bucket as never }) });
+    await files.upload("a.txt", "data", { contentType: "text/plain" });
+    // Simulate a concurrent delete: head succeeds, but the follow-up get returns null.
+    bucket.get = (() => Promise.resolve(null)) as never;
+    const info = await files.head("a.txt");
+    expect(await info.text()).toBe("");
+  });
+
+  test("binding list item's lazy body returns empty bytes when get races and returns null", async () => {
+    const { bucket } = fakeBinding();
+    const files = new Files({ adapter: r2({ binding: bucket as never }) });
+    await files.upload("a.txt", "data", { contentType: "text/plain" });
+    const out = await files.list();
+    const [item] = out.items;
+    if (!item) {
+      throw new Error("expected at least one item");
+    }
+    bucket.get = (() => Promise.resolve(null)) as never;
+    expect(await item.text()).toBe("");
+  });
+
+  test("binding download throws NotFound when key is missing", async () => {
+    const { bucket } = fakeBinding();
+    const files = new Files({ adapter: r2({ binding: bucket as never }) });
+    try {
+      await files.download("missing.txt");
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect((error as FilesError).code).toBe("NotFound");
     }
   });
 });
