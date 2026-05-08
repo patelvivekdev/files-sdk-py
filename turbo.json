@@ -14,6 +14,10 @@
       "dependsOn": ["^build"],
       "outputs": []
     },
+    "test:coverage": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
     "types": {
       "dependsOn": ["^build"],
       "outputs": []

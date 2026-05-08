@@ -12,6 +12,7 @@
     "build": "turbo run build",
     "dev": "turbo run dev",
     "test": "turbo run test",
+    "test:coverage": "turbo run test:coverage",
     "types": "turbo run types",
     "changeset": "changeset",
     "version-packages": "changeset version",

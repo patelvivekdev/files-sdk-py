@@ -34,6 +34,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "bun test",
+    "test:coverage": "bun test --coverage",
     "types": "tsgo --noEmit"
   },
   "dependencies": {
