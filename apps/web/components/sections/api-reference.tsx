@@ -43,17 +43,30 @@ const short = await files.url("avatars/abc.png", { expiresIn: 60 });
 // dropping a security ask would be a regression.
 const safe = await files.url("avatars/abc.png", {
   responseContentDisposition: "attachment",
-});
+});`;
 
-// Signed upload — discriminated PUT or POST shape, for direct
-// browser → bucket uploads without proxying through your server.
+const SIGNED_UPLOAD_EXAMPLE = `// On your server: hand back an upload contract that lets the browser
+// PUT/POST the file directly to the bucket. Bytes never touch your server.
 const upload = await files.signedUploadUrl("avatars/abc.png", {
   expiresIn: 60,
   contentType: "image/png",
   maxSize: 5_000_000,
 });
 // → { method: "PUT", url, headers? }
-//   | { method: "POST", url, fields }`;
+//   | { method: "POST", url, fields }
+
+// In the browser: PUT path (no maxSize) is a plain fetch.
+await fetch(upload.url, {
+  method: "PUT",
+  body: file,
+  headers: upload.headers,
+});
+
+// POST path (with maxSize) is multipart with the signed policy fields.
+const form = new FormData();
+for (const [k, v] of Object.entries(upload.fields)) form.append(k, v);
+form.append("file", file);
+await fetch(upload.url, { method: "POST", body: form });`;
 
 export const ApiReference = () => (
   <section>
@@ -177,13 +190,13 @@ export const ApiReference = () => (
     </section>
 
     <section>
-      <Heading as="h3" id="files-urls">
-        files.url, files.signedUploadUrl
+      <Heading as="h3" id="files-url">
+        files.url(key, options?)
       </Heading>
       <p>
-        <code>files.url(key, opts?)</code> is the unified read-URL entry point:
-        every adapter returns the most direct URL it can. Signing adapters (S3,
-        R2 over HTTP, MinIO, R2 binding when HTTP credentials are also
+        Returns a URL the caller can use to fetch <code>key</code>. Every
+        adapter returns the most direct URL it can produce. Signing adapters
+        (S3, R2 over HTTP, MinIO, R2 binding when HTTP credentials are also
         configured) sign a <code>GetObject</code> — defaulting to a 1-hour
         expiry, override per-call via <code>{"{ expiresIn }"}</code> or
         per-adapter via <code>defaultUrlExpiresIn</code>. If the adapter is
@@ -195,17 +208,11 @@ export const ApiReference = () => (
         <code>access: "private"</code> mode, and an R2 Workers binding without
         either <code>publicBaseUrl</code> or HTTP credentials.
       </p>
-      <p>
-        <code>files.signedUploadUrl(key, opts)</code> is a different operation —
-        it returns a discriminated PUT-or-POST contract so a client (typically a
-        browser) can upload directly to the bucket without proxying bytes
-        through your server. Vercel Blob throws — use{" "}
-        <code>handleUpload()</code> from <code>@vercel/blob/client</code> for
-        browser uploads.
-      </p>
       <CodeBlock code={URL_EXAMPLE} lang="ts" />
       <div className="flex flex-col gap-2">
-        <Heading as="h4">files.url options</Heading>
+        <Heading as="h4" id="files-url-options">
+          Options
+        </Heading>
         <ul className="!list-none !pl-0 !gap-0 rounded-md border border-dotted divide-y divide-dotted">
           <li className="px-4 py-3">
             <code>expiresIn</code> — number of seconds, optional. Honored on
@@ -229,8 +236,39 @@ export const ApiReference = () => (
           </li>
         </ul>
       </div>
+    </section>
+
+    <section>
+      <Heading as="h3" id="files-signed-upload-url">
+        files.signedUploadUrl(key, options)
+      </Heading>
+      <p>
+        Returns a discriminated PUT-or-POST contract so a client (typically a
+        browser) can upload directly to the bucket without proxying bytes
+        through your server. The flow is: your server calls{" "}
+        <code>signedUploadUrl()</code>, returns the result to the browser, the
+        browser uploads straight to S3/R2/MinIO. Bandwidth and CPU stay off your
+        server.
+      </p>
+      <p>
+        Without <code>maxSize</code>, the adapter returns a presigned PUT URL —
+        simpler, but with no server-side size cap. With <code>maxSize</code>,
+        the adapter switches to a presigned POST form whose policy enforces the
+        size at the bucket via <code>content-length-range</code>. In practice
+        you should always pass <code>maxSize</code> — without it, anyone with
+        the URL can DoS your storage costs until <code>expiresIn</code> elapses.
+      </p>
+      <p>
+        Vercel Blob throws here — its upload model goes through{" "}
+        <code>handleUpload()</code> from <code>@vercel/blob/client</code>{" "}
+        instead of presigned URLs. The R2 Workers binding throws unless you've
+        configured hybrid mode (binding + HTTP credentials).
+      </p>
+      <CodeBlock code={SIGNED_UPLOAD_EXAMPLE} lang="ts" />
       <div className="flex flex-col gap-2">
-        <Heading as="h4">files.signedUploadUrl options</Heading>
+        <Heading as="h4" id="files-signed-upload-url-options">
+          Options
+        </Heading>
         <ul className="!list-none !pl-0 !gap-0 rounded-md border border-dotted divide-y divide-dotted">
           <li className="px-4 py-3">
             <code>expiresIn</code> — number of seconds. Required.
