@@ -85,6 +85,15 @@ export interface SignUploadOptions {
    * via a `content-length-range` policy.
    */
   maxSize?: number;
+  /**
+   * Minimum upload size in bytes for the presigned POST policy. Defaults to
+   * `1` — empty uploads are usually a sign of a broken client, and the most
+   * common application assumption ("file present means real content") fails
+   * silently when 0-byte objects can land. Pass `0` if you genuinely want to
+   * allow empty uploads. Only used when `maxSize` is set (otherwise the
+   * adapter falls back to a presigned PUT, which has no policy at all).
+   */
+  minSize?: number;
 }
 
 export type SignedUpload =

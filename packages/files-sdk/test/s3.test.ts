@@ -392,6 +392,52 @@ describe("s3 adapter", () => {
     }
   });
 
+  test("signedUploadUrl POST policy defaults the content-length lower bound to 1 (rejects 0-byte uploads)", async () => {
+    const adapter = s3({
+      bucket: "b",
+      credentials: { accessKeyId: "AKID", secretAccessKey: "SECRET" },
+      region: "us-east-1",
+    });
+    const out = await adapter.signedUploadUrl("k.txt", {
+      expiresIn: 60,
+      maxSize: 1024,
+    });
+    expect(out.method).toBe("POST");
+    if (out.method === "POST") {
+      const policyJson = JSON.parse(
+        Buffer.from(out.fields.Policy ?? "", "base64").toString("utf-8")
+      );
+      const range = (policyJson.conditions as unknown[]).find(
+        (c): c is [string, number, number] =>
+          Array.isArray(c) && c[0] === "content-length-range"
+      );
+      expect(range).toEqual(["content-length-range", 1, 1024]);
+    }
+  });
+
+  test("signedUploadUrl POST policy honors explicit minSize: 0 when callers want empty uploads", async () => {
+    const adapter = s3({
+      bucket: "b",
+      credentials: { accessKeyId: "AKID", secretAccessKey: "SECRET" },
+      region: "us-east-1",
+    });
+    const out = await adapter.signedUploadUrl("k.txt", {
+      expiresIn: 60,
+      maxSize: 1024,
+      minSize: 0,
+    });
+    if (out.method === "POST") {
+      const policyJson = JSON.parse(
+        Buffer.from(out.fields.Policy ?? "", "base64").toString("utf-8")
+      );
+      const range = (policyJson.conditions as unknown[]).find(
+        (c): c is [string, number, number] =>
+          Array.isArray(c) && c[0] === "content-length-range"
+      );
+      expect(range).toEqual(["content-length-range", 0, 1024]);
+    }
+  });
+
   test("PreconditionFailed maps to Conflict", async () => {
     s3Mock.on(DeleteObjectCommand).rejects(
       Object.assign(new Error("conflict"), {

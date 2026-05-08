@@ -319,10 +319,11 @@ export const s3 = (opts: S3AdapterOptions): S3Adapter => {
     async signedUploadUrl(key, signOpts): Promise<SignedUpload> {
       try {
         if (signOpts.maxSize !== undefined) {
+          const minSize = signOpts.minSize ?? 1;
           const conditions: (
             | [string, ...unknown[]]
             | Record<string, string>
-          )[] = [["content-length-range", 0, signOpts.maxSize]];
+          )[] = [["content-length-range", minSize, signOpts.maxSize]];
           if (signOpts.contentType) {
             conditions.push(["eq", "$Content-Type", signOpts.contentType]);
           }
