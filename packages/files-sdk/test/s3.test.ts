@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { Readable } from 'node:stream';
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { Readable } from "node:stream";
+
 import {
   CopyObjectCommand,
   DeleteObjectCommand,
@@ -8,12 +9,12 @@ import {
   ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
-} from '@aws-sdk/client-s3';
-import { sdkStreamMixin } from '@smithy/util-stream';
-import { mockClient } from 'aws-sdk-client-mock';
+} from "@aws-sdk/client-s3";
+import { sdkStreamMixin } from "@smithy/util-stream";
+import { mockClient } from "aws-sdk-client-mock";
 
-import { Files, FilesError } from '../src/index.js';
-import { s3 } from '../src/s3/index.js';
+import { Files, FilesError } from "../src/index.js";
+import { s3 } from "../src/s3/index.js";
 
 const s3Mock = mockClient(S3Client);
 
@@ -25,177 +26,191 @@ afterEach(() => {
   s3Mock.reset();
 });
 
-function streamBody(bytes: Uint8Array | string) {
+const streamBody = (bytes: Uint8Array | string) => {
   const buf =
-    typeof bytes === 'string' ? Buffer.from(bytes) : Buffer.from(bytes);
+    typeof bytes === "string" ? Buffer.from(bytes) : Buffer.from(bytes);
   return sdkStreamMixin(Readable.from(buf));
-}
+};
 
-describe('s3 adapter', () => {
-  test('upload sends PutObjectCommand with bucket/key/contentType/metadata', async () => {
+const firstCall = <T extends { args: unknown[] }>(calls: T[]): T => {
+  const [first] = calls;
+  if (!first) {
+    throw new Error("expected at least one call");
+  }
+  return first;
+};
+
+describe("s3 adapter", () => {
+  test("upload sends PutObjectCommand with bucket/key/contentType/metadata", async () => {
     s3Mock.on(PutObjectCommand).resolves({ ETag: '"abc"' });
     const files = new Files({
-      adapter: s3({ bucket: 'test-bucket', region: 'us-east-1' }),
+      adapter: s3({ bucket: "test-bucket", region: "us-east-1" }),
     });
-    const result = await files.upload('a.txt', 'hello', {
-      contentType: 'text/plain',
-      metadata: { x: 'y' },
-      cacheControl: 'public, max-age=60',
+    const result = await files.upload("a.txt", "hello", {
+      cacheControl: "public, max-age=60",
+      contentType: "text/plain",
+      metadata: { x: "y" },
     });
-    expect(result.key).toBe('a.txt');
-    expect(result.contentType).toBe('text/plain');
-    expect(result.etag).toBe('abc');
+    expect(result.key).toBe("a.txt");
+    expect(result.contentType).toBe("text/plain");
+    expect(result.etag).toBe("abc");
 
     const calls = s3Mock.commandCalls(PutObjectCommand);
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.args[0].input.Bucket).toBe('test-bucket');
-    expect(calls[0]!.args[0].input.Key).toBe('a.txt');
-    expect(calls[0]!.args[0].input.ContentType).toBe('text/plain');
-    expect(calls[0]!.args[0].input.Metadata).toEqual({ x: 'y' });
-    expect(calls[0]!.args[0].input.CacheControl).toBe('public, max-age=60');
+    const [{ input }] = firstCall(calls).args;
+    expect(input.Bucket).toBe("test-bucket");
+    expect(input.Key).toBe("a.txt");
+    expect(input.ContentType).toBe("text/plain");
+    expect(input.Metadata).toEqual({ x: "y" });
+    expect(input.CacheControl).toBe("public, max-age=60");
   });
 
-  test('download returns a StoredFile with body bytes', async () => {
+  test("download returns a StoredFile with body bytes", async () => {
     s3Mock.on(GetObjectCommand).resolves({
-      Body: streamBody('hello') as unknown as undefined,
+      Body: streamBody("hello") as unknown as undefined,
       ContentLength: 5,
-      ContentType: 'text/plain',
+      ContentType: "text/plain",
       ETag: '"e"',
     });
     const files = new Files({
-      adapter: s3({ bucket: 'test-bucket', region: 'us-east-1' }),
+      adapter: s3({ bucket: "test-bucket", region: "us-east-1" }),
     });
-    const got = await files.download('a.txt');
-    expect(got.key).toBe('a.txt');
-    expect(await got.text()).toBe('hello');
-    expect(got.type).toBe('text/plain');
-    expect(got.etag).toBe('e');
+    const got = await files.download("a.txt");
+    expect(got.key).toBe("a.txt");
+    expect(await got.text()).toBe("hello");
+    expect(got.type).toBe("text/plain");
+    expect(got.etag).toBe("e");
   });
 
-  test('head returns metadata without fetching body', async () => {
+  test("head returns metadata without fetching body", async () => {
     s3Mock.on(HeadObjectCommand).resolves({
       ContentLength: 7,
-      ContentType: 'application/json',
+      ContentType: "application/json",
       ETag: '"h"',
-      Metadata: { foo: 'bar' },
+      Metadata: { foo: "bar" },
     });
     const files = new Files({
-      adapter: s3({ bucket: 'test-bucket', region: 'us-east-1' }),
+      adapter: s3({ bucket: "test-bucket", region: "us-east-1" }),
     });
-    const info = await files.head('a.json');
+    const info = await files.head("a.json");
     expect(info.size).toBe(7);
-    expect(info.type).toBe('application/json');
-    expect(info.etag).toBe('h');
-    expect(info.metadata).toEqual({ foo: 'bar' });
+    expect(info.type).toBe("application/json");
+    expect(info.etag).toBe("h");
+    expect(info.metadata).toEqual({ foo: "bar" });
     expect(s3Mock.commandCalls(HeadObjectCommand)).toHaveLength(1);
     expect(s3Mock.commandCalls(GetObjectCommand)).toHaveLength(0);
   });
 
-  test('delete sends DeleteObjectCommand', async () => {
+  test("delete sends DeleteObjectCommand", async () => {
     s3Mock.on(DeleteObjectCommand).resolves({});
     const files = new Files({
-      adapter: s3({ bucket: 'test-bucket', region: 'us-east-1' }),
+      adapter: s3({ bucket: "test-bucket", region: "us-east-1" }),
     });
-    await files.delete('a.txt');
+    await files.delete("a.txt");
     const calls = s3Mock.commandCalls(DeleteObjectCommand);
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.args[0].input.Bucket).toBe('test-bucket');
-    expect(calls[0]!.args[0].input.Key).toBe('a.txt');
+    const [{ input }] = firstCall(calls).args;
+    expect(input.Bucket).toBe("test-bucket");
+    expect(input.Key).toBe("a.txt");
   });
 
-  test('copy sends CopyObjectCommand with encoded source', async () => {
+  test("copy sends CopyObjectCommand with encoded source", async () => {
     s3Mock.on(CopyObjectCommand).resolves({});
     const files = new Files({
-      adapter: s3({ bucket: 'test-bucket', region: 'us-east-1' }),
+      adapter: s3({ bucket: "test-bucket", region: "us-east-1" }),
     });
-    await files.copy('foo bar.txt', 'to.txt');
+    await files.copy("foo bar.txt", "to.txt");
     const calls = s3Mock.commandCalls(CopyObjectCommand);
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.args[0].input.CopySource).toBe(
-      'test-bucket/foo%20bar.txt'
-    );
+    const [{ input }] = firstCall(calls).args;
+    expect(input.CopySource).toBe("test-bucket/foo%20bar.txt");
   });
 
-  test('list maps Contents into StoredFile items', async () => {
+  test("list maps Contents into StoredFile items", async () => {
     s3Mock.on(ListObjectsV2Command).resolves({
       Contents: [
-        { Key: 'a/1.txt', Size: 1, ETag: '"1"', LastModified: new Date() },
-        { Key: 'a/2.txt', Size: 2, ETag: '"2"', LastModified: new Date() },
+        { ETag: '"1"', Key: "a/1.txt", LastModified: new Date(), Size: 1 },
+        { ETag: '"2"', Key: "a/2.txt", LastModified: new Date(), Size: 2 },
       ],
       IsTruncated: true,
-      NextContinuationToken: 'next',
+      NextContinuationToken: "next",
     });
     const files = new Files({
-      adapter: s3({ bucket: 'test-bucket', region: 'us-east-1' }),
+      adapter: s3({ bucket: "test-bucket", region: "us-east-1" }),
     });
-    const out = await files.list({ prefix: 'a/', limit: 10 });
-    expect(out.items.map((i) => i.key)).toEqual(['a/1.txt', 'a/2.txt']);
-    expect(out.cursor).toBe('next');
+    const out = await files.list({ limit: 10, prefix: "a/" });
+    expect(out.items.map((i) => i.key)).toEqual(["a/1.txt", "a/2.txt"]);
+    expect(out.cursor).toBe("next");
     const calls = s3Mock.commandCalls(ListObjectsV2Command);
-    expect(calls[0]!.args[0].input.Prefix).toBe('a/');
-    expect(calls[0]!.args[0].input.MaxKeys).toBe(10);
+    const [{ input }] = firstCall(calls).args;
+    expect(input.Prefix).toBe("a/");
+    expect(input.MaxKeys).toBe(10);
   });
 
-  test('url() throws Provider for S3', async () => {
+  test("url() throws Provider for S3", async () => {
     const files = new Files({
-      adapter: s3({ bucket: 'test-bucket', region: 'us-east-1' }),
+      adapter: s3({ bucket: "test-bucket", region: "us-east-1" }),
     });
     try {
-      await files.url('a.txt');
-      throw new Error('should have thrown');
-    } catch (err) {
-      expect(err).toBeInstanceOf(FilesError);
-      expect((err as FilesError).code).toBe('Provider');
+      await files.url("a.txt");
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(FilesError);
+      expect((error as FilesError).code).toBe("Provider");
     }
   });
 
-  test('NoSuchKey is mapped to NotFound', async () => {
+  test("NoSuchKey is mapped to NotFound", async () => {
     s3Mock.on(GetObjectCommand).rejects(
-      Object.assign(new Error('nope'), {
-        name: 'NoSuchKey',
+      Object.assign(new Error("nope"), {
         $metadata: { httpStatusCode: 404 },
+        name: "NoSuchKey",
       })
     );
     const files = new Files({
-      adapter: s3({ bucket: 'test-bucket', region: 'us-east-1' }),
+      adapter: s3({ bucket: "test-bucket", region: "us-east-1" }),
     });
     try {
-      await files.download('missing');
-      throw new Error('should have thrown');
-    } catch (err) {
-      expect(err).toBeInstanceOf(FilesError);
-      expect((err as FilesError).code).toBe('NotFound');
+      await files.download("missing");
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(FilesError);
+      expect((error as FilesError).code).toBe("NotFound");
     }
   });
 
-  test('AccessDenied is mapped to Unauthorized', async () => {
+  test("AccessDenied is mapped to Unauthorized", async () => {
     s3Mock.on(GetObjectCommand).rejects(
-      Object.assign(new Error('denied'), {
-        name: 'AccessDenied',
+      Object.assign(new Error("denied"), {
         $metadata: { httpStatusCode: 403 },
+        name: "AccessDenied",
       })
     );
     const files = new Files({
-      adapter: s3({ bucket: 'test-bucket', region: 'us-east-1' }),
+      adapter: s3({ bucket: "test-bucket", region: "us-east-1" }),
     });
     try {
-      await files.download('a.txt');
-      throw new Error('should have thrown');
-    } catch (err) {
-      expect((err as FilesError).code).toBe('Unauthorized');
+      await files.download("a.txt");
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect((error as FilesError).code).toBe("Unauthorized");
     }
   });
 
-  test('missing region throws at construction', () => {
+  test("missing region throws at construction", () => {
     const oldRegion = process.env.AWS_REGION;
     const oldDefault = process.env.AWS_DEFAULT_REGION;
     delete process.env.AWS_REGION;
     delete process.env.AWS_DEFAULT_REGION;
     try {
-      expect(() => s3({ bucket: 'x' })).toThrow(/region/);
+      expect(() => s3({ bucket: "x" })).toThrow(/region/u);
     } finally {
-      if (oldRegion) process.env.AWS_REGION = oldRegion;
-      if (oldDefault) process.env.AWS_DEFAULT_REGION = oldDefault;
+      if (oldRegion) {
+        process.env.AWS_REGION = oldRegion;
+      }
+      if (oldDefault) {
+        process.env.AWS_DEFAULT_REGION = oldDefault;
+      }
     }
   });
 });

@@ -6,9 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
     "types": "tsgo --noEmit",
-    "format": "echo 'web: handled by biome at the root'",
     "test": "echo 'no tests'"
   },
   "dependencies": {
@@ -23,11 +21,15 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@typescript/native-preview": "^7.0.0-dev.20250101.1",
-    "eslint": "^9",
-    "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",
     "typescript": "^5"
   },
-  "ignoreScripts": ["sharp", "unrs-resolver"],
-  "trustedDependencies": ["sharp", "unrs-resolver"]
+  "ignoreScripts": [
+    "sharp",
+    "unrs-resolver"
+  ],
+  "trustedDependencies": [
+    "sharp",
+    "unrs-resolver"
+  ]
 }

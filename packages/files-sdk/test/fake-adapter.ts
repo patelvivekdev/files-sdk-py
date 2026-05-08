@@ -1,18 +1,18 @@
-import {
-  type Adapter,
-  type Body,
-  type DownloadOptions,
-  type ListOptions,
-  type ListResult,
-  type SignOptions,
-  type SignUploadOptions,
-  type SignedUpload,
-  type StoredFile,
-  type UploadOptions,
-  type UploadResult,
-  createStoredFile,
-} from '../src/index.js';
-import { FilesError } from '../src/internal/errors.js';
+import { createStoredFile } from "../src/index.js";
+import type {
+  Adapter,
+  Body,
+  DownloadOptions,
+  ListOptions,
+  ListResult,
+  SignOptions,
+  SignUploadOptions,
+  SignedUpload,
+  StoredFile,
+  UploadOptions,
+  UploadResult,
+} from "../src/index.js";
+import { FilesError } from "../src/internal/errors.js";
 
 interface Entry {
   bytes: Uint8Array;
@@ -27,62 +27,146 @@ export interface FakeAdapter extends Adapter<Map<string, Entry>> {
   has(key: string): boolean;
 }
 
-export function fakeAdapter(): FakeAdapter {
+const bytesOf = async (body: Body): Promise<Uint8Array> => {
+  if (typeof body === "string") {
+    return new TextEncoder().encode(body);
+  }
+  if (body instanceof Uint8Array) {
+    return body;
+  }
+  if (body instanceof ArrayBuffer) {
+    return new Uint8Array(body);
+  }
+  if (ArrayBuffer.isView(body)) {
+    const v = body as ArrayBufferView;
+    return new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+  }
+  if (body instanceof Blob) {
+    return new Uint8Array(await body.arrayBuffer());
+  }
+  // ReadableStream
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    if (value) {
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    out.set(c, offset);
+    offset += c.byteLength;
+  }
+  return out;
+};
+
+const compareKeys = (a: string, b: string): number => {
+  if (a < b) {
+    return -1;
+  }
+  if (a > b) {
+    return 1;
+  }
+  return 0;
+};
+
+export const fakeAdapter = (): FakeAdapter => {
   const store = new Map<string, Entry>();
   let counter = 0;
-  const nextEtag = () => `"etag-${++counter}"`;
-
-  const bytesOf = async (body: Body): Promise<Uint8Array> => {
-    if (typeof body === 'string') return new TextEncoder().encode(body);
-    if (body instanceof Uint8Array) return body;
-    if (body instanceof ArrayBuffer) return new Uint8Array(body);
-    if (ArrayBuffer.isView(body)) {
-      const v = body as ArrayBufferView;
-      return new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
-    }
-    if (body instanceof Blob) return new Uint8Array(await body.arrayBuffer());
-    // ReadableStream
-    const reader = body.getReader();
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (value) {
-        chunks.push(value);
-        total += value.byteLength;
-      }
-    }
-    const out = new Uint8Array(total);
-    let offset = 0;
-    for (const c of chunks) {
-      out.set(c, offset);
-      offset += c.byteLength;
-    }
-    return out;
+  const nextEtag = () => {
+    counter += 1;
+    return `"etag-${counter}"`;
   };
 
   const toStored = (key: string, entry: Entry): StoredFile =>
     createStoredFile(
       {
+        etag: entry.etag,
         key,
+        lastModified: entry.uploadedAt,
+        metadata: entry.metadata,
         size: entry.bytes.byteLength,
         type: entry.contentType,
-        lastModified: entry.uploadedAt,
-        etag: entry.etag,
-        metadata: entry.metadata,
       },
-      { kind: 'buffer', data: entry.bytes }
+      { data: entry.bytes, kind: "buffer" }
     );
 
   return {
-    name: 'fake',
-    raw: store,
-
+    copy(from: string, to: string): Promise<void> {
+      const entry = store.get(from);
+      if (!entry) {
+        throw new FilesError("NotFound", `not found: ${from}`);
+      }
+      store.set(to, { ...entry, etag: nextEtag(), uploadedAt: Date.now() });
+      return Promise.resolve();
+    },
+    delete(key: string): Promise<void> {
+      store.delete(key);
+      return Promise.resolve();
+    },
+    download(key: string, _opts?: DownloadOptions): Promise<StoredFile> {
+      const entry = store.get(key);
+      if (!entry) {
+        throw new FilesError("NotFound", `not found: ${key}`);
+      }
+      return Promise.resolve(toStored(key, entry));
+    },
     has(key) {
       return store.has(key);
     },
-
+    head(key: string): Promise<StoredFile> {
+      const entry = store.get(key);
+      if (!entry) {
+        throw new FilesError("NotFound", `not found: ${key}`);
+      }
+      return Promise.resolve(toStored(key, entry));
+    },
+    list(opts?: ListOptions): Promise<ListResult> {
+      const prefix = opts?.prefix ?? "";
+      const limit = opts?.limit ?? 1000;
+      const cursor = opts?.cursor;
+      const sorted = [...store.entries()]
+        .filter(([k]) => k.startsWith(prefix))
+        .toSorted(([a], [b]) => compareKeys(a, b));
+      const start = cursor ? sorted.findIndex(([k]) => k > cursor) : 0;
+      const slice = sorted.slice(
+        start === -1 ? sorted.length : start,
+        (start === -1 ? sorted.length : start) + limit
+      );
+      const lastKey = slice.at(-1)?.[0];
+      const more = start + slice.length < sorted.length;
+      return Promise.resolve({
+        cursor: more && lastKey ? lastKey : undefined,
+        items: slice.map(([k, e]) => toStored(k, e)),
+      });
+    },
+    name: "fake",
+    raw: store,
+    signedUploadUrl(
+      key: string,
+      _opts: SignUploadOptions
+    ): Promise<SignedUpload> {
+      return Promise.resolve({
+        headers: { "Content-Type": "application/octet-stream" },
+        method: "PUT",
+        url: `https://fake.local/${encodeURIComponent(key)}`,
+      });
+    },
+    signedUrl(key: string, opts: SignOptions): Promise<string> {
+      if (!store.has(key)) {
+        throw new FilesError("NotFound", `not found: ${key}`);
+      }
+      return Promise.resolve(
+        `https://fake.local/${encodeURIComponent(key)}?expires=${opts.expiresIn}`
+      );
+    },
     async upload(
       key: string,
       body: Body,
@@ -91,91 +175,23 @@ export function fakeAdapter(): FakeAdapter {
       const bytes = await bytesOf(body);
       const entry: Entry = {
         bytes,
-        contentType: opts?.contentType ?? 'application/octet-stream',
-        metadata: opts?.metadata,
         cacheControl: opts?.cacheControl,
+        contentType: opts?.contentType ?? "application/octet-stream",
         etag: nextEtag(),
+        metadata: opts?.metadata,
         uploadedAt: Date.now(),
       };
       store.set(key, entry);
       return {
-        key,
-        size: bytes.byteLength,
         contentType: entry.contentType,
         etag: entry.etag,
+        key,
         lastModified: entry.uploadedAt,
+        size: bytes.byteLength,
       };
     },
-
-    async download(key: string, _opts?: DownloadOptions): Promise<StoredFile> {
-      const entry = store.get(key);
-      if (!entry) {
-        throw new FilesError('NotFound', `not found: ${key}`);
-      }
-      return toStored(key, entry);
-    },
-
-    async head(key: string): Promise<StoredFile> {
-      const entry = store.get(key);
-      if (!entry) {
-        throw new FilesError('NotFound', `not found: ${key}`);
-      }
-      return toStored(key, entry);
-    },
-
-    async delete(key: string): Promise<void> {
-      store.delete(key);
-    },
-
-    async copy(from: string, to: string): Promise<void> {
-      const entry = store.get(from);
-      if (!entry) {
-        throw new FilesError('NotFound', `not found: ${from}`);
-      }
-      store.set(to, { ...entry, etag: nextEtag(), uploadedAt: Date.now() });
-    },
-
-    async list(opts?: ListOptions): Promise<ListResult> {
-      const prefix = opts?.prefix ?? '';
-      const limit = opts?.limit ?? 1000;
-      const sorted = [...store.entries()]
-        .filter(([k]) => k.startsWith(prefix))
-        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-      const start = opts?.cursor
-        ? sorted.findIndex(([k]) => k > opts.cursor!)
-        : 0;
-      const slice = sorted.slice(
-        start === -1 ? sorted.length : start,
-        (start === -1 ? sorted.length : start) + limit
-      );
-      const lastKey = slice.at(-1)?.[0];
-      const more = start + slice.length < sorted.length;
-      return {
-        items: slice.map(([k, e]) => toStored(k, e)),
-        cursor: more && lastKey ? lastKey : undefined,
-      };
-    },
-
-    async url(_key: string): Promise<string> {
-      throw new FilesError('Provider', 'fake adapter has no public URL');
-    },
-
-    async signedUrl(key: string, opts: SignOptions): Promise<string> {
-      if (!store.has(key)) {
-        throw new FilesError('NotFound', `not found: ${key}`);
-      }
-      return `https://fake.local/${encodeURIComponent(key)}?expires=${opts.expiresIn}`;
-    },
-
-    async signedUploadUrl(
-      key: string,
-      _opts: SignUploadOptions
-    ): Promise<SignedUpload> {
-      return {
-        method: 'PUT',
-        url: `https://fake.local/${encodeURIComponent(key)}`,
-        headers: { 'Content-Type': 'application/octet-stream' },
-      };
+    url(_key: string): Promise<string> {
+      throw new FilesError("Provider", "fake adapter has no public URL");
     },
   };
-}
+};

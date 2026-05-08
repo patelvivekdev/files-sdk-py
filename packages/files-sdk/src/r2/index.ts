@@ -1,9 +1,9 @@
-import type { S3Client } from '@aws-sdk/client-s3';
+import type { S3Client } from "@aws-sdk/client-s3";
 import type {
   R2Bucket,
   R2Object,
   R2ObjectBody,
-} from '@cloudflare/workers-types';
+} from "@cloudflare/workers-types";
 
 import type {
   Adapter,
@@ -11,41 +11,208 @@ import type {
   DownloadOptions,
   StoredFile,
   UploadResult,
-} from '../index.js';
-import { FilesError } from '../internal/errors.js';
-import { createStoredFile } from '../internal/stored-file.js';
-import { s3 } from '../s3/index.js';
+} from "../index.js";
+import { FilesError } from "../internal/errors.js";
+import { createStoredFile } from "../internal/stored-file.js";
+import { s3 } from "../s3/index.js";
 
-export type R2HttpOptions = {
+export interface R2HttpOptions {
   bucket: string;
   accountId?: string;
   accessKeyId?: string;
   secretAccessKey?: string;
-};
+}
 
-export type R2BindingOptions = {
+export interface R2BindingOptions {
   binding: R2Bucket;
   bucket?: string;
-};
+}
 
 export type R2AdapterOptions = R2BindingOptions | R2HttpOptions;
 
 export type R2Adapter = Adapter<S3Client | R2Bucket>;
 
-export function r2(opts: R2AdapterOptions): R2Adapter {
-  if ('binding' in opts && opts.binding) {
-    return r2FromBinding(opts);
+const normalizeForR2 = async (
+  body: Body,
+  contentTypeHint?: string
+): Promise<{
+  data: ArrayBuffer | ReadableStream<Uint8Array> | string;
+  contentType: string;
+  contentLength?: number;
+}> => {
+  if (typeof body === "string") {
+    return {
+      contentLength: new TextEncoder().encode(body).byteLength,
+      contentType: contentTypeHint ?? "text/plain; charset=utf-8",
+      data: body,
+    };
   }
-  return r2FromHttp(opts as R2HttpOptions);
-}
+  if (body instanceof Uint8Array) {
+    const buf = body.buffer.slice(
+      body.byteOffset,
+      body.byteOffset + body.byteLength
+    ) as ArrayBuffer;
+    return {
+      contentLength: buf.byteLength,
+      contentType: contentTypeHint ?? "application/octet-stream",
+      data: buf,
+    };
+  }
+  if (body instanceof ArrayBuffer) {
+    return {
+      contentLength: body.byteLength,
+      contentType: contentTypeHint ?? "application/octet-stream",
+      data: body,
+    };
+  }
+  if (ArrayBuffer.isView(body)) {
+    const view = body as ArrayBufferView;
+    const buf = view.buffer.slice(
+      view.byteOffset,
+      view.byteOffset + view.byteLength
+    ) as ArrayBuffer;
+    return {
+      contentLength: buf.byteLength,
+      contentType: contentTypeHint ?? "application/octet-stream",
+      data: buf,
+    };
+  }
+  if (body instanceof Blob) {
+    const buf = await body.arrayBuffer();
+    return {
+      contentLength: buf.byteLength,
+      contentType: contentTypeHint ?? body.type ?? "application/octet-stream",
+      data: buf,
+    };
+  }
+  return {
+    contentType: contentTypeHint ?? "application/octet-stream",
+    data: body,
+  };
+};
 
-function r2FromBinding(opts: R2BindingOptions): R2Adapter {
+const r2ObjectToStoredFile = (
+  obj: R2Object | R2ObjectBody,
+  downloadOpts?: DownloadOptions,
+  fallbackBody?: () => Promise<Uint8Array>
+): StoredFile => {
+  const meta = {
+    etag: obj.etag,
+    key: obj.key,
+    lastModified: obj.uploaded.getTime(),
+    metadata: obj.customMetadata,
+    size: obj.size,
+    type: obj.httpMetadata?.contentType ?? "application/octet-stream",
+  };
+  if ("body" in obj && obj.body) {
+    if (downloadOpts?.as === "stream") {
+      const stream = obj.body as unknown as ReadableStream<Uint8Array>;
+      return createStoredFile(meta, { factory: () => stream, kind: "stream" });
+    }
+    return createStoredFile(meta, {
+      factory: async () => new Uint8Array(await obj.arrayBuffer()),
+      kind: "lazy",
+    });
+  }
+  return createStoredFile(meta, {
+    factory: fallbackBody ?? (() => Promise.resolve(new Uint8Array())),
+    kind: "lazy",
+  });
+};
+
+const mapR2Error = (err: unknown): FilesError => {
+  if (err instanceof FilesError) {
+    return err;
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return new FilesError("Provider", message, err);
+};
+
+const r2FromBinding = (opts: R2BindingOptions): R2Adapter => {
   const bucket = opts.binding;
 
   return {
-    name: 'r2-binding',
+    async copy(from, to) {
+      const obj = await bucket.get(from);
+      if (!obj) {
+        throw new FilesError("NotFound", `Object not found: ${from}`);
+      }
+      const data = await obj.arrayBuffer();
+      await bucket.put(to, data, {
+        customMetadata: obj.customMetadata,
+        httpMetadata: obj.httpMetadata,
+      });
+    },
+    async delete(key) {
+      await bucket.delete(key);
+    },
+    async download(key, downloadOpts) {
+      const obj = await bucket.get(key);
+      if (!obj) {
+        throw new FilesError("NotFound", `Object not found: ${key}`);
+      }
+      return r2ObjectToStoredFile(obj, downloadOpts);
+    },
+    async head(key) {
+      const obj = await bucket.head(key);
+      if (!obj) {
+        throw new FilesError("NotFound", `Object not found: ${key}`);
+      }
+      return r2ObjectToStoredFile(obj, undefined, async () => {
+        const got = await bucket.get(obj.key);
+        if (!got) {
+          return new Uint8Array();
+        }
+        return new Uint8Array(await got.arrayBuffer());
+      });
+    },
+    async list(options) {
+      const result = await bucket.list({
+        ...(options?.prefix && { prefix: options.prefix }),
+        ...(options?.limit !== undefined && { limit: options.limit }),
+        ...(options?.cursor && { cursor: options.cursor }),
+      });
+      const items: StoredFile[] = result.objects.map((obj) =>
+        createStoredFile(
+          {
+            etag: obj.etag,
+            key: obj.key,
+            lastModified: obj.uploaded.getTime(),
+            metadata: obj.customMetadata,
+            size: obj.size,
+            type: obj.httpMetadata?.contentType ?? "application/octet-stream",
+          },
+          {
+            factory: async () => {
+              const got = await bucket.get(obj.key);
+              if (!got) {
+                return new Uint8Array();
+              }
+              return new Uint8Array(await got.arrayBuffer());
+            },
+            kind: "lazy",
+          }
+        )
+      );
+      return {
+        cursor: result.truncated ? result.cursor : undefined,
+        items,
+      };
+    },
+    name: "r2-binding",
     raw: bucket,
-
+    signedUploadUrl(_key, _opts) {
+      throw new FilesError(
+        "Provider",
+        "r2 binding: signed upload URLs are not supported via the Workers binding. Use the HTTP adapter for presigned URLs."
+      );
+    },
+    signedUrl(_key, _opts) {
+      throw new FilesError(
+        "Provider",
+        "r2 binding: signed URLs are not supported via the Workers binding. Use the HTTP adapter (r2({ accountId, accessKeyId, secretAccessKey, bucket })) for presigned URLs."
+      );
+    },
     async upload(key, body, options) {
       const { data, contentType, contentLength } = await normalizeForR2(
         body,
@@ -63,103 +230,26 @@ function r2FromBinding(opts: R2BindingOptions): R2Adapter {
           ...(options?.metadata && { customMetadata: options.metadata }),
         });
         return {
-          key,
-          size: result?.size ?? contentLength ?? 0,
           contentType,
           etag: result?.etag,
+          key,
           lastModified: result?.uploaded?.getTime(),
+          size: result?.size ?? contentLength ?? 0,
         } satisfies UploadResult;
-      } catch (err) {
-        throw mapR2Error(err);
+      } catch (error) {
+        throw mapR2Error(error);
       }
     },
-
-    async download(key, downloadOpts) {
-      const obj = await bucket.get(key);
-      if (!obj) throw new FilesError('NotFound', `Object not found: ${key}`);
-      return r2ObjectToStoredFile(obj, downloadOpts);
-    },
-
-    async head(key) {
-      const obj = await bucket.head(key);
-      if (!obj) throw new FilesError('NotFound', `Object not found: ${key}`);
-      return r2ObjectToStoredFile(obj, undefined, async () => {
-        const got = await bucket.get(obj.key);
-        if (!got) return new Uint8Array();
-        return new Uint8Array(await got.arrayBuffer());
-      });
-    },
-
-    async delete(key) {
-      await bucket.delete(key);
-    },
-
-    async copy(from, to) {
-      const obj = await bucket.get(from);
-      if (!obj) throw new FilesError('NotFound', `Object not found: ${from}`);
-      const data = await obj.arrayBuffer();
-      await bucket.put(to, data, {
-        httpMetadata: obj.httpMetadata,
-        customMetadata: obj.customMetadata,
-      });
-    },
-
-    async list(options) {
-      const result = await bucket.list({
-        ...(options?.prefix && { prefix: options.prefix }),
-        ...(options?.limit !== undefined && { limit: options.limit }),
-        ...(options?.cursor && { cursor: options.cursor }),
-      });
-      const items: StoredFile[] = result.objects.map((obj) =>
-        createStoredFile(
-          {
-            key: obj.key,
-            size: obj.size,
-            type: obj.httpMetadata?.contentType ?? 'application/octet-stream',
-            lastModified: obj.uploaded.getTime(),
-            etag: obj.etag,
-            metadata: obj.customMetadata,
-          },
-          {
-            kind: 'lazy',
-            factory: async () => {
-              const got = await bucket.get(obj.key);
-              if (!got) return new Uint8Array();
-              return new Uint8Array(await got.arrayBuffer());
-            },
-          }
-        )
-      );
-      return {
-        items,
-        cursor: result.truncated ? result.cursor : undefined,
-      };
-    },
-
-    async url(_key) {
+    url(_key) {
       throw new FilesError(
-        'Provider',
-        'r2 binding: public URLs are not available via the Workers binding. Configure an r2.dev or custom domain on the bucket and build URLs manually.'
-      );
-    },
-
-    async signedUrl(_key, _opts) {
-      throw new FilesError(
-        'Provider',
-        'r2 binding: signed URLs are not supported via the Workers binding. Use the HTTP adapter (r2({ accountId, accessKeyId, secretAccessKey, bucket })) for presigned URLs.'
-      );
-    },
-
-    async signedUploadUrl(_key, _opts) {
-      throw new FilesError(
-        'Provider',
-        'r2 binding: signed upload URLs are not supported via the Workers binding. Use the HTTP adapter for presigned URLs.'
+        "Provider",
+        "r2 binding: public URLs are not available via the Workers binding. Configure an r2.dev or custom domain on the bucket and build URLs manually."
       );
     },
   };
-}
+};
 
-function r2FromHttp(opts: R2HttpOptions): R2Adapter {
+const r2FromHttp = (opts: R2HttpOptions): R2Adapter => {
   const accountId = opts.accountId ?? process.env.R2_ACCOUNT_ID;
   const accessKeyId = opts.accessKeyId ?? process.env.R2_ACCESS_KEY_ID;
   const secretAccessKey =
@@ -167,130 +257,43 @@ function r2FromHttp(opts: R2HttpOptions): R2Adapter {
 
   if (!accountId) {
     throw new FilesError(
-      'Provider',
-      'r2 adapter: missing accountId. Pass `accountId` or set R2_ACCOUNT_ID.'
+      "Provider",
+      "r2 adapter: missing accountId. Pass `accountId` or set R2_ACCOUNT_ID."
     );
   }
   if (!(accessKeyId && secretAccessKey)) {
     throw new FilesError(
-      'Provider',
-      'r2 adapter: missing credentials. Pass `accessKeyId` + `secretAccessKey` or set R2_ACCESS_KEY_ID + R2_SECRET_ACCESS_KEY.'
+      "Provider",
+      "r2 adapter: missing credentials. Pass `accessKeyId` + `secretAccessKey` or set R2_ACCESS_KEY_ID + R2_SECRET_ACCESS_KEY."
     );
   }
 
   const inner = s3({
     bucket: opts.bucket,
-    region: 'auto',
+    credentials: { accessKeyId, secretAccessKey },
     endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
     forcePathStyle: true,
-    credentials: { accessKeyId, secretAccessKey },
+    region: "auto",
   });
 
   return {
     ...inner,
-    name: 'r2-http',
-    async url(_key) {
+    name: "r2-http",
+    url(_key) {
       throw new FilesError(
-        'Provider',
-        'r2 adapter: public URLs require a configured r2.dev or custom domain. Build URLs manually for now.'
+        "Provider",
+        "r2 adapter: public URLs require a configured r2.dev or custom domain. Build URLs manually for now."
       );
     },
   };
-}
+};
 
-async function normalizeForR2(
-  body: Body,
-  contentTypeHint?: string
-): Promise<{
-  data: ArrayBuffer | ReadableStream<Uint8Array> | string;
-  contentType: string;
-  contentLength?: number;
-}> {
-  if (typeof body === 'string') {
-    return {
-      data: body,
-      contentType: contentTypeHint ?? 'text/plain; charset=utf-8',
-      contentLength: new TextEncoder().encode(body).byteLength,
-    };
+export const r2 = (opts: R2AdapterOptions): R2Adapter => {
+  if ("binding" in opts && opts.binding) {
+    return r2FromBinding(opts);
   }
-  if (body instanceof Uint8Array) {
-    const buf = body.buffer.slice(
-      body.byteOffset,
-      body.byteOffset + body.byteLength
-    ) as ArrayBuffer;
-    return {
-      data: buf,
-      contentType: contentTypeHint ?? 'application/octet-stream',
-      contentLength: buf.byteLength,
-    };
-  }
-  if (body instanceof ArrayBuffer) {
-    return {
-      data: body,
-      contentType: contentTypeHint ?? 'application/octet-stream',
-      contentLength: body.byteLength,
-    };
-  }
-  if (ArrayBuffer.isView(body)) {
-    const view = body as ArrayBufferView;
-    const buf = view.buffer.slice(
-      view.byteOffset,
-      view.byteOffset + view.byteLength
-    ) as ArrayBuffer;
-    return {
-      data: buf,
-      contentType: contentTypeHint ?? 'application/octet-stream',
-      contentLength: buf.byteLength,
-    };
-  }
-  if (body instanceof Blob) {
-    const buf = await body.arrayBuffer();
-    return {
-      data: buf,
-      contentType: contentTypeHint ?? body.type ?? 'application/octet-stream',
-      contentLength: buf.byteLength,
-    };
-  }
-  return {
-    data: body,
-    contentType: contentTypeHint ?? 'application/octet-stream',
-  };
-}
-
-function r2ObjectToStoredFile(
-  obj: R2Object | R2ObjectBody,
-  downloadOpts?: DownloadOptions,
-  fallbackBody?: () => Promise<Uint8Array>
-): StoredFile {
-  const meta = {
-    key: obj.key,
-    size: obj.size,
-    type: obj.httpMetadata?.contentType ?? 'application/octet-stream',
-    lastModified: obj.uploaded.getTime(),
-    etag: obj.etag,
-    metadata: obj.customMetadata,
-  };
-  if ('body' in obj && obj.body) {
-    if (downloadOpts?.as === 'stream') {
-      const stream = obj.body as unknown as ReadableStream<Uint8Array>;
-      return createStoredFile(meta, { kind: 'stream', factory: () => stream });
-    }
-    return createStoredFile(meta, {
-      kind: 'lazy',
-      factory: async () => new Uint8Array(await obj.arrayBuffer()),
-    });
-  }
-  return createStoredFile(meta, {
-    kind: 'lazy',
-    factory: fallbackBody ?? (() => Promise.resolve(new Uint8Array())),
-  });
-}
-
-function mapR2Error(err: unknown): FilesError {
-  if (err instanceof FilesError) return err;
-  const message = err instanceof Error ? err.message : String(err);
-  return new FilesError('Provider', message, err);
-}
+  return r2FromHttp(opts as R2HttpOptions);
+};
 
 // Re-export R2 type so consumers don't need to import workers-types directly.
-export type { R2Bucket } from '@cloudflare/workers-types';
+export type { R2Bucket } from "@cloudflare/workers-types";

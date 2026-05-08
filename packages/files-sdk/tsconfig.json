@@ -3,7 +3,8 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
-    "types": ["bun", "@cloudflare/workers-types"]
+    "types": ["bun", "@cloudflare/workers-types"],
+    "strictNullChecks": true
   },
   "include": ["src/**/*", "test/**/*", "tsup.config.ts"]
 }

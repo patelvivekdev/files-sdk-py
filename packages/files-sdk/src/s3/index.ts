@@ -6,10 +6,10 @@ import {
   ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
-  type S3ClientConfig,
-} from '@aws-sdk/client-s3';
-import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+} from "@aws-sdk/client-s3";
+import type { S3ClientConfig } from "@aws-sdk/client-s3";
+import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 import type {
   Adapter,
@@ -17,9 +17,10 @@ import type {
   SignedUpload,
   StoredFile,
   UploadResult,
-} from '../index.js';
-import { FilesError } from '../internal/errors.js';
-import { createStoredFile } from '../internal/stored-file.js';
+} from "../index.js";
+import { FilesError } from "../internal/errors.js";
+import type { FilesErrorCode } from "../internal/errors.js";
+import { createStoredFile } from "../internal/stored-file.js";
 
 export interface S3AdapterOptions {
   bucket: string;
@@ -37,13 +38,130 @@ export type S3Adapter = Adapter<S3Client> & {
   readonly bucket: string;
 };
 
-export function s3(opts: S3AdapterOptions): S3Adapter {
+const normalizeBody = async (
+  body: Body,
+  contentTypeHint?: string
+): Promise<{
+  data: Uint8Array | ReadableStream<Uint8Array> | string;
+  contentType: string;
+  contentLength?: number;
+}> => {
+  if (typeof body === "string") {
+    const data = new TextEncoder().encode(body);
+    return {
+      contentLength: data.byteLength,
+      contentType: contentTypeHint ?? "text/plain; charset=utf-8",
+      data,
+    };
+  }
+  if (body instanceof Uint8Array) {
+    return {
+      contentLength: body.byteLength,
+      contentType: contentTypeHint ?? "application/octet-stream",
+      data: body,
+    };
+  }
+  if (body instanceof ArrayBuffer) {
+    const data = new Uint8Array(body);
+    return {
+      contentLength: data.byteLength,
+      contentType: contentTypeHint ?? "application/octet-stream",
+      data,
+    };
+  }
+  if (ArrayBuffer.isView(body)) {
+    const view = body as ArrayBufferView;
+    const data = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+    return {
+      contentLength: data.byteLength,
+      contentType: contentTypeHint ?? "application/octet-stream",
+      data,
+    };
+  }
+  if (body instanceof Blob) {
+    const buf = new Uint8Array(await body.arrayBuffer());
+    return {
+      contentLength: buf.byteLength,
+      contentType: contentTypeHint ?? body.type ?? "application/octet-stream",
+      data: buf,
+    };
+  }
+  // ReadableStream
+  return {
+    contentType: contentTypeHint ?? "application/octet-stream",
+    data: body,
+  };
+};
+
+const stripEtag = (etag: string | undefined): string | undefined => {
+  if (!etag) {
+    return;
+  }
+  return etag.replaceAll(/^"+|"+$/gu, "");
+};
+
+const emptyStream = (): ReadableStream<Uint8Array> =>
+  new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.close();
+    },
+  });
+
+const NOT_FOUND_CODES = new Set(["NoSuchKey", "NotFound"]);
+const NOT_FOUND_STATUS = new Set([404]);
+const UNAUTH_STATUS = new Set([401, 403]);
+const CONFLICT_STATUS = new Set([409, 412]);
+
+const classifyS3Error = (
+  code: string | undefined,
+  status: number | undefined
+): FilesErrorCode => {
+  if (
+    (code && NOT_FOUND_CODES.has(code)) ||
+    NOT_FOUND_STATUS.has(status ?? 0)
+  ) {
+    return "NotFound";
+  }
+  if (code === "AccessDenied" || UNAUTH_STATUS.has(status ?? 0)) {
+    return "Unauthorized";
+  }
+  if (code === "PreconditionFailed" || CONFLICT_STATUS.has(status ?? 0)) {
+    return "Conflict";
+  }
+  return "Provider";
+};
+
+const DEFAULT_S3_MESSAGES: Record<FilesErrorCode, string> = {
+  Conflict: "Conflict",
+  NotFound: "Not found",
+  Provider: "S3 error",
+  Unauthorized: "Unauthorized",
+};
+
+export const mapS3Error = (err: unknown): FilesError => {
+  if (err instanceof FilesError) {
+    return err;
+  }
+  const e = err as {
+    name?: string;
+    Code?: string;
+    $metadata?: { httpStatusCode?: number };
+    message?: string;
+  };
+  const code = classifyS3Error(
+    e?.name ?? e?.Code,
+    e?.$metadata?.httpStatusCode
+  );
+  return new FilesError(code, e?.message ?? DEFAULT_S3_MESSAGES[code], err);
+};
+
+export const s3 = (opts: S3AdapterOptions): S3Adapter => {
   const region =
     opts.region ?? process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION;
   if (!region) {
     throw new FilesError(
-      'Provider',
-      's3 adapter: missing region. Pass `region` or set AWS_REGION.'
+      "Provider",
+      "s3 adapter: missing region. Pass `region` or set AWS_REGION."
     );
   }
 
@@ -57,74 +175,59 @@ export function s3(opts: S3AdapterOptions): S3Adapter {
   };
 
   const client = new S3Client(config);
-  const bucket = opts.bucket;
+  const { bucket } = opts;
 
   return {
-    name: 's3',
-    raw: client,
     bucket,
-
-    async upload(key, body, options) {
-      const { data, contentType, contentLength } = await normalizeBody(
-        body,
-        options?.contentType
-      );
+    async copy(from, to) {
       try {
-        const result = await client.send(
-          new PutObjectCommand({
+        await client.send(
+          new CopyObjectCommand({
             Bucket: bucket,
-            Key: key,
-            Body: data,
-            ContentType: contentType,
-            ...(options?.cacheControl && {
-              CacheControl: options.cacheControl,
-            }),
-            ...(options?.metadata && { Metadata: options.metadata }),
-            ...(contentLength !== undefined && {
-              ContentLength: contentLength,
-            }),
+            CopySource: `${bucket}/${encodeURIComponent(from)}`,
+            Key: to,
           })
         );
-        return {
-          key,
-          size: contentLength ?? 0,
-          contentType,
-          etag: stripEtag(result.ETag),
-          lastModified: undefined,
-        } satisfies UploadResult;
-      } catch (err) {
-        throw mapS3Error(err);
+      } catch (error) {
+        throw mapS3Error(error);
       }
     },
-
-    async download(key, opts) {
+    async delete(key) {
+      try {
+        await client.send(
+          new DeleteObjectCommand({ Bucket: bucket, Key: key })
+        );
+      } catch (error) {
+        throw mapS3Error(error);
+      }
+    },
+    async download(key, downloadOpts) {
       try {
         const result = await client.send(
           new GetObjectCommand({ Bucket: bucket, Key: key })
         );
         const meta = {
-          key,
-          size: Number(result.ContentLength ?? 0),
-          type: result.ContentType ?? 'application/octet-stream',
-          lastModified: result.LastModified?.getTime(),
           etag: stripEtag(result.ETag),
+          key,
+          lastModified: result.LastModified?.getTime(),
           metadata: result.Metadata,
+          size: Number(result.ContentLength ?? 0),
+          type: result.ContentType ?? "application/octet-stream",
         };
-        if (opts?.as === 'stream') {
+        if (downloadOpts?.as === "stream") {
           const stream = result.Body?.transformToWebStream();
           return createStoredFile(meta, {
-            kind: 'stream',
             factory: () => stream ?? emptyStream(),
+            kind: "stream",
           });
         }
         const bytes =
           (await result.Body?.transformToByteArray()) ?? new Uint8Array();
-        return createStoredFile(meta, { kind: 'buffer', data: bytes });
-      } catch (err) {
-        throw mapS3Error(err);
+        return createStoredFile(meta, { data: bytes, kind: "buffer" });
+      } catch (error) {
+        throw mapS3Error(error);
       }
     },
-
     async head(key) {
       try {
         const result = await client.send(
@@ -132,15 +235,14 @@ export function s3(opts: S3AdapterOptions): S3Adapter {
         );
         return createStoredFile(
           {
-            key,
-            size: Number(result.ContentLength ?? 0),
-            type: result.ContentType ?? 'application/octet-stream',
-            lastModified: result.LastModified?.getTime(),
             etag: stripEtag(result.ETag),
+            key,
+            lastModified: result.LastModified?.getTime(),
             metadata: result.Metadata,
+            size: Number(result.ContentLength ?? 0),
+            type: result.ContentType ?? "application/octet-stream",
           },
           {
-            kind: 'lazy',
             factory: async () => {
               const get = await client.send(
                 new GetObjectCommand({ Bucket: bucket, Key: key })
@@ -149,37 +251,13 @@ export function s3(opts: S3AdapterOptions): S3Adapter {
                 (await get.Body?.transformToByteArray()) ?? new Uint8Array()
               );
             },
+            kind: "lazy",
           }
         );
-      } catch (err) {
-        throw mapS3Error(err);
+      } catch (error) {
+        throw mapS3Error(error);
       }
     },
-
-    async delete(key) {
-      try {
-        await client.send(
-          new DeleteObjectCommand({ Bucket: bucket, Key: key })
-        );
-      } catch (err) {
-        throw mapS3Error(err);
-      }
-    },
-
-    async copy(from, to) {
-      try {
-        await client.send(
-          new CopyObjectCommand({
-            Bucket: bucket,
-            Key: to,
-            CopySource: `${bucket}/${encodeURIComponent(from)}`,
-          })
-        );
-      } catch (err) {
-        throw mapS3Error(err);
-      }
-    },
-
     async list(options) {
       try {
         const result = await client.send(
@@ -191,17 +269,16 @@ export function s3(opts: S3AdapterOptions): S3Adapter {
           })
         );
         const items: StoredFile[] = (result.Contents ?? []).map((obj) => {
-          const objKey = obj.Key ?? '';
+          const objKey = obj.Key ?? "";
           return createStoredFile(
             {
-              key: objKey,
-              size: Number(obj.Size ?? 0),
-              type: 'application/octet-stream',
-              lastModified: obj.LastModified?.getTime(),
               etag: stripEtag(obj.ETag),
+              key: objKey,
+              lastModified: obj.LastModified?.getTime(),
+              size: Number(obj.Size ?? 0),
+              type: "application/octet-stream",
             },
             {
-              kind: 'lazy',
               factory: async () => {
                 const get = await client.send(
                   new GetObjectCommand({ Bucket: bucket, Key: objKey })
@@ -210,58 +287,42 @@ export function s3(opts: S3AdapterOptions): S3Adapter {
                   (await get.Body?.transformToByteArray()) ?? new Uint8Array()
                 );
               },
+              kind: "lazy",
             }
           );
         });
         return {
-          items,
           cursor: result.IsTruncated ? result.NextContinuationToken : undefined,
+          items,
         };
-      } catch (err) {
-        throw mapS3Error(err);
+      } catch (error) {
+        throw mapS3Error(error);
       }
     },
-
-    async url(_key) {
-      throw new FilesError(
-        'Provider',
-        'S3 buckets do not expose a public URL by default. Use signedUrl() instead.'
-      );
-    },
-
-    async signedUrl(key, signOpts) {
-      try {
-        return await getSignedUrl(
-          client,
-          new GetObjectCommand({ Bucket: bucket, Key: key }),
-          { expiresIn: signOpts.expiresIn }
-        );
-      } catch (err) {
-        throw mapS3Error(err);
-      }
-    },
-
+    name: "s3",
+    raw: client,
     async signedUploadUrl(key, signOpts): Promise<SignedUpload> {
       try {
         if (signOpts.maxSize !== undefined) {
-          const conditions: Array<
-            [string, ...unknown[]] | Record<string, string>
-          > = [['content-length-range', 0, signOpts.maxSize]];
+          const conditions: (
+            | [string, ...unknown[]]
+            | Record<string, string>
+          )[] = [["content-length-range", 0, signOpts.maxSize]];
           if (signOpts.contentType) {
-            conditions.push(['eq', '$Content-Type', signOpts.contentType]);
+            conditions.push(["eq", "$Content-Type", signOpts.contentType]);
           }
           const post = await createPresignedPost(client, {
             Bucket: bucket,
-            Key: key,
-            Expires: signOpts.expiresIn,
             Conditions: conditions as Parameters<
               typeof createPresignedPost
-            >[1]['Conditions'],
+            >[1]["Conditions"],
+            Expires: signOpts.expiresIn,
+            Key: key,
             ...(signOpts.contentType && {
-              Fields: { 'Content-Type': signOpts.contentType },
+              Fields: { "Content-Type": signOpts.contentType },
             }),
           });
-          return { method: 'POST', url: post.url, fields: post.fields };
+          return { fields: post.fields, method: "POST", url: post.url };
         }
         const url = await getSignedUrl(
           client,
@@ -273,105 +334,64 @@ export function s3(opts: S3AdapterOptions): S3Adapter {
           { expiresIn: signOpts.expiresIn }
         );
         return {
-          method: 'PUT',
-          url,
           headers: signOpts.contentType
-            ? { 'Content-Type': signOpts.contentType }
+            ? { "Content-Type": signOpts.contentType }
             : undefined,
+          method: "PUT",
+          url,
         };
-      } catch (err) {
-        throw mapS3Error(err);
+      } catch (error) {
+        throw mapS3Error(error);
       }
     },
-  };
-}
-
-async function normalizeBody(
-  body: Body,
-  contentTypeHint?: string
-): Promise<{
-  data: Uint8Array | ReadableStream<Uint8Array> | string;
-  contentType: string;
-  contentLength?: number;
-}> {
-  if (typeof body === 'string') {
-    const data = new TextEncoder().encode(body);
-    return {
-      data,
-      contentType: contentTypeHint ?? 'text/plain; charset=utf-8',
-      contentLength: data.byteLength,
-    };
-  }
-  if (body instanceof Uint8Array) {
-    return {
-      data: body,
-      contentType: contentTypeHint ?? 'application/octet-stream',
-      contentLength: body.byteLength,
-    };
-  }
-  if (body instanceof ArrayBuffer) {
-    const data = new Uint8Array(body);
-    return {
-      data,
-      contentType: contentTypeHint ?? 'application/octet-stream',
-      contentLength: data.byteLength,
-    };
-  }
-  if (ArrayBuffer.isView(body)) {
-    const view = body as ArrayBufferView;
-    const data = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
-    return {
-      data,
-      contentType: contentTypeHint ?? 'application/octet-stream',
-      contentLength: data.byteLength,
-    };
-  }
-  if (body instanceof Blob) {
-    const buf = new Uint8Array(await body.arrayBuffer());
-    return {
-      data: buf,
-      contentType: contentTypeHint ?? body.type ?? 'application/octet-stream',
-      contentLength: buf.byteLength,
-    };
-  }
-  // ReadableStream
-  return {
-    data: body,
-    contentType: contentTypeHint ?? 'application/octet-stream',
-  };
-}
-
-function stripEtag(etag: string | undefined): string | undefined {
-  if (!etag) return undefined;
-  return etag.replace(/^"+|"+$/g, '');
-}
-
-function emptyStream(): ReadableStream<Uint8Array> {
-  return new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.close();
+    async signedUrl(key, signOpts) {
+      try {
+        return await getSignedUrl(
+          client,
+          new GetObjectCommand({ Bucket: bucket, Key: key }),
+          { expiresIn: signOpts.expiresIn }
+        );
+      } catch (error) {
+        throw mapS3Error(error);
+      }
     },
-  });
-}
-
-export function mapS3Error(err: unknown): FilesError {
-  if (err instanceof FilesError) return err;
-  const e = err as {
-    name?: string;
-    Code?: string;
-    $metadata?: { httpStatusCode?: number };
-    message?: string;
+    async upload(key, body, options) {
+      const { data, contentType, contentLength } = await normalizeBody(
+        body,
+        options?.contentType
+      );
+      try {
+        const result = await client.send(
+          new PutObjectCommand({
+            Body: data,
+            Bucket: bucket,
+            ContentType: contentType,
+            Key: key,
+            ...(options?.cacheControl && {
+              CacheControl: options.cacheControl,
+            }),
+            ...(options?.metadata && { Metadata: options.metadata }),
+            ...(contentLength !== undefined && {
+              ContentLength: contentLength,
+            }),
+          })
+        );
+        return {
+          contentType,
+          etag: stripEtag(result.ETag),
+          key,
+          lastModified: undefined,
+          size: contentLength ?? 0,
+        } satisfies UploadResult;
+      } catch (error) {
+        throw mapS3Error(error);
+      }
+    },
+    url(_key) {
+      throw new FilesError(
+        "Provider",
+        "S3 buckets do not expose a public URL by default. Use signedUrl() instead."
+      );
+    },
   };
-  const status = e?.$metadata?.httpStatusCode;
-  const code = e?.name ?? e?.Code;
-  if (code === 'NoSuchKey' || code === 'NotFound' || status === 404) {
-    return new FilesError('NotFound', e?.message ?? 'Not found', err);
-  }
-  if (code === 'AccessDenied' || status === 401 || status === 403) {
-    return new FilesError('Unauthorized', e?.message ?? 'Unauthorized', err);
-  }
-  if (code === 'PreconditionFailed' || status === 409 || status === 412) {
-    return new FilesError('Conflict', e?.message ?? 'Conflict', err);
-  }
-  return new FilesError('Provider', e?.message ?? 'S3 error', err);
-}
+};

@@ -1,8 +1,8 @@
-export { FilesError, type FilesErrorCode } from './internal/errors.js';
-export { createStoredFile } from './internal/stored-file.js';
-export type { StoredFileMeta, BodySource } from './internal/stored-file.js';
+import { FilesError } from "./internal/errors.js";
 
-import { FilesError } from './internal/errors.js';
+export { FilesError, type FilesErrorCode } from "./internal/errors.js";
+export { createStoredFile } from "./internal/stored-file.js";
+export type { StoredFileMeta, BodySource } from "./internal/stored-file.js";
 
 export type Body =
   | Blob
@@ -42,7 +42,7 @@ export interface StoredFile {
 }
 
 export interface DownloadOptions {
-  as?: 'blob' | 'stream';
+  as?: "blob" | "stream";
 }
 
 export interface ListOptions {
@@ -68,12 +68,12 @@ export interface SignUploadOptions {
 
 export type SignedUpload =
   | {
-      method: 'PUT';
+      method: "PUT";
       url: string;
       headers?: Record<string, string>;
     }
   | {
-      method: 'POST';
+      method: "POST";
       url: string;
       fields: Record<string, string>;
     };
@@ -96,6 +96,14 @@ export interface FilesOptions<A extends Adapter> {
   adapter: A;
 }
 
+const run = async <T>(fn: () => Promise<T>): Promise<T> => {
+  try {
+    return await fn();
+  } catch (error) {
+    throw FilesError.wrap(error);
+  }
+};
+
 export class Files<A extends Adapter = Adapter> {
   readonly #adapter: A;
 
@@ -103,7 +111,7 @@ export class Files<A extends Adapter = Adapter> {
     this.#adapter = opts.adapter;
   }
 
-  get raw(): A['raw'] {
+  get raw(): A["raw"] {
     return this.#adapter.raw;
   }
 
@@ -112,46 +120,38 @@ export class Files<A extends Adapter = Adapter> {
   }
 
   upload(key: string, body: Body, opts?: UploadOptions): Promise<UploadResult> {
-    return this.#run(() => this.#adapter.upload(key, body, opts));
+    return run(() => this.#adapter.upload(key, body, opts));
   }
 
   download(key: string, opts?: DownloadOptions): Promise<StoredFile> {
-    return this.#run(() => this.#adapter.download(key, opts));
+    return run(() => this.#adapter.download(key, opts));
   }
 
   head(key: string): Promise<StoredFile> {
-    return this.#run(() => this.#adapter.head(key));
+    return run(() => this.#adapter.head(key));
   }
 
   delete(key: string): Promise<void> {
-    return this.#run(() => this.#adapter.delete(key));
+    return run(() => this.#adapter.delete(key));
   }
 
   copy(from: string, to: string): Promise<void> {
-    return this.#run(() => this.#adapter.copy(from, to));
+    return run(() => this.#adapter.copy(from, to));
   }
 
   list(opts?: ListOptions): Promise<ListResult> {
-    return this.#run(() => this.#adapter.list(opts));
+    return run(() => this.#adapter.list(opts));
   }
 
   url(key: string): Promise<string> {
-    return this.#run(() => this.#adapter.url(key));
+    return run(() => this.#adapter.url(key));
   }
 
   signedUrl(key: string, opts: SignOptions): Promise<string> {
-    return this.#run(() => this.#adapter.signedUrl(key, opts));
+    return run(() => this.#adapter.signedUrl(key, opts));
   }
 
   signedUploadUrl(key: string, opts: SignUploadOptions): Promise<SignedUpload> {
-    return this.#run(() => this.#adapter.signedUploadUrl(key, opts));
-  }
-
-  async #run<T>(fn: () => Promise<T>): Promise<T> {
-    try {
-      return await fn();
-    } catch (err) {
-      throw FilesError.wrap(err);
-    }
+    return run(() => this.#adapter.signedUploadUrl(key, opts));
   }
 }

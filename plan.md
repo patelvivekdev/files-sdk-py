@@ -62,14 +62,14 @@ const files = new Files({
 
 // Upload — accepts File | Blob | ReadableStream | ArrayBuffer | string
 const result = await files.upload("avatars/abc.png", file, {
-  contentType: "image/png",      // optional, inferred when possible
+  contentType: "image/png", // optional, inferred when possible
   cacheControl: "public, max-age=31536000",
   metadata: { userId: "123" },
 });
 // → { key, size, contentType, etag, lastModified }
 
 // Download — Blob by default, opt into streaming
-const blob   = await files.download("avatars/abc.png");
+const blob = await files.download("avatars/abc.png");
 const stream = await files.download("avatars/abc.png", { as: "stream" });
 
 // Metadata, delete, copy
@@ -81,8 +81,8 @@ await files.copy("avatars/abc.png", "avatars/abc.bak.png");
 const { items, cursor } = await files.list({ prefix: "avatars/", limit: 100 });
 
 // URLs
-const url       = await files.url("avatars/abc.png");                        // throws if no public URL exists for this adapter; use signedUrl instead
-const tempUrl   = await files.signedUrl("avatars/abc.png", { expiresIn: 60 });
+const url = await files.url("avatars/abc.png"); // throws if no public URL exists for this adapter; use signedUrl instead
+const tempUrl = await files.signedUrl("avatars/abc.png", { expiresIn: 60 });
 const uploadUrl = await files.signedUploadUrl("avatars/abc.png", {
   expiresIn: 60,
   contentType: "image/png",
@@ -101,7 +101,10 @@ interface Adapter<Raw = unknown> {
   readonly name: string;
   readonly raw: Raw;
   upload(key: string, body: Body, opts?: UploadOptions): Promise<UploadResult>;
-  download(key: string, opts?: { as?: "blob" | "stream" }): Promise<Blob | ReadableStream>;
+  download(
+    key: string,
+    opts?: { as?: "blob" | "stream" }
+  ): Promise<Blob | ReadableStream>;
   head(key: string): Promise<FileInfo>;
   delete(key: string): Promise<void>;
   copy(from: string, to: string): Promise<void>;
@@ -156,9 +159,9 @@ So we ship a custom `StoredFile` type that **mirrors `File`'s shape** (familiar 
 ```ts
 interface StoredFile {
   // File-shaped:
-  name: string;            // = key
+  name: string; // = key
   size: number;
-  type: string;            // = contentType
+  type: string; // = contentType
   lastModified?: number;
   arrayBuffer(): Promise<ArrayBuffer>;
   text(): Promise<string>;

@@ -1,4 +1,4 @@
-import type { StoredFile } from '../index.js';
+import type { StoredFile } from "../index.js";
 
 export interface StoredFileMeta {
   key: string;
@@ -10,23 +10,25 @@ export interface StoredFileMeta {
 }
 
 export type BodySource =
-  | { kind: 'buffer'; data: Uint8Array }
-  | { kind: 'stream'; factory: () => ReadableStream<Uint8Array> }
-  | { kind: 'lazy'; factory: () => Promise<Uint8Array> };
+  | { kind: "buffer"; data: Uint8Array }
+  | { kind: "stream"; factory: () => ReadableStream<Uint8Array> }
+  | { kind: "lazy"; factory: () => Promise<Uint8Array> };
 
-export function createStoredFile(
+export const createStoredFile = (
   meta: StoredFileMeta,
   body: BodySource
-): StoredFile {
+): StoredFile => {
   let cached: Uint8Array | undefined;
 
   const toBytes = async (): Promise<Uint8Array> => {
-    if (cached) return cached;
-    if (body.kind === 'buffer') {
+    if (cached) {
+      return cached;
+    }
+    if (body.kind === "buffer") {
       cached = body.data;
       return cached;
     }
-    if (body.kind === 'lazy') {
+    if (body.kind === "lazy") {
       cached = await body.factory();
       return cached;
     }
@@ -35,7 +37,9 @@ export function createStoredFile(
     const reader = body.factory().getReader();
     while (true) {
       const { value, done } = await reader.read();
-      if (done) break;
+      if (done) {
+        break;
+      }
       if (value) {
         chunks.push(value);
         total += value.byteLength;
@@ -52,13 +56,6 @@ export function createStoredFile(
   };
 
   return {
-    name: meta.key,
-    size: meta.size,
-    type: meta.type,
-    lastModified: meta.lastModified,
-    key: meta.key,
-    etag: meta.etag,
-    metadata: meta.metadata,
     async arrayBuffer() {
       const bytes = await toBytes();
       return bytes.buffer.slice(
@@ -66,10 +63,16 @@ export function createStoredFile(
         bytes.byteOffset + bytes.byteLength
       ) as ArrayBuffer;
     },
-    async text() {
+    async blob() {
       const bytes = await toBytes();
-      return new TextDecoder().decode(bytes);
+      return new Blob([bytes as BlobPart], { type: meta.type });
     },
+    etag: meta.etag,
+    key: meta.key,
+    lastModified: meta.lastModified,
+    metadata: meta.metadata,
+    name: meta.key,
+    size: meta.size,
     stream() {
       if (cached) {
         const bytes = cached;
@@ -80,7 +83,7 @@ export function createStoredFile(
           },
         });
       }
-      if (body.kind === 'stream') {
+      if (body.kind === "stream") {
         return body.factory();
       }
       return new ReadableStream<Uint8Array>({
@@ -91,9 +94,10 @@ export function createStoredFile(
         },
       });
     },
-    async blob() {
+    async text() {
       const bytes = await toBytes();
-      return new Blob([bytes as BlobPart], { type: meta.type });
+      return new TextDecoder().decode(bytes);
     },
+    type: meta.type,
   };
-}
+};
