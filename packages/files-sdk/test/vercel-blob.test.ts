@@ -8,6 +8,7 @@ const putMock = mock((pathname: string, _body: unknown, _opts?: unknown) =>
     contentDisposition: "",
     contentType: "text/plain",
     downloadUrl: `https://blob.test/${pathname}?download=1`,
+    etag: `"etag-${pathname}"`,
     pathname,
     url: `https://blob.test/${pathname}`,
   })
@@ -365,7 +366,7 @@ describe("vercel-blob adapter", () => {
     }
   });
 
-  test("upload size for ReadableStream body falls back to 0", async () => {
+  test("upload of ReadableStream body fetches authoritative size via head()", async () => {
     const adapter = vercelBlob();
     const stream = new ReadableStream<Uint8Array>({
       start(c) {
@@ -373,8 +374,21 @@ describe("vercel-blob adapter", () => {
         c.close();
       },
     });
+    headMock.mockClear();
     const result = await adapter.upload("s.bin", stream);
-    expect(result.size).toBe(0);
+    // The streaming-body path must consult head() for the size that we
+    // can't compute locally — otherwise callers see a bogus size: 0.
+    expect(headMock).toHaveBeenCalledTimes(1);
+    expect(result.size).toBe(5);
+  });
+
+  test("upload of known-size body skips the extra head() round trip", async () => {
+    const adapter = vercelBlob();
+    headMock.mockClear();
+    const result = await adapter.upload("s.txt", "hello");
+    expect(headMock).not.toHaveBeenCalled();
+    expect(result.size).toBe(5);
+    expect(result.etag).toBe('"etag-s.txt"');
   });
 
   test("list error is mapped to FilesError", async () => {

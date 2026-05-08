@@ -23,7 +23,7 @@ export type VercelBlobClient = typeof blob;
 
 export type VercelBlobAdapter = Adapter<VercelBlobClient>;
 
-const sizeOf = (body: Body): number => {
+const sizeOf = (body: Body): number | undefined => {
   if (typeof body === "string") {
     return new TextEncoder().encode(body).byteLength;
   }
@@ -39,7 +39,7 @@ const sizeOf = (body: Body): number => {
   if (body instanceof Blob) {
     return body.size;
   }
-  return 0;
+  return undefined;
 };
 
 const parseCacheControlMaxAge = (header: string): number | undefined => {
@@ -219,14 +219,28 @@ export const vercelBlob = (
             cacheControlMaxAge: parseCacheControlMaxAge(options.cacheControl),
           }),
         });
+        // Vercel's PutBlobResult has no size; for stream bodies we can't compute
+        // it locally, so fall back to a follow-up head() to get the authoritative
+        // size (and lastModified). For known-size bodies, skip the extra round trip.
+        const localSize = sizeOf(body);
+        let size = localSize;
+        let lastModified = Date.now();
+        if (size === undefined) {
+          const { size: headSize, uploadedAt } = await blob.head(result.url, {
+            token,
+          });
+          size = headSize;
+          lastModified = uploadedAt?.getTime() ?? lastModified;
+        }
         return {
           contentType:
             result.contentType ??
             options?.contentType ??
             "application/octet-stream",
+          etag: result.etag,
           key: result.pathname,
-          lastModified: Date.now(),
-          size: sizeOf(body),
+          lastModified,
+          size,
         } satisfies UploadResult;
       } catch (error) {
         throw mapBlobError(error);
