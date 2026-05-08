@@ -166,10 +166,36 @@ describe("vercel-blob adapter", () => {
     expect(out.items.map((i) => i.key)).toEqual(["a/1.txt"]);
   });
 
-  test("url returns the blob's public URL", async () => {
+  test("url returns the blob's public URL via head() when token has no storeId", async () => {
     const files = new Files({ adapter: vercelBlob() });
+    headMock.mockClear();
     const url = await files.url("a.txt");
     expect(url).toBe("https://blob.test/a.txt");
+    expect(headMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("url derives URL from storeId without a round trip when addRandomSuffix is false", async () => {
+    process.env.BLOB_READ_WRITE_TOKEN = "vercel_blob_rw_abc123store_random";
+    const files = new Files({ adapter: vercelBlob() });
+    headMock.mockClear();
+    const url = await files.url("a.txt");
+    expect(url).toBe(
+      "https://abc123store.public.blob.vercel-storage.com/a.txt"
+    );
+    expect(headMock).not.toHaveBeenCalled();
+    process.env.BLOB_READ_WRITE_TOKEN = "test-token";
+  });
+
+  test("url falls back to head() when addRandomSuffix is true (pathname unknown)", async () => {
+    process.env.BLOB_READ_WRITE_TOKEN = "vercel_blob_rw_abc123store_random";
+    const files = new Files({
+      adapter: vercelBlob({ addRandomSuffix: true }),
+    });
+    headMock.mockClear();
+    const url = await files.url("a.txt");
+    expect(url).toBe("https://blob.test/a.txt");
+    expect(headMock).toHaveBeenCalledTimes(1);
+    process.env.BLOB_READ_WRITE_TOKEN = "test-token";
   });
 
   test("signedUrl throws Provider (Vercel Blob URLs don't expire)", async () => {

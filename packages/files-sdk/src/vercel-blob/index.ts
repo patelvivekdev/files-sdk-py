@@ -92,6 +92,15 @@ export const vercelBlob = (
   const addRandomSuffix = opts.addRandomSuffix ?? false;
   const allowOverwrite = opts.allowOverwrite ?? true;
 
+  // BLOB_READ_WRITE_TOKEN format is `vercel_blob_rw_<storeId>_<random>`.
+  // The 4th `_`-separated segment is the storeId, which is also the URL
+  // subdomain. We use this to synthesize URLs without a round trip when the
+  // pathname is predictable (i.e. `addRandomSuffix: false`). If the token
+  // format ever changes, `storeId` will be `undefined` and `url()` falls
+  // back to a head() call automatically.
+  const tokenParts = token.split("_");
+  const storeId = tokenParts.length >= 4 ? tokenParts.at(3) : undefined;
+
   const headRaw = async (key: string) => {
     try {
       return await blob.head(key, { token });
@@ -262,6 +271,12 @@ export const vercelBlob = (
       }
     },
     async url(key) {
+      // Fast path: with a known storeId and predictable keys, derive the
+      // URL without an API call. `addRandomSuffix: true` makes the actual
+      // pathname unknowable in advance, so we have to head() in that case.
+      if (storeId && !addRandomSuffix) {
+        return `https://${storeId}.public.blob.vercel-storage.com/${key}`;
+      }
       const result = await headRaw(key);
       if (!result.url) {
         throw new FilesError("Provider", "vercel-blob: missing public URL");
