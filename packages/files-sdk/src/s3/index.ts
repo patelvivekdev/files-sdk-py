@@ -391,12 +391,28 @@ export const s3 = (opts: S3AdapterOptions): S3Adapter => {
             }),
           })
         );
+        let size = contentLength;
+        let lastModified: number | undefined;
+        // Stream bodies have no locally computed length; PutObject's response
+        // doesn't carry size either. Do a follow-up head() to surface the
+        // authoritative size and lastModified instead of silently returning 0.
+        if (size === undefined) {
+          try {
+            const head = await client.send(
+              new HeadObjectCommand({ Bucket: bucket, Key: key })
+            );
+            size = Number(head.ContentLength ?? 0);
+            lastModified = head.LastModified?.getTime();
+          } catch {
+            size = 0;
+          }
+        }
         return {
           contentType,
           etag: stripEtag(result.ETag),
           key,
-          lastModified: undefined,
-          size: contentLength ?? 0,
+          lastModified,
+          size,
         } satisfies UploadResult;
       } catch (error) {
         throw mapS3Error(error);

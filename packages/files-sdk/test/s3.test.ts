@@ -238,6 +238,10 @@ describe("s3 adapter", () => {
 
   test("upload accepts ReadableStream bodies (no contentLength)", async () => {
     s3Mock.on(PutObjectCommand).resolves({});
+    s3Mock.on(HeadObjectCommand).resolves({
+      ContentLength: 2,
+      LastModified: new Date(1_700_000_000_000),
+    });
     const adapter = s3({ bucket: "b", region: "us-east-1" });
     const stream = new ReadableStream<Uint8Array>({
       start(c) {
@@ -245,10 +249,27 @@ describe("s3 adapter", () => {
         c.close();
       },
     });
-    await adapter.upload("k", stream);
+    const result = await adapter.upload("k", stream);
     const [{ input }] = firstCall(s3Mock.commandCalls(PutObjectCommand)).args;
     expect(input.ContentLength).toBeUndefined();
     expect(input.Body).toBe(stream);
+    expect(result.size).toBe(2);
+    expect(result.lastModified).toBe(1_700_000_000_000);
+  });
+
+  test("upload of a stream body falls back to size 0 if the head() probe fails", async () => {
+    s3Mock.on(PutObjectCommand).resolves({});
+    s3Mock.on(HeadObjectCommand).rejects(new Error("transient"));
+    const adapter = s3({ bucket: "b", region: "us-east-1" });
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new Uint8Array([1, 2]));
+        c.close();
+      },
+    });
+    const result = await adapter.upload("k", stream);
+    expect(result.size).toBe(0);
+    expect(result.lastModified).toBeUndefined();
   });
 
   test("download as stream returns a streaming StoredFile", async () => {
