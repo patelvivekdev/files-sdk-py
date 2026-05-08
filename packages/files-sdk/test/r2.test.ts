@@ -174,18 +174,40 @@ const fakeBinding = () => {
         }));
       return Promise.resolve({ cursor: undefined, objects, truncated: false });
     },
-    put(
+    async put(
       key: string,
-      body: ArrayBuffer | string,
+      body: ArrayBuffer | string | ReadableStream<Uint8Array>,
       opts?: {
         httpMetadata?: { contentType?: string };
         customMetadata?: Record<string, string>;
       }
     ) {
-      const bytes =
-        typeof body === "string"
-          ? new TextEncoder().encode(body)
-          : new Uint8Array(body);
+      let bytes: Uint8Array;
+      if (typeof body === "string") {
+        bytes = new TextEncoder().encode(body);
+      } else if (body instanceof ReadableStream) {
+        const chunks: Uint8Array[] = [];
+        let total = 0;
+        const reader = body.getReader();
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) {
+            break;
+          }
+          if (value) {
+            chunks.push(value);
+            total += value.byteLength;
+          }
+        }
+        bytes = new Uint8Array(total);
+        let offset = 0;
+        for (const c of chunks) {
+          bytes.set(c, offset);
+          offset += c.byteLength;
+        }
+      } else {
+        bytes = new Uint8Array(body);
+      }
       counter += 1;
       const entry = {
         bytes,
@@ -196,14 +218,14 @@ const fakeBinding = () => {
         uploaded: new Date(),
       };
       map.set(key, entry);
-      return Promise.resolve({
+      return {
         customMetadata: entry.customMetadata,
         etag: entry.etag,
         httpMetadata: entry.httpMetadata,
         key,
         size: entry.size,
         uploaded: entry.uploaded,
-      });
+      };
     },
   };
   return { bucket, map };

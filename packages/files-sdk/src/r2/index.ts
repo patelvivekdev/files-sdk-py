@@ -133,15 +133,23 @@ const r2FromBinding = (opts: R2BindingOptions): R2Adapter => {
 
   return {
     async copy(from, to) {
+      // R2 bindings have no server-side copy, so this is a read-then-write.
+      // Stream the body straight through `put` instead of buffering the whole
+      // object — multi-GB copies would otherwise blow past the Worker's
+      // memory limit. Source and destination are not atomic; concurrent
+      // mutations to `from` between the get and put are not detected.
       const obj = await bucket.get(from);
       if (!obj) {
         throw new FilesError("NotFound", `Object not found: ${from}`);
       }
-      const data = await obj.arrayBuffer();
-      await bucket.put(to, data, {
-        customMetadata: obj.customMetadata,
-        httpMetadata: obj.httpMetadata,
-      });
+      try {
+        await bucket.put(to, obj.body, {
+          customMetadata: obj.customMetadata,
+          httpMetadata: obj.httpMetadata,
+        });
+      } catch (error) {
+        throw mapR2Error(error);
+      }
     },
     async delete(key) {
       await bucket.delete(key);
