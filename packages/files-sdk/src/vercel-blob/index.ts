@@ -201,9 +201,14 @@ export const vercelBlob = (
         "vercel-blob: signed upload URLs are not available. Use Vercel's `handleUpload()` route handler with the `@vercel/blob/client` package for browser uploads."
       );
     },
-    signedUrl(key, _opts) {
-      // Vercel Blob URLs are public and do not expire. `expiresIn` is accepted for API parity but ignored.
-      return this.url(key);
+    signedUrl(_key, _opts): Promise<string> {
+      // Vercel Blob URLs are public and do not expire. Returning `url()` would silently violate
+      // the caller's `expiresIn` contract — a 5-minute "signed" URL would actually live forever.
+      // Callers who want a public URL should call `url()` explicitly.
+      throw new FilesError(
+        "Provider",
+        "vercel-blob: signed URLs are not supported. Vercel Blob URLs are public and do not expire — call `url()` instead if a permanent public URL is acceptable."
+      );
     },
     async upload(key, body, options) {
       try {

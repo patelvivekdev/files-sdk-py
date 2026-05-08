@@ -168,10 +168,16 @@ describe("vercel-blob adapter", () => {
     expect(url).toBe("https://blob.test/a.txt");
   });
 
-  test("signedUrl returns the same public URL (Vercel Blob URLs don't expire)", async () => {
+  test("signedUrl throws Provider (Vercel Blob URLs don't expire)", async () => {
     const files = new Files({ adapter: vercelBlob() });
-    const url = await files.signedUrl("a.txt", { expiresIn: 60 });
-    expect(url).toBe("https://blob.test/a.txt");
+    try {
+      await files.signedUrl("a.txt", { expiresIn: 60 });
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(FilesError);
+      expect((error as FilesError).code).toBe("Provider");
+      expect((error as FilesError).message).toMatch(/do not expire/u);
+    }
   });
 
   test("signedUploadUrl throws Provider", async () => {
