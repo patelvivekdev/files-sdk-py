@@ -27,7 +27,7 @@ const headMock = mock((pathname: string) =>
   })
 );
 const delMock = mock((_pathname: string | string[]) => Promise.resolve());
-const copyMock = mock((_from: string, to: string) =>
+const copyMock = mock((_from: string, to: string, _opts?: unknown) =>
   Promise.resolve({
     contentDisposition: "",
     contentType: "text/plain",
@@ -52,10 +52,51 @@ const listMock = mock((_opts?: unknown) =>
     hasMore: false,
   })
 );
+type GetMockResult = {
+  blob: {
+    cacheControl: string;
+    contentDisposition: string;
+    contentType: string;
+    downloadUrl: string;
+    etag: string;
+    pathname: string;
+    size: number;
+    uploadedAt: Date;
+    url: string;
+  };
+  headers: Headers;
+  statusCode: number;
+  stream: ReadableStream<Uint8Array>;
+} | null;
+const getMock = mock(
+  (pathname: string, _opts?: unknown): Promise<GetMockResult> =>
+    Promise.resolve({
+      blob: {
+        cacheControl: "",
+        contentDisposition: "",
+        contentType: "text/plain",
+        downloadUrl: `https://blob.test/${pathname}?download=1`,
+        etag: `"etag-${pathname}"`,
+        pathname,
+        size: 5,
+        uploadedAt: new Date(),
+        url: `https://blob.test/${pathname}`,
+      },
+      headers: new Headers(),
+      statusCode: 200,
+      stream: new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(new TextEncoder().encode("hello"));
+          c.close();
+        },
+      }),
+    })
+);
 
 mock.module("@vercel/blob", () => ({
   copy: copyMock,
   del: delMock,
+  get: getMock,
   head: headMock,
   list: listMock,
   put: putMock,
@@ -72,6 +113,7 @@ beforeEach(() => {
   delMock.mockClear();
   copyMock.mockClear();
   listMock.mockClear();
+  getMock.mockClear();
   globalThis.fetch = ((url: string | URL | Request) => {
     const u = typeof url === "string" ? url : url.toString();
     if (u.includes("/missing")) {
@@ -503,5 +545,189 @@ describe("vercel-blob adapter", () => {
     await files.download("a.txt");
     expect(seenSignals).toHaveLength(1);
     expect(seenSignals[0]).toBeUndefined();
+  });
+
+  describe("private mode", () => {
+    test("upload passes access: 'private' to blob.put", async () => {
+      const files = new Files({ adapter: vercelBlob({ access: "private" }) });
+      await files.upload("a.txt", "hello");
+      const [firstCall] = putMock.mock.calls;
+      if (!firstCall) {
+        throw new Error("expected put to have been called");
+      }
+      const opts = firstCall[2] as { access: string };
+      expect(opts.access).toBe("private");
+    });
+
+    test("copy passes access: 'private' to blob.copy", async () => {
+      const files = new Files({ adapter: vercelBlob({ access: "private" }) });
+      await files.copy("a.txt", "b.txt");
+      const [firstCall] = copyMock.mock.calls;
+      if (!firstCall) {
+        throw new Error("expected copy to have been called");
+      }
+      const opts = firstCall[2] as { access: string };
+      expect(opts.access).toBe("private");
+    });
+
+    test("download routes through blob.get and never hits the public URL", async () => {
+      // Track public-URL fetches; the private path must not touch fetch().
+      const fetchCalls: string[] = [];
+      globalThis.fetch = ((url: string | URL | Request) => {
+        fetchCalls.push(typeof url === "string" ? url : url.toString());
+        return Promise.resolve(new Response("from-public-url"));
+      }) as typeof fetch;
+      const files = new Files({ adapter: vercelBlob({ access: "private" }) });
+      const got = await files.download("a.txt");
+      expect(await got.text()).toBe("hello");
+      expect(getMock).toHaveBeenCalledTimes(1);
+      const [firstGet] = getMock.mock.calls;
+      if (!firstGet) {
+        throw new Error("expected get to have been called");
+      }
+      const [pathArg, getOpts] = firstGet;
+      expect(pathArg).toBe("a.txt");
+      const o = getOpts as { access: string; token: string };
+      expect(o.access).toBe("private");
+      expect(o.token).toBe("test-token");
+      expect(fetchCalls).toEqual([]);
+    });
+
+    test("download as: 'stream' returns the blob.get stream without buffering", async () => {
+      const files = new Files({ adapter: vercelBlob({ access: "private" }) });
+      const got = await files.download("a.txt", { as: "stream" });
+      const reader = got.stream().getReader();
+      let total = 0;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) {
+          break;
+        }
+        if (value) {
+          total += value.byteLength;
+        }
+      }
+      expect(total).toBe(5);
+    });
+
+    test("head lazy body fetches via blob.get, not the public URL", async () => {
+      const fetchCalls: string[] = [];
+      globalThis.fetch = ((url: string | URL | Request) => {
+        fetchCalls.push(typeof url === "string" ? url : url.toString());
+        return Promise.resolve(new Response("from-public-url"));
+      }) as typeof fetch;
+      const files = new Files({ adapter: vercelBlob({ access: "private" }) });
+      const info = await files.head("a.txt");
+      expect(await info.text()).toBe("hello");
+      expect(getMock).toHaveBeenCalledTimes(1);
+      expect(fetchCalls).toEqual([]);
+    });
+
+    test("list items lazy bodies fetch via blob.get, not the public URL", async () => {
+      const fetchCalls: string[] = [];
+      globalThis.fetch = ((url: string | URL | Request) => {
+        fetchCalls.push(typeof url === "string" ? url : url.toString());
+        return Promise.resolve(new Response("from-public-url"));
+      }) as typeof fetch;
+      const files = new Files({ adapter: vercelBlob({ access: "private" }) });
+      const out = await files.list();
+      const [item] = out.items;
+      if (!item) {
+        throw new Error("expected at least one list item");
+      }
+      expect(await item.text()).toBe("hello");
+      expect(getMock).toHaveBeenCalledTimes(1);
+      expect(fetchCalls).toEqual([]);
+    });
+
+    test("url throws Provider with a private-specific message", async () => {
+      const files = new Files({ adapter: vercelBlob({ access: "private" }) });
+      try {
+        await files.url("a.txt");
+        throw new Error("should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(FilesError);
+        expect((error as FilesError).code).toBe("Provider");
+        expect((error as FilesError).message).toMatch(/private/u);
+      }
+    });
+
+    test("url throws even when the storeId fast path would otherwise apply", async () => {
+      // Fast path is gated on storeId presence; private mode must override
+      // it so we never hand out a URL that 401s.
+      process.env.BLOB_READ_WRITE_TOKEN = "vercel_blob_rw_abc123store_random";
+      const files = new Files({ adapter: vercelBlob({ access: "private" }) });
+      try {
+        await files.url("a.txt");
+        throw new Error("should have thrown");
+      } catch (error) {
+        expect((error as FilesError).code).toBe("Provider");
+      }
+      process.env.BLOB_READ_WRITE_TOKEN = "test-token";
+    });
+
+    test("signedUrl throws with a private-specific message", async () => {
+      const files = new Files({ adapter: vercelBlob({ access: "private" }) });
+      try {
+        await files.signedUrl("a.txt", { expiresIn: 60 });
+        throw new Error("should have thrown");
+      } catch (error) {
+        expect((error as FilesError).code).toBe("Provider");
+        expect((error as FilesError).message).toMatch(/private/u);
+      }
+    });
+
+    test("download maps blob.get rejection with status 404 to NotFound", async () => {
+      getMock.mockImplementationOnce(() =>
+        Promise.reject(Object.assign(new Error("nope"), { status: 404 }))
+      );
+      const files = new Files({ adapter: vercelBlob({ access: "private" }) });
+      try {
+        await files.download("a.txt");
+        throw new Error("should have thrown");
+      } catch (error) {
+        expect((error as FilesError).code).toBe("NotFound");
+      }
+    });
+
+    test("download maps blob.get rejection with status 403 to Unauthorized", async () => {
+      getMock.mockImplementationOnce(() =>
+        Promise.reject(Object.assign(new Error("denied"), { status: 403 }))
+      );
+      const files = new Files({ adapter: vercelBlob({ access: "private" }) });
+      try {
+        await files.download("a.txt");
+        throw new Error("should have thrown");
+      } catch (error) {
+        expect((error as FilesError).code).toBe("Unauthorized");
+      }
+    });
+
+    test("download maps a 304 (or null) blob.get response to NotFound", async () => {
+      // Defensive: blob.get can resolve to null or to a non-200 statusCode.
+      // Either case means we cannot return a body, so surface NotFound rather
+      // than constructing a StoredFile with a null stream.
+      getMock.mockImplementationOnce(() => Promise.resolve(null));
+      const files = new Files({ adapter: vercelBlob({ access: "private" }) });
+      try {
+        await files.download("a.txt");
+        throw new Error("should have thrown");
+      } catch (error) {
+        expect((error as FilesError).code).toBe("NotFound");
+      }
+    });
+
+    test("default access is 'public' (existing put calls still pass access: 'public')", async () => {
+      // Backward-compat regression guard: omitting `access` must keep the
+      // existing public behavior.
+      const files = new Files({ adapter: vercelBlob() });
+      await files.upload("a.txt", "hello");
+      const [firstCall] = putMock.mock.calls;
+      if (!firstCall) {
+        throw new Error("expected put to have been called");
+      }
+      const opts = firstCall[2] as { access: string };
+      expect(opts.access).toBe("public");
+    });
   });
 });

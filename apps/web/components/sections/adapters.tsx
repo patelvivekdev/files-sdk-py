@@ -113,12 +113,22 @@ export const Adapters = () => (
           fetch that never resolves.
         </p>
         <p>
+          <code>access</code> selects public or private blobs and is fixed at
+          construction. Default <code>"public"</code> matches the existing
+          behavior. With <code>access: "private"</code>, uploads use Vercel's
+          private mode and reads route through <code>blob.get()</code> with the
+          token instead of a public URL fetch — there is no permanent public URL
+          for private blobs, so <code>url()</code> throws. Need both? Use two
+          adapters.
+        </p>
+        <p>
           <span className="text-foreground">Limitations.</span>{" "}
           <code>signedUrl</code> and <code>signedUploadUrl</code> both throw —
-          blob URLs are public and don't expire, and browser uploads go through{" "}
-          <code>handleUpload()</code> from <code>@vercel/blob/client</code>{" "}
-          instead of presigned URLs. User <code>metadata</code> isn't supported
-          by the underlying API, so it round-trips as <code>undefined</code>.
+          public blob URLs don't expire, private blobs require an authenticated
+          SDK call, and browser uploads go through <code>handleUpload()</code>{" "}
+          from <code>@vercel/blob/client</code> instead of presigned URLs. User{" "}
+          <code>metadata</code> isn't supported by the underlying API, so it
+          round-trips as <code>undefined</code>.
         </p>
       </TabsContent>
 

@@ -15,6 +15,23 @@ import { createStoredFile } from "../internal/stored-file.js";
 export interface VercelBlobAdapterOptions {
   token?: string;
   /**
+   * Whether blobs uploaded by this adapter are public or private.
+   *
+   * - `"public"` (default): blobs are uploaded with `access: "public"` and
+   *   reachable via their CDN URL without authentication. `url()` returns a
+   *   permanent public URL.
+   * - `"private"`: blobs are uploaded with `access: "private"`. They cannot
+   *   be fetched by URL — `download()` and the lazy bodies returned from
+   *   `head()` / `list()` instead route through `blob.get(key, { access:
+   *   "private" })`, which uses the token. `url()` throws because there is
+   *   no permanent public URL for private blobs.
+   *
+   * The setting is fixed at construction so a single `Files` instance is
+   * unambiguously one or the other. If you need both, instantiate two
+   * adapters.
+   */
+  access?: "public" | "private";
+  /**
    * Add a random suffix to uploaded keys (Vercel default).
    *
    * When `false`, the resulting pathname matches the key 1:1, which keeps
@@ -137,10 +154,44 @@ export const vercelBlob = (
     );
   }
 
+  const access = opts.access ?? "public";
   const addRandomSuffix = opts.addRandomSuffix ?? false;
   const allowOverwrite = opts.allowOverwrite ?? true;
   const downloadTimeoutMs =
     opts.downloadTimeoutMs ?? DEFAULT_DOWNLOAD_TIMEOUT_MS;
+
+  // For private blobs the public URL field returned by head()/list() requires
+  // authentication to fetch — a plain `fetch(url)` would 401. Route body reads
+  // through `blob.get(...)` instead, which uses the token. Returns a stream
+  // and a content type; callers can buffer or pipe it.
+  const getPrivateBody = async (
+    key: string
+  ): Promise<{
+    contentType: string | undefined;
+    size: number | undefined;
+    stream: ReadableStream<Uint8Array>;
+  }> => {
+    const signal =
+      downloadTimeoutMs > 0
+        ? AbortSignal.timeout(downloadTimeoutMs)
+        : undefined;
+    const got = await blob.get(key, {
+      access: "private",
+      token,
+      ...(signal && { abortSignal: signal }),
+    });
+    if (!got || got.statusCode !== 200) {
+      throw new FilesError(
+        "NotFound",
+        `vercel-blob: private blob not found: ${key}`
+      );
+    }
+    return {
+      contentType: got.blob.contentType,
+      size: got.blob.size,
+      stream: got.stream,
+    };
+  };
 
   // BLOB_READ_WRITE_TOKEN format is `vercel_blob_rw_<storeId>_<random>`.
   // We use the storeId to synthesize public URLs without a round trip when
@@ -177,7 +228,7 @@ export const vercelBlob = (
     async copy(from, to) {
       try {
         await blob.copy(from, to, {
-          access: "public",
+          access,
           addRandomSuffix,
           allowOverwrite,
           token,
@@ -196,6 +247,28 @@ export const vercelBlob = (
     async download(key, downloadOpts) {
       const result = await headRaw(key);
       try {
+        const meta = {
+          etag: result.etag,
+          key: result.pathname,
+          lastModified: result.uploadedAt?.getTime(),
+          type: result.contentType ?? "application/octet-stream",
+        };
+        if (access === "private") {
+          const got = await getPrivateBody(key);
+          if (downloadOpts?.as === "stream") {
+            return createStoredFile(
+              { ...meta, size: result.size },
+              { factory: () => got.stream, kind: "stream" }
+            );
+          }
+          const bytes = new Uint8Array(
+            await new Response(got.stream).arrayBuffer()
+          );
+          return createStoredFile(
+            { ...meta, size: bytes.byteLength },
+            { data: bytes, kind: "buffer" }
+          );
+        }
         const res = await fetchWithTimeout(result.url, downloadTimeoutMs);
         if (!res.ok) {
           throw new FilesError(
@@ -203,12 +276,6 @@ export const vercelBlob = (
             `vercel-blob download failed: ${res.status} ${res.statusText}`
           );
         }
-        const meta = {
-          etag: result.etag,
-          key: result.pathname,
-          lastModified: result.uploadedAt?.getTime(),
-          type: result.contentType ?? "application/octet-stream",
-        };
         if (downloadOpts?.as === "stream" && res.body) {
           const stream = res.body;
           return createStoredFile(
@@ -237,6 +304,12 @@ export const vercelBlob = (
         },
         {
           factory: async () => {
+            if (access === "private") {
+              const got = await getPrivateBody(key);
+              return new Uint8Array(
+                await new Response(got.stream).arrayBuffer()
+              );
+            }
             const res = await fetchWithTimeout(result.url, downloadTimeoutMs);
             return new Uint8Array(await res.arrayBuffer());
           },
@@ -263,6 +336,12 @@ export const vercelBlob = (
             },
             {
               factory: async () => {
+                if (access === "private") {
+                  const got = await getPrivateBody(b.pathname);
+                  return new Uint8Array(
+                    await new Response(got.stream).arrayBuffer()
+                  );
+                }
                 const res = await fetchWithTimeout(b.url, downloadTimeoutMs);
                 return new Uint8Array(await res.arrayBuffer());
               },
@@ -287,9 +366,18 @@ export const vercelBlob = (
       );
     },
     signedUrl(_key, _opts): Promise<string> {
-      // Vercel Blob URLs are public and do not expire. Returning `url()` would silently violate
-      // the caller's `expiresIn` contract — a 5-minute "signed" URL would actually live forever.
-      // Callers who want a public URL should call `url()` explicitly.
+      // Vercel Blob has no signed-URL primitive. Public blobs are reachable via
+      // their permanent CDN URL (`url()`); private blobs require an authenticated
+      // SDK call (`download()`), which is not a URL the caller can hand to a
+      // browser. Returning `url()` would silently violate the `expiresIn`
+      // contract — a 5-minute "signed" URL would actually live forever (or, for
+      // private blobs, never work).
+      if (access === "private") {
+        throw new FilesError(
+          "Provider",
+          "vercel-blob: signed URLs are not supported for private blobs. Use `download()` to read the body via the SDK with the token."
+        );
+      }
       throw new FilesError(
         "Provider",
         "vercel-blob: signed URLs are not supported. Vercel Blob URLs are public and do not expire — call `url()` instead if a permanent public URL is acceptable."
@@ -298,7 +386,7 @@ export const vercelBlob = (
     async upload(key, body, options) {
       try {
         const result = await blob.put(key, body as Blob | string, {
-          access: "public",
+          access,
           addRandomSuffix,
           allowOverwrite,
           token,
@@ -335,6 +423,16 @@ export const vercelBlob = (
       }
     },
     async url(key) {
+      // Private blobs have no permanent public URL — the `url` field
+      // returned by head()/list() requires authentication to fetch. Returning
+      // it from `url()` would silently violate the documented "permanent
+      // public URL" contract; callers would hand out URLs that always 401.
+      if (access === "private") {
+        throw new FilesError(
+          "Provider",
+          "vercel-blob: url() is not supported for private blobs. Use `download()` to read the body via the SDK with the token."
+        );
+      }
       // Fast path: with a known storeId and predictable keys, derive the
       // URL without an API call. `addRandomSuffix: true` makes the actual
       // pathname unknowable in advance, so we have to head() in that case.
