@@ -2,6 +2,14 @@
 
 A unified storage SDK for object and blob backends. One small, honest API. Web-standards I/O. An escape hatch when you need the native client.
 
+## Install
+
+```sh
+npm install files-sdk
+```
+
+## Quick start
+
 ```ts
 import { Files } from "files-sdk";
 import { s3 } from "files-sdk/s3";
@@ -14,7 +22,18 @@ await files.upload("avatars/abc.png", file, { contentType: "image/png" });
 const got = await files.download("avatars/abc.png");
 ```
 
-Docs: [files-sdk.dev](https://files-sdk.dev)
+Swap the adapter import (`files-sdk/r2`, `files-sdk/gcs`, `files-sdk/azure`, …) and the rest of your code stays the same.
+
+## What you get
+
+- **One API across providers** — `upload`, `download`, `head`, `delete`, `copy`, `list`, `url`, `signedUploadUrl`. The shape is the same on S3, GCS, Azure, Vercel Blob, the local filesystem, and consumer providers like Dropbox.
+- **Web-standard I/O** — bodies are `Blob`, `File`, `ReadableStream`, `Uint8Array`, `ArrayBuffer`, or `string`. No provider-specific types leak into your code.
+- **Escape hatch** — every adapter exposes its native client at `files.raw`, so provider-specific features are one property access away.
+- **Tree-shakeable** — each adapter is a separate entry point. You only bundle what you import.
+
+## Adapters
+
+A growing catalog covering S3 and S3-compatible stores, the major cloud blob platforms, edge/serverless blob services, the local filesystem, and consumer file providers. See [files-sdk.dev](https://files-sdk.dev) for the current list and per-adapter setup.
 
 ## License
 
