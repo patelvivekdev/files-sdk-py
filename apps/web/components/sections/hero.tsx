@@ -30,7 +30,7 @@ export const Hero = () => (
       A unified storage SDK for object and blob backends. One small, honest API.
       Web-standards I/O. An escape hatch when you need the native client.
     </motion.p>
-    <div className="flex items-center -space-x-0.5">
+    <div className="flex items-center -space-x-1">
       {iconList.map((Icon, index) => {
         const restRotate = index % 2 === 0 ? 3 : -3;
         return (
