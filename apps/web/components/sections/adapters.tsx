@@ -689,20 +689,19 @@ export const Adapters = () => (
               dev upload-handler can validate the param.
             </p>
           </PropAccordionItem>
-          <PropAccordionItem
-            monospace={false}
-            name="Storage layout"
-            value="storageLayout"
-          >
-            <p>
-              Body at <code>{`\${root}/\${key}`}</code>; sidecar at{" "}
-              <code>{`\${root}/\${key}.meta.json`}</code>. Sidecars survive{" "}
-              <code>cp -r</code> / <code>git mv</code> / partial-tree deletion.{" "}
-              <code>list()</code> hides them. ETag is a SHA-1-derived stable
-              hash computed at upload time.
-            </p>
-          </PropAccordionItem>
         </Accordion>
+      </div>
+      <div className="flex flex-col gap-2">
+        <Heading as="h4" id="adapter-fs-storage-layout">
+          Storage layout
+        </Heading>
+        <p>
+          Body at <code>{`\${root}/\${key}`}</code>; sidecar at{" "}
+          <code>{`\${root}/\${key}.meta.json`}</code>. Sidecars survive{" "}
+          <code>cp -r</code> / <code>git mv</code> / partial-tree deletion.{" "}
+          <code>list()</code> hides them. ETag is a SHA-1-derived stable hash
+          computed at upload time.
+        </p>
       </div>
       <div className="flex flex-col gap-2">
         <Heading as="h4" id="adapter-fs-limitations">
