@@ -119,6 +119,30 @@ const url = await files.url("hello.txt");`,
   },
   {
     code: `import { Files } from "files-sdk";
+import { googleDrive } from "files-sdk/google-drive";
+
+// Service-account auth into a Shared Drive. Virtual keys are stored
+// in the Drive file's appProperties so callers see the same
+// "key in / key out" model as S3.
+const files = new Files({
+  adapter: googleDrive({
+    credentials: {
+      client_email: process.env.GOOGLE_DRIVE_CLIENT_EMAIL!,
+      private_key: process.env.GOOGLE_DRIVE_PRIVATE_KEY!,
+    },
+    driveId: process.env.GOOGLE_DRIVE_ID!,
+    rootFolderId: process.env.GOOGLE_DRIVE_ID!,
+  }),
+});
+
+await files.upload("hello.txt", "world");
+const file = await files.download("hello.txt");`,
+    id: "google-drive",
+    label: "Google Drive",
+    lang: "tsx",
+  },
+  {
+    code: `import { Files } from "files-sdk";
 import { azure } from "files-sdk/azure";
 
 const files = new Files({

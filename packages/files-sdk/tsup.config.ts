@@ -14,6 +14,7 @@ export default defineConfig({
     "src/hetzner/index.ts",
     "src/akamai/index.ts",
     "src/gcs/index.ts",
+    "src/google-drive/index.ts",
     "src/azure/index.ts",
     "src/supabase/index.ts",
     "src/fs/index.ts",

@@ -1,0 +1,746 @@
+import { Buffer } from "node:buffer";
+import { Readable } from "node:stream";
+
+import { drive } from "@googleapis/drive";
+import type { drive_v3 } from "@googleapis/drive";
+import { GoogleAuth, JWT, OAuth2Client } from "google-auth-library";
+
+import type {
+  Adapter,
+  Body,
+  ListResult,
+  SignedUpload,
+  StoredFile,
+  UploadResult,
+} from "../index.js";
+import { FilesError } from "../internal/errors.js";
+import type { FilesErrorCode } from "../internal/errors.js";
+import { createStoredFile } from "../internal/stored-file.js";
+
+export interface GoogleDriveAdapterOptions {
+  /**
+   * Inline service-account credentials. Mints a `JWT` auth client with
+   * `https://www.googleapis.com/auth/drive` scope. Mutually exclusive with
+   * the other auth shapes.
+   */
+  credentials?: { client_email: string; private_key: string };
+  /**
+   * Path to a service-account JSON file. Mutually exclusive with the other
+   * auth shapes.
+   */
+  keyFilename?: string;
+  /**
+   * OAuth refresh token (3-legged OAuth, end-user Drive). The adapter mints
+   * fresh access tokens against `clientId`/`clientSecret`. Mutually
+   * exclusive with the other auth shapes.
+   */
+  oauth?: { clientId: string; clientSecret: string; refreshToken: string };
+  /**
+   * Pre-built `@googleapis/drive` v3 client — escape hatch for callers that
+   * have already wired auth (workload identity, ADC, etc.). When passed,
+   * the adapter uses it directly. `signedUploadUrl()` requires an auth
+   * handle to mint access tokens for the resumable session POST; if you
+   * use this escape hatch, that method will throw because we can't
+   * recover the underlying auth from the wrapped client in a stable way.
+   */
+  client?: drive_v3.Drive;
+  /**
+   * Domain-wide delegation subject (the user to impersonate). Only honored
+   * with `credentials` or `keyFilename`.
+   */
+  subject?: string;
+  /**
+   * Shared Drive id. **Strongly recommended for service-account auth** —
+   * service accounts have a 15 GB personal quota; production workloads
+   * should target a Shared Drive with the service account added as a
+   * member. When set, all queries scope to that Shared Drive.
+   */
+  driveId?: string;
+  /**
+   * Logical "bucket root" — virtual keys live under this folder. Defaults
+   * to `"root"` (My Drive root) or, when `driveId` is set, the Shared
+   * Drive root id should be used here.
+   */
+  rootFolderId?: string;
+  /**
+   * When `true`, `upload()` also creates an `anyone with link, reader`
+   * permission and `url()` returns the Drive public download URL. When
+   * `false` (default), `url()` throws — Drive has no signed URL primitive.
+   *
+   * Security note: this is public-by-default for the entire adapter
+   * lifetime. If you need a mix of public and private files, instantiate
+   * two `Files` instances or grant permissions explicitly via `raw`.
+   */
+  publicByDefault?: boolean;
+  /**
+   * LRU capacity for the in-memory virtual-key → fileId cache. Drive has
+   * no native key field; every read after the first round-trips a
+   * `files.list` to resolve the id, which the cache amortizes within a
+   * single adapter instance. Defaults to 1024.
+   */
+  fileIdCacheSize?: number;
+}
+
+export type GoogleDriveClient = drive_v3.Drive;
+export type GoogleDriveAdapter = Adapter<GoogleDriveClient> & {
+  readonly rootFolderId: string;
+};
+
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
+const DEFAULT_CACHE_SIZE = 1024;
+const RESUMABLE_INITIATE_URL =
+  "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true";
+
+// Reserved appProperties keys — used as the virtual-key index and to
+// round-trip metadata Drive has no native field for. Caller metadata keys
+// starting with `fsdk` are rejected at upload time to keep the namespace
+// clean (see assertNoReservedMetadata).
+const KEY_PROP = "fsdkKey";
+const CONTENT_TYPE_PROP = "fsdkContentType";
+const CACHE_CONTROL_PROP = "fsdkCacheControl";
+const RESERVED_METADATA_PREFIX = "fsdk";
+
+const FILE_FIELDS =
+  "id, name, size, mimeType, md5Checksum, modifiedTime, appProperties";
+
+const NOT_FOUND_STATUS = new Set([404]);
+const UNAUTH_STATUS = new Set([401, 403]);
+const CONFLICT_STATUS = new Set([409, 412]);
+
+const classifyDriveError = (status: number | undefined): FilesErrorCode => {
+  if (NOT_FOUND_STATUS.has(status ?? 0)) {
+    return "NotFound";
+  }
+  if (UNAUTH_STATUS.has(status ?? 0)) {
+    return "Unauthorized";
+  }
+  if (CONFLICT_STATUS.has(status ?? 0)) {
+    return "Conflict";
+  }
+  return "Provider";
+};
+
+const DEFAULT_MESSAGES: Record<FilesErrorCode, string> = {
+  Conflict: "Conflict",
+  NotFound: "Not found",
+  Provider: "Drive error",
+  Unauthorized: "Unauthorized",
+};
+
+export const mapDriveError = (err: unknown): FilesError => {
+  if (err instanceof FilesError) {
+    return err;
+  }
+  const e = err as {
+    code?: number | string;
+    message?: string;
+    status?: number;
+    response?: { status?: number; data?: { error?: { message?: string } } };
+  };
+  let status: number | undefined;
+  if (typeof e?.code === "number") {
+    status = e.code;
+  } else if (typeof e?.status === "number") {
+    ({ status } = e);
+  } else if (typeof e?.response?.status === "number") {
+    ({ status } = e.response);
+  }
+  const errorCode = classifyDriveError(status);
+  const message =
+    e?.response?.data?.error?.message ??
+    e?.message ??
+    DEFAULT_MESSAGES[errorCode];
+  return new FilesError(errorCode, message, err);
+};
+
+// Drive's `q` syntax: backslash escapes single quote.
+const escapeQueryValue = (value: string): string =>
+  value.replaceAll("\\", "\\\\").replaceAll("'", "\\'");
+
+const basename = (key: string): string => {
+  const idx = key.lastIndexOf("/");
+  return idx === -1 ? key : key.slice(idx + 1);
+};
+
+const assertNoReservedMetadata = (
+  metadata: Record<string, string> | undefined
+): void => {
+  if (!metadata) {
+    return;
+  }
+  for (const k of Object.keys(metadata)) {
+    if (k.startsWith(RESERVED_METADATA_PREFIX)) {
+      throw new FilesError(
+        "Provider",
+        `google-drive: metadata key '${k}' is reserved (the '${RESERVED_METADATA_PREFIX}' prefix is used by the adapter for bookkeeping).`
+      );
+    }
+  }
+};
+
+class LRU<V> {
+  readonly #map = new Map<string, V>();
+  readonly #cap: number;
+  constructor(cap: number) {
+    this.#cap = Math.max(1, cap);
+  }
+  get(key: string): V | undefined {
+    const v = this.#map.get(key);
+    if (v === undefined) {
+      return undefined;
+    }
+    this.#map.delete(key);
+    this.#map.set(key, v);
+    return v;
+  }
+  set(key: string, value: V): void {
+    if (this.#map.has(key)) {
+      this.#map.delete(key);
+    }
+    this.#map.set(key, value);
+    if (this.#map.size > this.#cap) {
+      const oldest = this.#map.keys().next().value;
+      if (oldest !== undefined) {
+        this.#map.delete(oldest);
+      }
+    }
+  }
+  delete(key: string): void {
+    this.#map.delete(key);
+  }
+}
+
+interface NormalizedBody {
+  stream: Readable;
+  contentType: string;
+  contentLength?: number;
+}
+
+const normalizeBody = async (
+  body: Body,
+  contentTypeHint?: string
+): Promise<NormalizedBody> => {
+  if (typeof body === "string") {
+    const buf = Buffer.from(body, "utf-8");
+    return {
+      contentLength: buf.byteLength,
+      contentType: contentTypeHint ?? "text/plain; charset=utf-8",
+      stream: Readable.from(buf),
+    };
+  }
+  if (body instanceof Uint8Array) {
+    const buf = Buffer.from(body.buffer, body.byteOffset, body.byteLength);
+    return {
+      contentLength: buf.byteLength,
+      contentType: contentTypeHint ?? "application/octet-stream",
+      stream: Readable.from(buf),
+    };
+  }
+  if (body instanceof ArrayBuffer) {
+    const buf = Buffer.from(body);
+    return {
+      contentLength: buf.byteLength,
+      contentType: contentTypeHint ?? "application/octet-stream",
+      stream: Readable.from(buf),
+    };
+  }
+  if (ArrayBuffer.isView(body)) {
+    const view = body as ArrayBufferView;
+    const buf = Buffer.from(view.buffer, view.byteOffset, view.byteLength);
+    return {
+      contentLength: buf.byteLength,
+      contentType: contentTypeHint ?? "application/octet-stream",
+      stream: Readable.from(buf),
+    };
+  }
+  if (body instanceof Blob) {
+    const buf = Buffer.from(await body.arrayBuffer());
+    return {
+      contentLength: buf.byteLength,
+      contentType: contentTypeHint ?? body.type ?? "application/octet-stream",
+      stream: Readable.from(buf),
+    };
+  }
+  return {
+    contentType: contentTypeHint ?? "application/octet-stream",
+    stream: Readable.fromWeb(body as never),
+  };
+};
+
+const toUint8 = (data: unknown): Uint8Array => {
+  if (data instanceof Uint8Array) {
+    return data;
+  }
+  if (data instanceof ArrayBuffer) {
+    return new Uint8Array(data);
+  }
+  if (Buffer.isBuffer(data)) {
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  }
+  if (ArrayBuffer.isView(data)) {
+    const v = data as ArrayBufferView;
+    return new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+  }
+  if (typeof data === "string") {
+    return new TextEncoder().encode(data);
+  }
+  throw new FilesError(
+    "Provider",
+    "google-drive: unexpected response payload shape"
+  );
+};
+
+const fileToStoredMeta = (
+  file: drive_v3.Schema$File
+): {
+  size: number;
+  type: string;
+  etag?: string;
+  lastModified?: number;
+  metadata?: Record<string, string>;
+} => {
+  const props = (file.appProperties ?? {}) as Record<string, string>;
+  const userMeta: Record<string, string> = {};
+  for (const [k, v] of Object.entries(props)) {
+    if (k.startsWith(RESERVED_METADATA_PREFIX)) {
+      continue;
+    }
+    if (typeof v === "string") {
+      userMeta[k] = v;
+    }
+  }
+  const ct =
+    props[CONTENT_TYPE_PROP] ?? file.mimeType ?? "application/octet-stream";
+  return {
+    ...(file.md5Checksum && { etag: file.md5Checksum }),
+    ...(file.modifiedTime && {
+      lastModified: new Date(file.modifiedTime).getTime(),
+    }),
+    ...(Object.keys(userMeta).length > 0 && { metadata: userMeta }),
+    size: Number(file.size ?? 0),
+    type: ct,
+  };
+};
+
+type AuthHandle = JWT | GoogleAuth | OAuth2Client;
+
+const buildAuth = (opts: GoogleDriveAdapterOptions): AuthHandle | undefined => {
+  if (opts.credentials) {
+    return new JWT({
+      email: opts.credentials.client_email,
+      key: opts.credentials.private_key,
+      scopes: [DRIVE_SCOPE],
+      ...(opts.subject && { subject: opts.subject }),
+    });
+  }
+  if (opts.keyFilename) {
+    return new GoogleAuth({
+      keyFile: opts.keyFilename,
+      scopes: [DRIVE_SCOPE],
+      ...(opts.subject && { clientOptions: { subject: opts.subject } }),
+    });
+  }
+  if (opts.oauth) {
+    const o = new OAuth2Client({
+      clientId: opts.oauth.clientId,
+      clientSecret: opts.oauth.clientSecret,
+    });
+    o.setCredentials({ refresh_token: opts.oauth.refreshToken });
+    return o;
+  }
+  return undefined;
+};
+
+export const googleDrive = (
+  opts: GoogleDriveAdapterOptions
+): GoogleDriveAdapter => {
+  const haveExplicit = Boolean(
+    opts.credentials || opts.keyFilename || opts.oauth || opts.client
+  );
+  if (!haveExplicit) {
+    throw new FilesError(
+      "Provider",
+      "google-drive adapter: missing auth. Pass `credentials`, `keyFilename`, `oauth`, or `client`."
+    );
+  }
+
+  let driveClient: drive_v3.Drive;
+  let authForTokens: AuthHandle | undefined;
+  if (opts.client) {
+    driveClient = opts.client;
+    // No reliable public surface to recover the auth from a pre-built
+    // client, so signedUploadUrl() will refuse with a clear message.
+    authForTokens = undefined;
+  } else {
+    const built = buildAuth(opts);
+    if (!built) {
+      // Unreachable — haveExplicit guarantees one of the three shapes.
+      throw new FilesError("Provider", "google-drive: failed to build auth");
+    }
+    authForTokens = built;
+    driveClient = drive({ auth: built as never, version: "v3" });
+  }
+
+  const rootFolderId = opts.rootFolderId ?? "root";
+  const publicByDefault = opts.publicByDefault ?? false;
+  const fileIdCache = new LRU<string>(
+    opts.fileIdCacheSize ?? DEFAULT_CACHE_SIZE
+  );
+
+  const sharedDriveParams: {
+    supportsAllDrives: true;
+    includeItemsFromAllDrives: true;
+    corpora?: string;
+    driveId?: string;
+  } = {
+    includeItemsFromAllDrives: true,
+    supportsAllDrives: true,
+    ...(opts.driveId && { corpora: "drive", driveId: opts.driveId }),
+  };
+
+  const resolveFileId = async (key: string): Promise<string> => {
+    const cached = fileIdCache.get(key);
+    if (cached) {
+      return cached;
+    }
+    const q = `appProperties has { key='${KEY_PROP}' and value='${escapeQueryValue(key)}' } and trashed=false`;
+    let res: { data: drive_v3.Schema$FileList };
+    try {
+      res = (await driveClient.files.list({
+        ...sharedDriveParams,
+        fields: "files(id)",
+        pageSize: 2,
+        q,
+      })) as { data: drive_v3.Schema$FileList };
+    } catch (error) {
+      throw mapDriveError(error);
+    }
+    const files = res.data.files ?? [];
+    if (files.length === 0) {
+      throw new FilesError("NotFound", `Not found: ${key}`);
+    }
+    if (files.length > 1) {
+      throw new FilesError(
+        "Conflict",
+        `google-drive: multiple files share virtual key '${key}'. Resolve via raw client.`
+      );
+    }
+    const id = files[0]?.id;
+    if (!id) {
+      throw new FilesError(
+        "Provider",
+        `google-drive: list returned no fileId for ${key}`
+      );
+    }
+    fileIdCache.set(key, id);
+    return id;
+  };
+
+  const lazyDownload = (fileId: string) => async (): Promise<Uint8Array> => {
+    const res = await driveClient.files.get(
+      { ...sharedDriveParams, alt: "media", fileId },
+      { responseType: "arraybuffer" }
+    );
+    return toUint8(res.data as unknown);
+  };
+
+  return {
+    async copy(from, to) {
+      try {
+        const fromId = await resolveFileId(from);
+        const copied = await driveClient.files.copy({
+          ...sharedDriveParams,
+          fields: "id",
+          fileId: fromId,
+          requestBody: {
+            appProperties: { [KEY_PROP]: to },
+            name: basename(to),
+            parents: [rootFolderId],
+          },
+        });
+        const newId = copied.data.id;
+        if (newId) {
+          fileIdCache.set(to, newId);
+        }
+      } catch (error) {
+        throw mapDriveError(error);
+      }
+    },
+    async delete(key) {
+      let fileId: string;
+      try {
+        fileId = await resolveFileId(key);
+      } catch (error) {
+        // Idempotent: a missing file is not an error on delete.
+        if (error instanceof FilesError && error.code === "NotFound") {
+          return;
+        }
+        throw error;
+      }
+      try {
+        await driveClient.files.delete({ ...sharedDriveParams, fileId });
+        fileIdCache.delete(key);
+      } catch (error) {
+        const mapped = mapDriveError(error);
+        if (mapped.code === "NotFound") {
+          fileIdCache.delete(key);
+          return;
+        }
+        throw mapped;
+      }
+    },
+    async download(key, downloadOpts) {
+      try {
+        const fileId = await resolveFileId(key);
+        if (downloadOpts?.as === "stream") {
+          const [metaRes, mediaRes] = await Promise.all([
+            driveClient.files.get({
+              ...sharedDriveParams,
+              fields: FILE_FIELDS,
+              fileId,
+            }),
+            driveClient.files.get(
+              { ...sharedDriveParams, alt: "media", fileId },
+              { responseType: "stream" }
+            ),
+          ]);
+          const m = fileToStoredMeta(metaRes.data);
+          const node = mediaRes.data as unknown as Readable;
+          return createStoredFile(
+            { key, ...m },
+            {
+              factory: () =>
+                Readable.toWeb(node) as unknown as ReadableStream<Uint8Array>,
+              kind: "stream",
+            }
+          );
+        }
+        const [metaRes, mediaRes] = await Promise.all([
+          driveClient.files.get({
+            ...sharedDriveParams,
+            fields: FILE_FIELDS,
+            fileId,
+          }),
+          driveClient.files.get(
+            { ...sharedDriveParams, alt: "media", fileId },
+            { responseType: "arraybuffer" }
+          ),
+        ]);
+        const m = fileToStoredMeta(metaRes.data);
+        const bytes = toUint8(mediaRes.data as unknown);
+        return createStoredFile(
+          { key, ...m, size: bytes.byteLength },
+          { data: bytes, kind: "buffer" }
+        );
+      } catch (error) {
+        throw mapDriveError(error);
+      }
+    },
+    async head(key) {
+      try {
+        const fileId = await resolveFileId(key);
+        const res = await driveClient.files.get({
+          ...sharedDriveParams,
+          fields: FILE_FIELDS,
+          fileId,
+        });
+        const m = fileToStoredMeta(res.data);
+        return createStoredFile(
+          { key, ...m },
+          { factory: lazyDownload(fileId), kind: "lazy" }
+        );
+      } catch (error) {
+        throw mapDriveError(error);
+      }
+    },
+    async list(options): Promise<ListResult> {
+      try {
+        const q = `'${escapeQueryValue(rootFolderId)}' in parents and trashed=false`;
+        const res = (await driveClient.files.list({
+          ...sharedDriveParams,
+          fields: `nextPageToken, files(${FILE_FIELDS})`,
+          ...(options?.limit !== undefined && { pageSize: options.limit }),
+          ...(options?.cursor && { pageToken: options.cursor }),
+          q,
+        })) as { data: drive_v3.Schema$FileList };
+        const driveFiles = res.data.files ?? [];
+        const items: StoredFile[] = [];
+        for (const f of driveFiles) {
+          const props = (f.appProperties ?? {}) as Record<string, string>;
+          const fsdkKey = props[KEY_PROP];
+          if (!fsdkKey) {
+            continue;
+          }
+          if (options?.prefix && !fsdkKey.startsWith(options.prefix)) {
+            continue;
+          }
+          const m = fileToStoredMeta(f);
+          const fileId = f.id ?? "";
+          if (fileId) {
+            fileIdCache.set(fsdkKey, fileId);
+          }
+          items.push(
+            createStoredFile(
+              { key: fsdkKey, ...m },
+              {
+                factory: lazyDownload(fileId),
+                kind: "lazy",
+              }
+            )
+          );
+        }
+        const cursor = res.data.nextPageToken ?? undefined;
+        return { items, ...(cursor && { cursor }) };
+      } catch (error) {
+        throw mapDriveError(error);
+      }
+    },
+    name: "google-drive",
+    raw: driveClient,
+    rootFolderId,
+    async signedUploadUrl(key, signOpts): Promise<SignedUpload> {
+      if (!authForTokens) {
+        throw new FilesError(
+          "Provider",
+          "google-drive: signedUploadUrl() requires `credentials`, `keyFilename`, or `oauth` — not the pre-built `client` escape hatch."
+        );
+      }
+      const tokenResp = await (
+        authForTokens as {
+          getAccessToken: () => Promise<string | { token?: string | null }>;
+        }
+      ).getAccessToken();
+      const token =
+        typeof tokenResp === "string" ? tokenResp : tokenResp?.token;
+      if (!token) {
+        throw new FilesError(
+          "Provider",
+          "google-drive: failed to mint access token for resumable upload session"
+        );
+      }
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json; charset=UTF-8",
+      };
+      if (signOpts.contentType) {
+        headers["X-Upload-Content-Type"] = signOpts.contentType;
+      }
+      // `maxSize` is *advisory* — Drive does not enforce a server-side
+      // size policy on resumable sessions. We forward
+      // `X-Upload-Content-Length` so Drive can return early on quota
+      // overruns, but the cap is not binding. `minSize` is ignored.
+      if (signOpts.maxSize !== undefined) {
+        headers["X-Upload-Content-Length"] = String(signOpts.maxSize);
+      }
+      const initBody = {
+        appProperties: { [KEY_PROP]: key },
+        name: basename(key),
+        parents: [rootFolderId],
+      };
+      let res: Response;
+      try {
+        res = await fetch(RESUMABLE_INITIATE_URL, {
+          body: JSON.stringify(initBody),
+          headers,
+          method: "POST",
+        });
+      } catch (error) {
+        throw mapDriveError(error);
+      }
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw mapDriveError({
+          message:
+            `google-drive: resumable session initiation failed: ${res.status} ${res.statusText} ${text}`.trim(),
+          status: res.status,
+        });
+      }
+      const sessionUrl =
+        res.headers.get("location") ?? res.headers.get("Location");
+      if (!sessionUrl) {
+        throw new FilesError(
+          "Provider",
+          "google-drive: resumable session response missing Location header"
+        );
+      }
+      return {
+        method: "PUT",
+        url: sessionUrl,
+        ...(signOpts.contentType && {
+          headers: { "Content-Type": signOpts.contentType },
+        }),
+      };
+    },
+    async upload(key, body, options): Promise<UploadResult> {
+      assertNoReservedMetadata(options?.metadata);
+      try {
+        const normalized = await normalizeBody(body, options?.contentType);
+        const appProperties: Record<string, string> = {
+          [KEY_PROP]: key,
+          [CONTENT_TYPE_PROP]: normalized.contentType,
+          ...(options?.cacheControl && {
+            [CACHE_CONTROL_PROP]: options.cacheControl,
+          }),
+          ...options?.metadata,
+        };
+        const res = await driveClient.files.create({
+          ...sharedDriveParams,
+          fields: "id, size, mimeType, md5Checksum, modifiedTime",
+          media: {
+            body: normalized.stream,
+            mimeType: normalized.contentType,
+          },
+          requestBody: {
+            appProperties,
+            mimeType: normalized.contentType,
+            name: basename(key),
+            parents: [rootFolderId],
+          },
+        });
+        const { data } = res;
+        const fileId = data.id;
+        if (fileId) {
+          fileIdCache.set(key, fileId);
+        }
+        if (publicByDefault && fileId) {
+          await driveClient.permissions.create({
+            ...sharedDriveParams,
+            fileId,
+            requestBody: { role: "reader", type: "anyone" },
+          });
+        }
+        return {
+          contentType: normalized.contentType,
+          ...(data.md5Checksum && { etag: data.md5Checksum }),
+          key,
+          ...(data.modifiedTime && {
+            lastModified: new Date(data.modifiedTime).getTime(),
+          }),
+          size: normalized.contentLength ?? Number(data.size ?? 0),
+        };
+      } catch (error) {
+        throw mapDriveError(error);
+      }
+    },
+    async url(key, urlOpts) {
+      if (urlOpts?.responseContentDisposition) {
+        throw new FilesError(
+          "Provider",
+          "google-drive: `responseContentDisposition` is not supported. Drive's webContentLink has no Content-Disposition override."
+        );
+      }
+      if (!publicByDefault) {
+        throw new FilesError(
+          "Provider",
+          "google-drive: url() requires the adapter to be constructed with `publicByDefault: true`. Drive has no signed URL primitive — use download() for private files."
+        );
+      }
+      try {
+        const fileId = await resolveFileId(key);
+        return `https://drive.google.com/uc?export=download&id=${fileId}`;
+      } catch (error) {
+        throw mapDriveError(error);
+      }
+    },
+  };
+};

@@ -36,6 +36,7 @@ const COLUMNS = [
   { key: "hetzner", label: "Hetzner", parent: "Hetzner" },
   { key: "akamai", label: "Akamai", parent: "Akamai" },
   { key: "gcs", label: "GCS", parent: "GCS" },
+  { key: "google-drive", label: "Drive", parent: "Google Drive" },
   { key: "azure", label: "Azure", parent: "Azure" },
   { key: "supabase", label: "Supabase", parent: "Supabase" },
   { key: "ut-public", label: "public", parent: "UploadThing" },
@@ -52,6 +53,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       azure: ok,
       fs: ok,
       gcs: ok,
+      "google-drive": ok,
       hetzner: ok,
       minio: ok,
       "r2-binding": ok,
@@ -74,6 +76,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       azure: ok,
       fs: ok,
       gcs: ok,
+      "google-drive": ok,
       hetzner: ok,
       minio: ok,
       "r2-binding": ok,
@@ -96,6 +99,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       azure: ok,
       fs: ok,
       gcs: ok,
+      "google-drive": ok,
       hetzner: ok,
       minio: ok,
       "r2-binding": ok,
@@ -118,6 +122,9 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       azure: ok,
       fs: ok,
       gcs: ok,
+      "google-drive": warn(
+        "Drive has no native key field. The adapter scopes by parent folder and filters client-side to files carrying its `fsdkKey` appProperty — files written into the same folder out-of-band are excluded. `prefix` is filtered page-local and can under-return when the prefix isn't satisfied within a single page."
+      ),
       hetzner: ok,
       minio: ok,
       "r2-binding": ok,
@@ -146,6 +153,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       azure: ok,
       fs: ok,
       gcs: ok,
+      "google-drive": ok,
       hetzner: ok,
       minio: ok,
       "r2-binding": ok,
@@ -174,6 +182,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       ),
       fs: ok,
       gcs: ok,
+      "google-drive": ok,
       hetzner: ok,
       minio: ok,
       "r2-binding": warn(
@@ -208,6 +217,9 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
         "Returns a `file://` URL by default — fine for CLIs and tests, not browsers. With `urlBaseUrl` set, returns `<urlBaseUrl>/<key>` so a dev server (Next.js `/public` mount, `serve-static`, etc.) can deliver the body. `responseContentDisposition` requires `urlBaseUrl` — `file://` has no signature mechanism in which to bind the override."
       ),
       gcs: ok,
+      "google-drive": warn(
+        "Throws by default — Drive has no signed URL primitive. With `publicByDefault: true` at construction, `upload()` grants `anyone, reader` and `url()` returns the permanent Drive download URL (`expiresIn` ignored). `responseContentDisposition` always throws — Drive's download URL has no Content-Disposition override."
+      ),
       hetzner: ok,
       minio: ok,
       "r2-binding": no(
@@ -246,6 +258,9 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
         "Throws without `urlBaseUrl` — the fs adapter has no built-in upload server, so there's nothing to sign against. With `urlBaseUrl` set, returns a PUT URL with `?expires=`, `?content-type=`, and `?max-size=` query params for a dev upload-handler to validate. The fs adapter does not enforce the params itself."
       ),
       gcs: ok,
+      "google-drive": warn(
+        "Initiates a Drive resumable session via `POST /upload/drive/v3/files?uploadType=resumable` and returns the session URL as a one-shot PUT. `maxSize` is forwarded as `X-Upload-Content-Length` but Drive does not enforce a server-side size cap — it's advisory. `minSize` is ignored. Throws when the adapter was constructed via the pre-built `client` escape hatch (no auth handle to mint access tokens)."
+      ),
       hetzner: ok,
       minio: ok,
       "r2-binding": no(
