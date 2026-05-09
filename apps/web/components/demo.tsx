@@ -26,7 +26,7 @@ const files = new Files({
 await files.upload("hello.txt", "world");
 const url = await files.url("hello.txt");`,
     id: "r2",
-    label: "Cloudflare R2",
+    label: "R2",
     lang: "tsx",
   },
   {
@@ -59,6 +59,22 @@ const url = await files.url("hello.txt");`,
   },
   {
     code: `import { Files } from "files-sdk";
+import { storj } from "files-sdk/storj";
+
+// Defaults to https://gateway.storjshare.io (Gateway MT).
+// STORJ_ACCESS_KEY_ID / STORJ_SECRET_ACCESS_KEY read from env.
+const files = new Files({
+  adapter: storj({ bucket: "uploads" }),
+});
+
+await files.upload("hello.txt", "world");
+const url = await files.url("hello.txt");`,
+    id: "storj",
+    label: "Storj",
+    lang: "tsx",
+  },
+  {
+    code: `import { Files } from "files-sdk";
 import { gcs } from "files-sdk/gcs";
 
 const files = new Files({
@@ -82,7 +98,7 @@ const files = new Files({
 await files.upload("hello.txt", "world");
 const url = await files.url("hello.txt");`,
     id: "azure",
-    label: "Azure Blob",
+    label: "Azure",
     lang: "tsx",
   },
   {

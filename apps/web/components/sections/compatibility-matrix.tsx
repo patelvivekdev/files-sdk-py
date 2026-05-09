@@ -32,6 +32,7 @@ const COLUMNS = [
   { key: "vb-private", label: "private", parent: "Vercel Blob" },
   { key: "minio", label: "MinIO", parent: "MinIO" },
   { key: "spaces", label: "Spaces", parent: "DigitalOcean" },
+  { key: "storj", label: "Storj", parent: "Storj" },
   { key: "gcs", label: "GCS", parent: "GCS" },
   { key: "azure", label: "Azure", parent: "Azure" },
   { key: "supabase", label: "Supabase", parent: "Supabase" },
@@ -54,6 +55,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       "r2-hybrid": ok,
       s3: ok,
       spaces: ok,
+      storj: ok,
       supabase: ok,
       "ut-private": ok,
       "ut-public": ok,
@@ -73,6 +75,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       "r2-hybrid": ok,
       s3: ok,
       spaces: ok,
+      storj: ok,
       supabase: ok,
       "ut-private": ok,
       "ut-public": ok,
@@ -92,6 +95,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       "r2-hybrid": ok,
       s3: ok,
       spaces: ok,
+      storj: ok,
       supabase: ok,
       "ut-private": ok,
       "ut-public": ok,
@@ -111,6 +115,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       "r2-hybrid": ok,
       s3: ok,
       spaces: ok,
+      storj: ok,
       supabase: warn(
         "Supabase's stable list API is offset/limit, not cursor-based. The adapter encodes the next offset as a numeric cursor string so the unified API works unchanged — the cursor is opaque to callers but is just `String(offset + page)` underneath."
       ),
@@ -136,6 +141,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       "r2-hybrid": ok,
       s3: ok,
       spaces: ok,
+      storj: ok,
       supabase: ok,
       "ut-private": warn(
         "UploadThing has no metadata endpoint, so `head()` issues a HEAD request against the resolved file URL (signed for private, CDN for public) and parses size/content-type/etag/last-modified from the response headers. User `metadata` isn't supported."
@@ -165,6 +171,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       ),
       s3: ok,
       spaces: ok,
+      storj: ok,
       supabase: ok,
       "ut-private": warn(
         "Read-then-write — UploadThing has no server-side copy primitive, so the source is downloaded and re-uploaded. Costs an egress + an ingest; not atomic."
@@ -194,6 +201,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       "r2-hybrid": ok,
       s3: ok,
       spaces: ok,
+      storj: ok,
       supabase: warn(
         "Default mints a signed read URL via `createSignedUrl` (1-hour default). With `public: true`, returns the permanent unsigned `getPublicUrl` result. With `publicBaseUrl`, returns `<publicBaseUrl>/<key>`. `responseContentDisposition` is honored — it threads through Supabase's `download` option in the signed path."
       ),
@@ -229,6 +237,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       "r2-hybrid": ok,
       s3: ok,
       spaces: ok,
+      storj: ok,
       supabase: warn(
         "PUT URL only — Supabase has no POST policy equivalent. `maxSize` throws (Supabase signed upload URLs have no `content-length-range` policy; set the bucket-level size limit in the dashboard instead). `expiresIn` is silently ignored — Supabase fixes the TTL at 2 hours server-side. The returned headers include `x-upsert: true`."
       ),

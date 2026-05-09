@@ -1,7 +1,7 @@
 {
   "name": "files-sdk",
   "version": "1.0.0",
-  "description": "Unified storage SDK for object/blob backends (S3, R2, Vercel Blob, MinIO, DigitalOcean Spaces, GCS, Azure Blob Storage, Supabase Storage).",
+  "description": "Unified storage SDK for object/blob backends (S3, R2, Vercel Blob, MinIO, DigitalOcean Spaces, Storj, GCS, Azure Blob Storage, Supabase Storage).",
   "homepage": "https://github.com/haydenbleasel/files-sdk#readme",
   "bugs": {
     "url": "https://github.com/haydenbleasel/files-sdk/issues"
@@ -45,6 +45,10 @@
     "./digitalocean-spaces": {
       "types": "./dist/digitalocean-spaces/index.d.ts",
       "import": "./dist/digitalocean-spaces/index.js"
+    },
+    "./storj": {
+      "types": "./dist/storj/index.d.ts",
+      "import": "./dist/storj/index.js"
     },
     "./gcs": {
       "types": "./dist/gcs/index.d.ts",
