@@ -48,6 +48,18 @@ export const metadata: Metadata = {
   },
 };
 
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareSourceCode",
+  author: { "@type": "Person", name: "Hayden Bleasel" },
+  codeRepository: "https://github.com/haydenbleasel/files-sdk",
+  description,
+  license: "https://opensource.org/licenses/MIT",
+  name: "Files SDK",
+  programmingLanguage: "TypeScript",
+  url: baseUrl,
+};
+
 interface RootLayoutProps {
   children: ReactNode;
 }
@@ -62,6 +74,11 @@ const RootLayout = ({ children }: RootLayoutProps) => (
     )}
   >
     <body className="flex min-h-full flex-col">
+      <script
+        type="application/ld+json"
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: JSON-LD is the standard pattern for structured data
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       <TooltipProvider>
         <MotionProvider>{children}</MotionProvider>
       </TooltipProvider>
