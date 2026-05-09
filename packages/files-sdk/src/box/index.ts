@@ -208,7 +208,17 @@ export const mapBoxError = (err: unknown): FilesError => {
   );
 };
 
-const trimSlashes = (s: string): string => s.replaceAll(/^\/+|\/+$/gu, "");
+const trimSlashes = (s: string): string => {
+  let start = 0;
+  let end = s.length;
+  while (start < end && s[start] === "/") {
+    start += 1;
+  }
+  while (end > start && s[end - 1] === "/") {
+    end -= 1;
+  }
+  return start === 0 && end === s.length ? s : s.slice(start, end);
+};
 
 const splitKey = (
   key: string

@@ -190,12 +190,25 @@ export const mapGraphError = (err: unknown): FilesError => {
 };
 
 const basename = (key: string): string => {
-  const trimmed = key.replace(/\/+$/u, "");
-  const idx = trimmed.lastIndexOf("/");
-  return idx === -1 ? trimmed : trimmed.slice(idx + 1);
+  let end = key.length;
+  while (end > 0 && key[end - 1] === "/") {
+    end -= 1;
+  }
+  const idx = key.lastIndexOf("/", end - 1);
+  return key.slice(idx + 1, end);
 };
 
-const trimSlashes = (s: string): string => s.replaceAll(/^\/+|\/+$/gu, "");
+const trimSlashes = (s: string): string => {
+  let start = 0;
+  let end = s.length;
+  while (start < end && s[start] === "/") {
+    start += 1;
+  }
+  while (end > start && s[end - 1] === "/") {
+    end -= 1;
+  }
+  return start === 0 && end === s.length ? s : s.slice(start, end);
+};
 
 const encodePathSegments = (path: string): string =>
   trimSlashes(path)

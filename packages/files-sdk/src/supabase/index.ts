@@ -238,7 +238,11 @@ const buildClient = (opts: SupabaseAdapterOptions): StorageClient => {
       "supabase adapter: missing credentials. Pass `client` (an existing SupabaseClient or StorageClient), or `url` + `key`. Env fallbacks: SUPABASE_URL / NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY / SUPABASE_KEY / NEXT_PUBLIC_SUPABASE_ANON_KEY."
     );
   }
-  const trimmed = url.replace(/\/+$/u, "");
+  let end = url.length;
+  while (end > 0 && url[end - 1] === "/") {
+    end -= 1;
+  }
+  const trimmed = url.slice(0, end);
   const storageUrl = trimmed.endsWith("/storage/v1")
     ? trimmed
     : `${trimmed}/storage/v1`;
