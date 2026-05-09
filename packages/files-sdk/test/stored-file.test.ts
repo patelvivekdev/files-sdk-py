@@ -153,6 +153,47 @@ describe("createStoredFile", () => {
     expect(new TextDecoder().decode(out)).toBe("abcde");
   });
 
+  test("lazy kind: concurrent reads share the in-flight cache promise", async () => {
+    let calls = 0;
+    const deferred = Promise.withResolvers<Uint8Array>();
+    const sf = createStoredFile(
+      { key: "k", size: 3, type: "text/plain" },
+      {
+        factory: () => {
+          calls += 1;
+          return deferred.promise;
+        },
+        kind: "lazy",
+      }
+    );
+    // Kick off two reads before the factory resolves — the second should
+    // reuse the in-flight `cachePromise` rather than re-invoke the factory.
+    const a = sf.text();
+    const b = sf.text();
+    deferred.resolve(new TextEncoder().encode("abc"));
+    expect(await a).toBe("abc");
+    expect(await b).toBe("abc");
+    expect(calls).toBe(1);
+  });
+
+  test("lazy kind: stream() during in-flight load reuses the cache promise", async () => {
+    const deferred = Promise.withResolvers<Uint8Array>();
+    const sf = createStoredFile(
+      { key: "k", size: 3, type: "text/plain" },
+      {
+        factory: () => deferred.promise,
+        kind: "lazy",
+      }
+    );
+    const textPromise = sf.text();
+    // stream() is called while the lazy load is mid-flight — should hit
+    // the `cachePromise` branch on `stream()` rather than re-load.
+    const streamed = collectStream(sf.stream());
+    deferred.resolve(new TextEncoder().encode("abc"));
+    expect(await textPromise).toBe("abc");
+    expect(new TextDecoder().decode(await streamed)).toBe("abc");
+  });
+
   test("metadata fields are surfaced on the StoredFile", () => {
     const sf = createStoredFile(
       {

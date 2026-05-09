@@ -52,11 +52,20 @@ const uploadStreamMock = mock(
     return uploadStreamResponse();
   }
 );
-const downloadMock = mock(() =>
-  Promise.resolve({
-    ...baseProps(),
-    readableStreamBody: Readable.from([Buffer.from("hello")]),
-  })
+interface DownloadResult {
+  contentLength?: number;
+  contentType?: string;
+  etag?: string;
+  lastModified?: Date;
+  metadata?: Record<string, string>;
+  readableStreamBody?: Readable;
+}
+const downloadMock = mock(
+  (): Promise<DownloadResult> =>
+    Promise.resolve({
+      ...baseProps(),
+      readableStreamBody: Readable.from([Buffer.from("hello")]),
+    })
 );
 const downloadToBufferMock = mock(() => Promise.resolve(Buffer.from("hello")));
 const getPropertiesMock = mock(() => Promise.resolve(baseProps()));
@@ -495,6 +504,49 @@ describe("azure adapter", () => {
       }
       expect(total).toBe(5);
     });
+
+    test("as: 'stream' yields an empty stream when SDK omits readableStreamBody", async () => {
+      // The Azure SDK occasionally returns the metadata envelope without a
+      // readable body (e.g. zero-byte blobs). The adapter's stream factory
+      // should fall through to an immediately-closed ReadableStream rather
+      // than crashing on `Readable.toWeb(undefined)`.
+      downloadMock.mockImplementationOnce(() =>
+        Promise.resolve({ ...baseProps(), readableStreamBody: undefined })
+      );
+      const files = new Files({
+        adapter: azure({
+          accountKey: "k",
+          accountName: ACCOUNT,
+          container: CONTAINER,
+        }),
+      });
+      const got = await files.download("a.txt", { as: "stream" });
+      const reader = got.stream().getReader();
+      const { done, value } = await reader.read();
+      expect(done).toBe(true);
+      expect(value).toBeUndefined();
+    });
+
+    test("buffered: download tolerates a response missing etag and metadata", async () => {
+      // stripEtag's `if (!etag) return undefined` branch runs when the SDK
+      // doesn't echo an ETag back (e.g. anonymous-read responses).
+      downloadMock.mockImplementationOnce(() =>
+        Promise.resolve({
+          contentLength: 5,
+          contentType: "text/plain",
+          lastModified: new Date(STABLE_LAST_MODIFIED),
+          readableStreamBody: Readable.from([Buffer.from("hello")]),
+        })
+      );
+      const got = await azure({
+        accountKey: "k",
+        accountName: ACCOUNT,
+        container: CONTAINER,
+      }).download("a.txt");
+      expect(await got.text()).toBe("hello");
+      expect(got.etag).toBeUndefined();
+      expect(got.metadata).toBeUndefined();
+    });
   });
 
   describe("head", () => {
@@ -575,6 +627,18 @@ describe("azure adapter", () => {
       expect(source).toContain(`${BLOB_BASE}/a.txt?`);
       expect(source).toContain("sig=");
       expect(generateBlobSASQueryParametersMock).toHaveBeenCalled();
+    });
+
+    test("anonymous mode (no key, no SAS) uses the bare blob URL as the copy source", async () => {
+      const adapter = azure({ accountName: ACCOUNT, container: CONTAINER });
+      await adapter.copy("a.txt", "b.txt");
+      const [copyCall] = syncCopyFromURLMock.mock.calls;
+      if (!copyCall) {
+        throw new Error("expected syncCopyFromURL to have been called");
+      }
+      const [source] = copyCall;
+      expect(source).toBe(`${BLOB_BASE}/a.txt`);
+      expect(generateBlobSASQueryParametersMock).not.toHaveBeenCalled();
     });
 
     test("sas-only mode appends the existing SAS to the source URL", async () => {

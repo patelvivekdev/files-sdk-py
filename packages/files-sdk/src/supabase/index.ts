@@ -139,7 +139,7 @@ const extractStatus = (e: SupabaseErrorLike): number | undefined => {
   return undefined;
 };
 
-export const mapSupabaseError = (err: unknown): FilesError => {
+export const mapSupabaseError = (err?: unknown): FilesError => {
   if (err instanceof FilesError) {
     return err;
   }

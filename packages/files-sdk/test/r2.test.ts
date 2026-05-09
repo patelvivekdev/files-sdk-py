@@ -681,6 +681,24 @@ describe("r2 adapter — Workers binding path", () => {
     expect(await item.text()).toBe("first");
   });
 
+  test("binding copy maps put errors via mapR2Error", async () => {
+    const { bucket } = fakeBinding();
+    const files = new Files({ adapter: r2({ binding: bucket as never }) });
+    await files.upload("from.txt", "x");
+    const originalPut = bucket.put;
+    bucket.put = (() => Promise.reject(new Error("put failed"))) as never;
+    try {
+      await files.copy("from.txt", "to.txt");
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(FilesError);
+      expect((error as FilesError).code).toBe("Provider");
+      expect((error as FilesError).message).toBe("put failed");
+    } finally {
+      bucket.put = originalPut;
+    }
+  });
+
   test("binding upload error: existing FilesError passes through unchanged", async () => {
     const { bucket } = fakeBinding();
     const original = new FilesError("Conflict", "already exists");

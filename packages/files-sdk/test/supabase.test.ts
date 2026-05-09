@@ -89,7 +89,18 @@ const downloadStreamMock = mock(() =>
     )
   )
 );
-const infoMock = mock((_path: string) => Promise.resolve(ok(baseInfo())));
+interface SupaInfo {
+  cacheControl?: string;
+  contentType?: string;
+  etag?: string;
+  lastModified?: string | number | Date;
+  metadata?: Record<string, unknown>;
+  size?: number;
+}
+const infoMock = mock(
+  (_path: string): Promise<SupaResult<SupaInfo>> =>
+    Promise.resolve(ok(baseInfo()))
+);
 const removeMock = mock((_paths: string[]) => Promise.resolve(ok([])));
 const copyMock = mock((_from: string, _to: string) =>
   Promise.resolve(ok({ path: "to" }))
@@ -685,6 +696,137 @@ describe("supabase adapter", () => {
         Object.assign(new Error("oops"), { status: 500 })
       );
       expect(err.code).toBe("Provider");
+    });
+
+    test("falls back to numeric statusCode when status is absent", () => {
+      // Some transport errors arrive with only `statusCode` (a number)
+      // populated — extractStatus should reach for that branch.
+      const err = mapSupabaseError(
+        Object.assign(new Error("teapot"), { statusCode: 404 })
+      );
+      expect(err.code).toBe("NotFound");
+    });
+
+    test("plain object errors fall through to the default message", () => {
+      // Not an Error and no message — exercises the default-message branch
+      // on `mapSupabaseError`.
+      const err = mapSupabaseError({ status: 500 });
+      expect(err.code).toBe("Provider");
+      expect(err.message).toBe("Supabase error");
+    });
+
+    test("undefined errors fall through to the default message", () => {
+      const err = mapSupabaseError();
+      expect(err.code).toBe("Provider");
+      expect(err.message).toBe("Supabase error");
+    });
+  });
+
+  describe("metadata helpers", () => {
+    test("stream download tolerates info() returning an error", async () => {
+      // safeInfo's `if (error || !data) return undefined` branch — the
+      // stream path falls back to size 0 + octet-stream when info errors.
+      infoMock.mockImplementationOnce(() =>
+        Promise.resolve(fail(500, "ServerError", "boom"))
+      );
+      const got = await makeAdapter().download("a.txt", { as: "stream" });
+      expect(got.size).toBe(0);
+      expect(got.type).toBe("application/octet-stream");
+    });
+
+    test("stream download tolerates info() throwing", async () => {
+      // safeInfo's catch swallows thrown errors (older Supabase deployments
+      // don't expose info()). The stream path should still resolve.
+      infoMock.mockImplementationOnce(() =>
+        Promise.reject(new Error("info not supported"))
+      );
+      const got = await makeAdapter().download("a.txt", { as: "stream" });
+      expect(got.size).toBe(0);
+    });
+
+    test("buffer download with empty Blob.type recovers via info()", async () => {
+      // Drives toMs(Date) and stringifyMetadata branches via metadata that
+      // arrives as a Date and a non-string value.
+      downloadResolveMock.mockImplementationOnce(() =>
+        Promise.resolve(ok(new Blob(["hi"], { type: "" })))
+      );
+      infoMock.mockImplementationOnce(() =>
+        Promise.resolve(
+          ok({
+            contentType: "image/png",
+            etag: '"abc"',
+            lastModified: new Date(STABLE_LAST_MODIFIED),
+            metadata: { count: 5, missing: null, name: "thing" },
+            size: 2,
+          })
+        )
+      );
+      const got = await makeAdapter().download("a.txt");
+      expect(got.type).toBe("image/png");
+      expect(got.lastModified).toBe(STABLE_LAST_MODIFIED_MS);
+      expect(got.metadata).toEqual({ count: "5", name: "thing" });
+    });
+
+    test("buffer download recovers when info() returns numeric lastModified", async () => {
+      // toMs `typeof value === "number"` branch.
+      downloadResolveMock.mockImplementationOnce(() =>
+        Promise.resolve(ok(new Blob(["hi"], { type: "" })))
+      );
+      infoMock.mockImplementationOnce(() =>
+        Promise.resolve(
+          ok({
+            contentType: "image/png",
+            lastModified: 1_700_000_000_000,
+            size: 2,
+          })
+        )
+      );
+      const got = await makeAdapter().download("a.txt");
+      expect(got.lastModified).toBe(1_700_000_000_000);
+    });
+
+    test("buffer download with empty Blob.type and absent info() falls back to octet-stream", async () => {
+      downloadResolveMock.mockImplementationOnce(() =>
+        Promise.resolve(ok(new Blob(["hi"], { type: "" })))
+      );
+      infoMock.mockImplementationOnce(() =>
+        Promise.resolve(fail(500, "ServerError", "boom"))
+      );
+      const got = await makeAdapter().download("a.txt");
+      expect(got.type).toBe("application/octet-stream");
+      expect(got.lastModified).toBeUndefined();
+    });
+
+    test("metadata containing only nullish values is dropped from the StoredFile", async () => {
+      downloadResolveMock.mockImplementationOnce(() =>
+        Promise.resolve(ok(new Blob(["hi"], { type: "" })))
+      );
+      infoMock.mockImplementationOnce(() =>
+        Promise.resolve(
+          ok({
+            contentType: "image/png",
+            metadata: { gone: null, missing: undefined },
+            size: 2,
+          })
+        )
+      );
+      const got = await makeAdapter().download("a.txt");
+      expect(got.metadata).toBeUndefined();
+    });
+
+    test("head's lazy body propagates download errors as FilesError", async () => {
+      // Drives `downloadAsBytes`'s `throw mapSupabaseError(error)` path.
+      const info = await makeAdapter().head("a.txt");
+      downloadResolveMock.mockImplementationOnce(() =>
+        Promise.resolve(fail(404, "NotFound", "vanished"))
+      );
+      try {
+        await info.text();
+        throw new Error("should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(FilesError);
+        expect((error as FilesError).code).toBe("NotFound");
+      }
     });
 
     test("an existing FilesError passes through unchanged", () => {

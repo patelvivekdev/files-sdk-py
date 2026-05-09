@@ -277,6 +277,18 @@ describe("fs adapter", () => {
       ).rejects.toMatchObject({ code: "ENOENT" });
     });
 
+    test("surfaces non-ENOENT rm errors as FilesError", async () => {
+      const root = await makeRoot();
+      const files = new Files({ adapter: fsAdapter({ root }) });
+      // Place a directory at the body path. `fsp.rm` without `recursive`
+      // refuses to remove a directory — the adapter should surface the
+      // ERR_FS_EISDIR as a Provider error rather than swallow it.
+      await fsp.mkdir(path.join(root, "thedir"));
+      await expect(files.delete("thedir")).rejects.toMatchObject({
+        code: "Provider",
+      });
+    });
+
     test("is idempotent on missing keys", async () => {
       const root = await makeRoot();
       const files = new Files({ adapter: fsAdapter({ root }) });
@@ -550,6 +562,95 @@ describe("fs adapter", () => {
     test("classifies unknown codes as Provider", () => {
       const err = Object.assign(new Error("???"), { code: "EWHATEVER" });
       expect(mapFsError(err).code).toBe("Provider");
+    });
+
+    test("classifies err.code that isn't a string as Provider", () => {
+      // numeric `code` (libuv sometimes attaches one) shouldn't match the
+      // string-based classifier — falls through to Provider.
+      const err = Object.assign(new Error("weird"), { code: 42 });
+      expect(mapFsError(err).code).toBe("Provider");
+    });
+
+    test("classifies an error with no code field as Provider", () => {
+      expect(mapFsError(new Error("plain")).code).toBe("Provider");
+    });
+
+    test("non-Error values fall back to the default message", () => {
+      const mapped = mapFsError("string thrown");
+      expect(mapped.code).toBe("Provider");
+      expect(mapped.message).toBe("fs error");
+    });
+  });
+
+  describe("sidecar resilience", () => {
+    test("download falls through to defaults when sidecar JSON is missing fields", async () => {
+      const root = await makeRoot();
+      const files = new Files({ adapter: fsAdapter({ root }) });
+      await fsp.writeFile(path.join(root, "x.bin"), "data");
+      // Sidecar parses but is missing the required keys — adapter should
+      // treat it as if there were no sidecar at all.
+      await fsp.writeFile(
+        path.join(root, "x.bin.meta.json"),
+        JSON.stringify({ unrelated: true })
+      );
+      const got = await files.download("x.bin");
+      expect(await got.text()).toBe("data");
+      expect(got.type).toBe("application/octet-stream");
+      expect(got.etag).toBeUndefined();
+    });
+
+    test("download surfaces sidecar JSON parse errors as Provider", async () => {
+      const root = await makeRoot();
+      const files = new Files({ adapter: fsAdapter({ root }) });
+      await fsp.writeFile(path.join(root, "x.bin"), "data");
+      await fsp.writeFile(path.join(root, "x.bin.meta.json"), "{not json");
+      await expect(files.download("x.bin")).rejects.toMatchObject({
+        code: "Provider",
+      });
+    });
+
+    test("head's lazy body errors when underlying body file is removed", async () => {
+      const root = await makeRoot();
+      const files = new Files({ adapter: fsAdapter({ root }) });
+      await files.upload("h.txt", "lazy");
+      const info = await files.head("h.txt");
+      // Yank the body file out from under the lazy factory — text() should
+      // reject through mapFsError, not crash with a raw ENOENT.
+      await fsp.rm(path.join(root, "h.txt"));
+      await expect(info.text()).rejects.toMatchObject({ code: "NotFound" });
+    });
+  });
+
+  describe("upload failure cleanup", () => {
+    test("buffer upload surfaces and cleans up when rename fails", async () => {
+      const root = await makeRoot();
+      const files = new Files({ adapter: fsAdapter({ root }) });
+      // Pre-create a directory at the destination — rename(file → dir) fails
+      // with EISDIR/EPERM, and the temp file should still get cleaned up.
+      await fsp.mkdir(path.join(root, "blocker"));
+      await expect(files.upload("blocker", "x")).rejects.toBeInstanceOf(
+        FilesError
+      );
+      const remaining = await fsp.readdir(root);
+      // No `.tmp` leftovers — bestEffortRm should have removed them.
+      expect(remaining.some((n) => n.includes(".tmp"))).toBe(false);
+    });
+
+    test("stream upload surfaces and cleans up when rename fails", async () => {
+      const root = await makeRoot();
+      const files = new Files({ adapter: fsAdapter({ root }) });
+      await fsp.mkdir(path.join(root, "blocker"));
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(new TextEncoder().encode("payload"));
+          c.close();
+        },
+      });
+      await expect(files.upload("blocker", stream)).rejects.toBeInstanceOf(
+        FilesError
+      );
+      const remaining = await fsp.readdir(root);
+      expect(remaining.some((n) => n.includes(".tmp"))).toBe(false);
     });
   });
 });
