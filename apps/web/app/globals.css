@@ -130,11 +130,11 @@
     @apply flex flex-col gap-12;
   }
 
-  main > section {
+  main section {
     @apply flex flex-col gap-3;
   }
 
-  main > section > section {
+  main section section {
     @apply flex flex-col gap-3 pt-6;
   }
 

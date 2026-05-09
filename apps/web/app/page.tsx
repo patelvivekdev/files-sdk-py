@@ -1,4 +1,5 @@
 import { Demo } from "@/components/demo";
+import { FadeIn } from "@/components/fade-in";
 import { MobileTableOfContents } from "@/components/mobile-table-of-contents";
 import { Adapters } from "@/components/sections/adapters";
 import { ApiReference } from "@/components/sections/api-reference";
@@ -22,18 +23,42 @@ export default function Home() {
         <main className="mx-auto w-full max-w-2xl border-x border-dotted px-4 sm:px-8 pt-8 pb-8">
           <Header />
           <Hero />
-          <MobileTableOfContents />
-          <Demo />
-          <Why />
-          <Installation />
-          <QuickStart />
-          <Adapters />
-          <ApiReference />
-          <StoredFileType />
-          <Errors />
-          <EscapeHatch />
-          <CompatibilityMatrix />
-          <Footer />
+          <FadeIn className="lg:hidden">
+            <MobileTableOfContents />
+          </FadeIn>
+          <FadeIn>
+            <Demo />
+          </FadeIn>
+          <FadeIn>
+            <Why />
+          </FadeIn>
+          <FadeIn>
+            <Installation />
+          </FadeIn>
+          <FadeIn>
+            <QuickStart />
+          </FadeIn>
+          <FadeIn>
+            <Adapters />
+          </FadeIn>
+          <FadeIn>
+            <ApiReference />
+          </FadeIn>
+          <FadeIn>
+            <StoredFileType />
+          </FadeIn>
+          <FadeIn>
+            <Errors />
+          </FadeIn>
+          <FadeIn>
+            <EscapeHatch />
+          </FadeIn>
+          <FadeIn>
+            <CompatibilityMatrix />
+          </FadeIn>
+          <FadeIn>
+            <Footer />
+          </FadeIn>
         </main>
         <aside className="hidden lg:block pr-8 pt-44">
           <div className="sticky top-8">

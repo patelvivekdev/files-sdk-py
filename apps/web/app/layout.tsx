@@ -4,6 +4,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import type { ReactNode } from "react";
 
+import { MotionProvider } from "@/components/motion-provider";
 import { cn } from "@/lib/utils";
 
 const geistSans = Geist({
@@ -35,7 +36,9 @@ const RootLayout = ({ children }: RootLayoutProps) => (
       geistMono.variable
     )}
   >
-    <body className="flex min-h-full flex-col">{children}</body>
+    <body className="flex min-h-full flex-col">
+      <MotionProvider>{children}</MotionProvider>
+    </body>
   </html>
 );
 
