@@ -1,4 +1,4 @@
-# files-sdk
+# Files SDK
 
 A unified storage SDK for object and blob backends. One small, honest API. Web-standards I/O. An escape hatch when you need the native client.
 
