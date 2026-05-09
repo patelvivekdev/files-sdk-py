@@ -18,10 +18,34 @@ const geistMono = Geist_Mono({
   variable: "--font-mono",
 });
 
+const protocol = process.env.NODE_ENV === "production" ? "https" : "http";
+const origin = process.env.VERCEL_PROJECT_PRODUCTION_URL ?? "localhost:3000";
+const baseUrl = `${protocol}://${origin}`;
+
+const title = "Files SDK — One API for S3, R2, GCS, Azure & blob storage";
+const description =
+  "A unified storage SDK for object and blob backends. One small, honest API. Web-standards I/O. An escape hatch when you need the native client.";
+
 export const metadata: Metadata = {
-  description:
-    "A unified storage SDK for object and blob backends. One small, honest API. Web-standards I/O. An escape hatch when you need the native client.",
-  title: "Files SDK",
+  alternates: {
+    canonical: "/",
+  },
+  description,
+  metadataBase: new URL(baseUrl),
+  openGraph: {
+    description,
+    locale: "en_US",
+    siteName: "Files SDK",
+    title,
+    type: "website",
+    url: "/",
+  },
+  title,
+  twitter: {
+    card: "summary_large_image",
+    description,
+    title,
+  },
 };
 
 interface RootLayoutProps {
