@@ -31,6 +31,7 @@ const COLUMNS = [
   { key: "minio", label: "MinIO", parent: "MinIO" },
   { key: "gcs", label: "GCS", parent: "GCS" },
   { key: "azure", label: "Azure", parent: "Azure" },
+  { key: "supabase", label: "Supabase", parent: "Supabase" },
 ] as const;
 
 type ColumnKey = (typeof COLUMNS)[number]["key"];
@@ -45,6 +46,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       "r2-http": ok,
       "r2-hybrid": ok,
       s3: ok,
+      supabase: ok,
       "vb-private": ok,
       "vb-public": ok,
     },
@@ -59,6 +61,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       "r2-http": ok,
       "r2-hybrid": ok,
       s3: ok,
+      supabase: ok,
       "vb-private": ok,
       "vb-public": ok,
     },
@@ -73,6 +76,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       "r2-http": ok,
       "r2-hybrid": ok,
       s3: ok,
+      supabase: ok,
       "vb-private": ok,
       "vb-public": ok,
     },
@@ -87,6 +91,9 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       "r2-http": ok,
       "r2-hybrid": ok,
       s3: ok,
+      supabase: warn(
+        "Supabase's stable list API is offset/limit, not cursor-based. The adapter encodes the next offset as a numeric cursor string so the unified API works unchanged — the cursor is opaque to callers but is just `String(offset + page)` underneath."
+      ),
       "vb-private": ok,
       "vb-public": ok,
     },
@@ -101,6 +108,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       "r2-http": ok,
       "r2-hybrid": ok,
       s3: ok,
+      supabase: ok,
       "vb-private": ok,
       "vb-public": ok,
     },
@@ -121,6 +129,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
         "Read-then-write — copy goes through the binding (no native copy command on Workers)."
       ),
       s3: ok,
+      supabase: ok,
       "vb-private": ok,
       "vb-public": ok,
     },
@@ -139,6 +148,9 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       "r2-http": ok,
       "r2-hybrid": ok,
       s3: ok,
+      supabase: warn(
+        "Default mints a signed read URL via `createSignedUrl` (1-hour default). With `public: true`, returns the permanent unsigned `getPublicUrl` result. With `publicBaseUrl`, returns `<publicBaseUrl>/<key>`. `responseContentDisposition` is honored — it threads through Supabase's `download` option in the signed path."
+      ),
       "vb-private": no(
         "No URL primitive for private blobs — the underlying SDK requires an authenticated `blob.get()` call with the token. Use `download()` instead, or instantiate a second public-access adapter."
       ),
@@ -161,6 +173,9 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       "r2-http": ok,
       "r2-hybrid": ok,
       s3: ok,
+      supabase: warn(
+        "PUT URL only — Supabase has no POST policy equivalent. `maxSize` throws (Supabase signed upload URLs have no `content-length-range` policy; set the bucket-level size limit in the dashboard instead). `expiresIn` is silently ignored — Supabase fixes the TTL at 2 hours server-side. The returned headers include `x-upsert: true`."
+      ),
       "vb-private": no(
         "No presigned upload primitive. Use `handleUpload()` from `@vercel/blob/client` for browser uploads."
       ),

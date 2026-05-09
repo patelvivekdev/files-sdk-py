@@ -83,6 +83,19 @@ const files = new Files({
   }),
 });`;
 
+const SUPABASE_EXAMPLE = `import { Files } from "files-sdk";
+import { supabase } from "files-sdk/supabase";
+
+const files = new Files({
+  adapter: supabase({
+    bucket: "uploads",
+    // Auto-loads url + key from SUPABASE_URL / NEXT_PUBLIC_SUPABASE_URL
+    // and SUPABASE_SERVICE_ROLE_KEY / SUPABASE_KEY /
+    // NEXT_PUBLIC_SUPABASE_ANON_KEY. Or pass an existing SupabaseClient
+    // via \`client\` to share with auth/postgrest.
+  }),
+});`;
+
 export const Adapters = () => (
   <section>
     <Heading as="h2">Adapters</Heading>
@@ -102,6 +115,7 @@ export const Adapters = () => (
         <TabsTrigger value="minio">MinIO</TabsTrigger>
         <TabsTrigger value="gcs">GCS</TabsTrigger>
         <TabsTrigger value="azure">Azure Blob</TabsTrigger>
+        <TabsTrigger value="supabase">Supabase</TabsTrigger>
       </TabsList>
 
       <TabsContent className="flex flex-col gap-4" value="s3">
@@ -340,6 +354,74 @@ export const Adapters = () => (
             Identity is not supported in v1 — drop down to{" "}
             <code>adapter.raw</code> or wait for a future <code>client</code>{" "}
             option.
+          </li>
+        </ul>
+      </TabsContent>
+
+      <TabsContent className="flex flex-col gap-4" value="supabase">
+        <p>
+          Supabase Storage via the official <code>@supabase/storage-js</code>{" "}
+          SDK. Auto-loads the project URL and an API key from the standard env
+          vars; pass <code>client</code> to share an existing{" "}
+          <code>SupabaseClient</code> with the rest of your app (auth,
+          postgrest).
+        </p>
+        <CodeBlock code={SUPABASE_EXAMPLE} lang="ts" />
+        <ul>
+          <li>
+            <code>bucket</code> — required. Must already exist (this SDK does
+            not create buckets).
+          </li>
+          <li>
+            <code>client</code> — optional, highest precedence. Either a{" "}
+            <code>StorageClient</code> from <code>@supabase/storage-js</code> or
+            a <code>SupabaseClient</code> from{" "}
+            <code>@supabase/supabase-js</code> — the adapter unwraps{" "}
+            <code>client.storage</code> automatically.
+          </li>
+          <li>
+            <code>url</code> — Supabase project URL, e.g.{" "}
+            <code>https://xxxx.supabase.co</code>. The adapter appends{" "}
+            <code>/storage/v1</code>. Falls back to <code>SUPABASE_URL</code>{" "}
+            then <code>NEXT_PUBLIC_SUPABASE_URL</code>.
+          </li>
+          <li>
+            <code>key</code> — API key. The service role key is required for
+            writes on RLS-protected buckets; the anon key works for public
+            buckets. Falls back to <code>SUPABASE_SERVICE_ROLE_KEY</code>,{" "}
+            <code>SUPABASE_KEY</code>, then{" "}
+            <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code>.
+          </li>
+          <li>
+            <code>public</code> — boolean, optional. Set to <code>true</code>{" "}
+            for a public bucket so <code>url()</code> returns the permanent
+            unsigned <code>getPublicUrl()</code> result instead of minting a
+            signed read URL. Supabase has no API to detect bucket visibility, so
+            the adapter trusts what you pass — a wrong value yields a 4xx on
+            fetch.
+          </li>
+          <li>
+            <code>publicBaseUrl</code> — optional. When set, <code>url()</code>{" "}
+            returns <code>{`\`\${publicBaseUrl}/\${key}\``}</code> and skips
+            both signing and <code>getPublicUrl()</code>. Use for a CDN in front
+            of the project. Implies <code>public: true</code>.
+          </li>
+          <li>
+            <code>defaultUrlExpiresIn</code> — number of seconds, optional.
+            Default expiry for signed read URLs returned by <code>url()</code>.
+            Defaults to 3600.
+          </li>
+          <li>
+            <span className="text-foreground">Limitations.</span>{" "}
+            <code>signedUploadUrl()</code> issues PUT-only. <code>maxSize</code>{" "}
+            throws — Supabase signed upload URLs have no{" "}
+            <code>content-length-range</code> equivalent; set the bucket-level
+            file size limit in the Supabase dashboard or enforce caps at your
+            application gateway. <code>expiresIn</code> on{" "}
+            <code>signedUploadUrl()</code> is ignored — Supabase fixes the TTL
+            at 2 hours server-side. <code>list()</code> uses Supabase's V1
+            offset/limit API; the adapter encodes <code>offset</code> as a
+            numeric cursor string so it threads through the unified API.
           </li>
         </ul>
       </TabsContent>

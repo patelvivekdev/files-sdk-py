@@ -11,6 +11,7 @@ export default defineConfig({
     "src/minio/index.ts",
     "src/gcs/index.ts",
     "src/azure/index.ts",
+    "src/supabase/index.ts",
   ],
   format: ["esm"],
   sourcemap: true,

@@ -1,0 +1,639 @@
+import { StorageClient } from "@supabase/storage-js";
+import type { FileObject } from "@supabase/storage-js";
+
+import type {
+  Adapter,
+  Body,
+  ListResult,
+  SignedUpload,
+  StoredFile,
+  UploadResult,
+} from "../index.js";
+import { readEnv } from "../internal/env.js";
+import { FilesError } from "../internal/errors.js";
+import type { FilesErrorCode } from "../internal/errors.js";
+import { createStoredFile } from "../internal/stored-file.js";
+
+export interface SupabaseAdapterOptions {
+  /**
+   * Supabase storage bucket. Must already exist (this SDK does not create
+   * buckets). Surfaced as `bucket` on the returned adapter for cross-adapter
+   * API consistency (S3/R2/GCS/MinIO/Azure all expose `bucket`).
+   */
+  bucket: string;
+  /**
+   * Existing client instance. Highest precedence. Pass either:
+   *  - a `StorageClient` (from `@supabase/storage-js`), or
+   *  - a `SupabaseClient` (from `@supabase/supabase-js`) — the adapter will
+   *    pick `client.storage` automatically.
+   *
+   * Useful when the consumer already constructs a Supabase client for auth
+   * or postgrest and wants to share it with the storage adapter.
+   */
+  client?: StorageClient | { storage: StorageClient };
+  /**
+   * Supabase project URL (e.g. `https://xxxx.supabase.co`). Required if
+   * `client` is not provided. The adapter appends `/storage/v1` automatically
+   * when constructing a `StorageClient`. Falls back to `SUPABASE_URL`, then
+   * `NEXT_PUBLIC_SUPABASE_URL`.
+   */
+  url?: string;
+  /**
+   * Supabase API key. The service role key is required for write operations
+   * on RLS-protected buckets; the anon key works for public buckets. Falls
+   * back to `SUPABASE_SERVICE_ROLE_KEY`, then `SUPABASE_KEY`, then
+   * `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+   */
+  key?: string;
+  /**
+   * Set to `true` if the bucket is configured as a public bucket. `url()`
+   * will then return `getPublicUrl()` results — a permanent, unsigned URL —
+   * instead of minting a signed read URL.
+   *
+   * Supabase exposes no API to detect bucket visibility from the client; if
+   * `public: true` is set on a private bucket, the returned URL will 4xx
+   * when fetched.
+   */
+  public?: boolean;
+  /**
+   * Origin used to build URLs from `url()`. When set, `url(key)` returns
+   * `${publicBaseUrl}/${key}` and skips both signing and `getPublicUrl()` —
+   * appropriate when a CDN sits in front of the Supabase project. Implies
+   * `public: true`.
+   */
+  publicBaseUrl?: string;
+  /**
+   * Default expiry, in seconds, for the signed read URLs returned by
+   * `url()` when neither `public` nor `publicBaseUrl` is set. Defaults to
+   * 3600 (1 hour). Per-call `url(key, { expiresIn })` overrides.
+   */
+  defaultUrlExpiresIn?: number;
+}
+
+export type SupabaseAdapter = Adapter<StorageClient> & {
+  readonly bucket: string;
+};
+
+const DEFAULT_URL_EXPIRES_IN = 3600;
+const DEFAULT_LIST_LIMIT = 100;
+
+const NOT_FOUND_CODES = new Set(["NotFound", "NoSuchKey"]);
+const UNAUTH_CODES = new Set([
+  "InvalidJWT",
+  "Unauthorized",
+  "AccessDenied",
+  "InvalidKey",
+]);
+const CONFLICT_CODES = new Set(["Duplicate", "AlreadyExists"]);
+
+const NOT_FOUND_STATUS = new Set([404]);
+const UNAUTH_STATUS = new Set([401, 403]);
+const CONFLICT_STATUS = new Set([409, 412]);
+
+interface SupabaseErrorLike {
+  message?: string;
+  status?: number;
+  statusCode?: string | number;
+  name?: string;
+}
+
+const classifySupabaseError = (
+  statusCode: string | undefined,
+  status: number | undefined
+): FilesErrorCode => {
+  if (
+    (statusCode && NOT_FOUND_CODES.has(statusCode)) ||
+    NOT_FOUND_STATUS.has(status ?? 0)
+  ) {
+    return "NotFound";
+  }
+  if (
+    (statusCode && UNAUTH_CODES.has(statusCode)) ||
+    UNAUTH_STATUS.has(status ?? 0)
+  ) {
+    return "Unauthorized";
+  }
+  if (
+    (statusCode && CONFLICT_CODES.has(statusCode)) ||
+    CONFLICT_STATUS.has(status ?? 0)
+  ) {
+    return "Conflict";
+  }
+  return "Provider";
+};
+
+const DEFAULT_MESSAGES: Record<FilesErrorCode, string> = {
+  Conflict: "Conflict",
+  NotFound: "Not found",
+  Provider: "Supabase error",
+  Unauthorized: "Unauthorized",
+};
+
+const extractStatus = (e: SupabaseErrorLike): number | undefined => {
+  if (typeof e.status === "number") {
+    return e.status;
+  }
+  if (typeof e.statusCode === "number") {
+    return e.statusCode;
+  }
+  return undefined;
+};
+
+export const mapSupabaseError = (err: unknown): FilesError => {
+  if (err instanceof FilesError) {
+    return err;
+  }
+  const e = (err ?? {}) as SupabaseErrorLike;
+  // `statusCode` from StorageApiError is the server's string code (e.g.
+  // "NotFound", "Duplicate"). Fall back to `status` (HTTP) which is
+  // present on every StorageApiError and many transport errors.
+  const statusCode =
+    typeof e.statusCode === "string" ? e.statusCode : undefined;
+  const status = extractStatus(e);
+  const code = classifySupabaseError(statusCode, status);
+  return new FilesError(code, e.message ?? DEFAULT_MESSAGES[code], err);
+};
+
+const stripEtag = (etag: string | undefined): string | undefined => {
+  if (!etag) {
+    return;
+  }
+  return etag.replaceAll(/^"+|"+$/gu, "");
+};
+
+const joinPublicUrl = (base: string, key: string): string => {
+  const trimmed = base.endsWith("/") ? base.slice(0, -1) : base;
+  return `${trimmed}/${key}`;
+};
+
+const normalizeBody = async (
+  body: Body,
+  contentTypeHint?: string
+): Promise<{
+  data: Uint8Array | ReadableStream<Uint8Array> | Blob;
+  contentType: string;
+  contentLength?: number;
+  isBlob: boolean;
+}> => {
+  if (typeof body === "string") {
+    const data = new TextEncoder().encode(body);
+    return {
+      contentLength: data.byteLength,
+      contentType: contentTypeHint ?? "text/plain; charset=utf-8",
+      data,
+      isBlob: false,
+    };
+  }
+  if (body instanceof Uint8Array) {
+    return {
+      contentLength: body.byteLength,
+      contentType: contentTypeHint ?? "application/octet-stream",
+      data: body,
+      isBlob: false,
+    };
+  }
+  if (body instanceof ArrayBuffer) {
+    const data = new Uint8Array(body);
+    return {
+      contentLength: data.byteLength,
+      contentType: contentTypeHint ?? "application/octet-stream",
+      data,
+      isBlob: false,
+    };
+  }
+  if (ArrayBuffer.isView(body)) {
+    const view = body as ArrayBufferView;
+    const data = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+    return {
+      contentLength: data.byteLength,
+      contentType: contentTypeHint ?? "application/octet-stream",
+      data,
+      isBlob: false,
+    };
+  }
+  if (body instanceof Blob) {
+    // Supabase sends Blob/File as multipart and uses the Blob's own
+    // `type` for the part — `FileOptions.contentType` is ignored. To make
+    // the caller's `contentType` honored consistently, drain the Blob to
+    // a Uint8Array when an override is set; otherwise pass it through and
+    // let the Blob's type win.
+    if (contentTypeHint && contentTypeHint !== body.type) {
+      const buf = new Uint8Array(await body.arrayBuffer());
+      return {
+        contentLength: buf.byteLength,
+        contentType: contentTypeHint,
+        data: buf,
+        isBlob: false,
+      };
+    }
+    return {
+      contentLength: body.size,
+      contentType: contentTypeHint ?? body.type ?? "application/octet-stream",
+      data: body,
+      isBlob: true,
+    };
+  }
+  return {
+    contentType: contentTypeHint ?? "application/octet-stream",
+    data: body,
+    isBlob: false,
+  };
+};
+
+const isStorageClientLike = (
+  candidate: unknown
+): candidate is { storage: StorageClient } =>
+  typeof candidate === "object" &&
+  candidate !== null &&
+  "storage" in candidate &&
+  typeof (candidate as { storage?: unknown }).storage === "object";
+
+const buildClient = (opts: SupabaseAdapterOptions): StorageClient => {
+  if (opts.client) {
+    return isStorageClientLike(opts.client) ? opts.client.storage : opts.client;
+  }
+  const url =
+    opts.url ?? readEnv("SUPABASE_URL") ?? readEnv("NEXT_PUBLIC_SUPABASE_URL");
+  const key =
+    opts.key ??
+    readEnv("SUPABASE_SERVICE_ROLE_KEY") ??
+    readEnv("SUPABASE_KEY") ??
+    readEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  if (!url || !key) {
+    throw new FilesError(
+      "Provider",
+      "supabase adapter: missing credentials. Pass `client` (an existing SupabaseClient or StorageClient), or `url` + `key`. Env fallbacks: SUPABASE_URL / NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY / SUPABASE_KEY / NEXT_PUBLIC_SUPABASE_ANON_KEY."
+    );
+  }
+  const trimmed = url.replace(/\/+$/u, "");
+  const storageUrl = trimmed.endsWith("/storage/v1")
+    ? trimmed
+    : `${trimmed}/storage/v1`;
+  return new StorageClient(storageUrl, {
+    Authorization: `Bearer ${key}`,
+    apikey: key,
+  });
+};
+
+interface SupabaseListItemMetadata {
+  eTag?: string;
+  size?: number;
+  mimetype?: string;
+  cacheControl?: string;
+  lastModified?: string | number | Date;
+  contentLength?: number;
+  [key: string]: unknown;
+}
+
+interface SupabaseInfoLike {
+  size?: number;
+  contentType?: string;
+  etag?: string;
+  lastModified?: string | number | Date;
+  cacheControl?: string;
+  metadata?: Record<string, unknown> | null;
+}
+
+const toMs = (
+  value: string | number | Date | undefined
+): number | undefined => {
+  if (value === undefined || value === null) {
+    return;
+  }
+  if (value instanceof Date) {
+    return value.getTime();
+  }
+  if (typeof value === "number") {
+    return value;
+  }
+  const t = new Date(value).getTime();
+  return Number.isFinite(t) ? t : undefined;
+};
+
+const stringifyMetadata = (
+  metadata: Record<string, unknown> | null | undefined
+): Record<string, string> | undefined => {
+  if (!metadata) {
+    return;
+  }
+  const out: Record<string, string> = {};
+  let any = false;
+  for (const [k, v] of Object.entries(metadata)) {
+    if (v === undefined || v === null) {
+      continue;
+    }
+    out[k] = typeof v === "string" ? v : JSON.stringify(v);
+    any = true;
+  }
+  return any ? out : undefined;
+};
+
+const blobToUint8 = async (blob: Blob): Promise<Uint8Array> =>
+  new Uint8Array(await blob.arrayBuffer());
+
+const safeInfo = async (
+  bucketRef: ReturnType<StorageClient["from"]>,
+  key: string
+): Promise<SupabaseInfoLike | undefined> => {
+  try {
+    const { data, error } = await bucketRef.info(key);
+    if (error || !data) {
+      return;
+    }
+    return data as SupabaseInfoLike;
+  } catch {
+    // info() may not be supported on older Supabase deployments.
+  }
+};
+
+export const supabase = (opts: SupabaseAdapterOptions): SupabaseAdapter => {
+  const { bucket, public: isPublic, publicBaseUrl } = opts;
+  if (!bucket) {
+    throw new FilesError(
+      "Provider",
+      "supabase adapter: missing bucket. Pass `bucket`."
+    );
+  }
+  const client = buildClient(opts);
+  const bucketRef = client.from(bucket);
+  const defaultUrlExpiresIn =
+    opts.defaultUrlExpiresIn ?? DEFAULT_URL_EXPIRES_IN;
+
+  const downloadAsBytes = async (key: string): Promise<Uint8Array> => {
+    const { data, error } = await bucketRef.download(key);
+    if (error) {
+      throw mapSupabaseError(error);
+    }
+    return blobToUint8(data as Blob);
+  };
+
+  const downloadAsStreamFile = async (key: string): Promise<StoredFile> => {
+    const { data, error } = await bucketRef.download(key).asStream();
+    if (error) {
+      throw mapSupabaseError(error);
+    }
+    const stream = data as ReadableStream<Uint8Array>;
+    // Supabase's stream download doesn't surface metadata alongside
+    // the body. Issue an `info()` call for size/type/etag so the
+    // returned StoredFile is usable. info() may not be supported on
+    // older Supabase deployments; in that case we fall back to zero
+    // size and the stream's content-type.
+    const meta = await safeInfo(bucketRef, key);
+    return createStoredFile(
+      {
+        ...(meta?.etag && { etag: stripEtag(meta.etag) }),
+        key,
+        ...(meta?.lastModified && {
+          lastModified: toMs(meta.lastModified),
+        }),
+        ...(meta?.metadata && {
+          metadata: stringifyMetadata(meta.metadata),
+        }),
+        size: meta?.size ?? 0,
+        type: meta?.contentType ?? "application/octet-stream",
+      },
+      {
+        factory: () => stream,
+        kind: "stream",
+      }
+    );
+  };
+
+  const downloadAsBufferFile = async (key: string): Promise<StoredFile> => {
+    const { data, error } = await bucketRef.download(key);
+    if (error) {
+      throw mapSupabaseError(error);
+    }
+    const blob = data as Blob;
+    const bytes = await blobToUint8(blob);
+    // Blob.type may be empty when Supabase doesn't echo a Content-Type;
+    // fall back to info() in that case so callers get a useful type.
+    let { type } = blob;
+    let etag: string | undefined;
+    let lastModified: number | undefined;
+    let metadata: Record<string, string> | undefined;
+    if (!type) {
+      const meta = await safeInfo(bucketRef, key);
+      type = meta?.contentType ?? "application/octet-stream";
+      etag = stripEtag(meta?.etag);
+      lastModified = toMs(meta?.lastModified);
+      metadata = stringifyMetadata(meta?.metadata);
+    }
+    return createStoredFile(
+      {
+        ...(etag && { etag }),
+        key,
+        ...(lastModified !== undefined && { lastModified }),
+        ...(metadata && { metadata }),
+        size: bytes.byteLength,
+        type,
+      },
+      { data: bytes, kind: "buffer" }
+    );
+  };
+
+  return {
+    bucket,
+    async copy(from, to) {
+      const { error } = await bucketRef.copy(from, to);
+      if (error) {
+        throw mapSupabaseError(error);
+      }
+    },
+    async delete(key) {
+      // `remove()` is idempotent in Supabase — it returns an empty array
+      // (not an error) when the key doesn't exist, matching the
+      // silent-on-missing behavior of S3/Azure.
+      const { error } = await bucketRef.remove([key]);
+      if (error) {
+        throw mapSupabaseError(error);
+      }
+    },
+    download(key, downloadOpts) {
+      if (downloadOpts?.as === "stream") {
+        return downloadAsStreamFile(key);
+      }
+      return downloadAsBufferFile(key);
+    },
+    async head(key) {
+      const { data, error } = await bucketRef.info(key);
+      if (error) {
+        throw mapSupabaseError(error);
+      }
+      const info = data as SupabaseInfoLike;
+      return createStoredFile(
+        {
+          ...(info.etag && { etag: stripEtag(info.etag) }),
+          key,
+          ...(info.lastModified !== undefined && {
+            lastModified: toMs(info.lastModified),
+          }),
+          ...(info.metadata && {
+            metadata: stringifyMetadata(info.metadata),
+          }),
+          size: info.size ?? 0,
+          type: info.contentType ?? "application/octet-stream",
+        },
+        {
+          factory: () => downloadAsBytes(key),
+          kind: "lazy",
+        }
+      );
+    },
+    async list(options): Promise<ListResult> {
+      const limit = options?.limit ?? DEFAULT_LIST_LIMIT;
+      const offset = options?.cursor ? Number(options.cursor) : 0;
+      if (!Number.isFinite(offset) || offset < 0) {
+        throw new FilesError(
+          "Provider",
+          `supabase: invalid list cursor "${options?.cursor}" — expected a non-negative integer.`
+        );
+      }
+      const { data, error } = await bucketRef.list(options?.prefix ?? "", {
+        limit,
+        offset,
+      });
+      if (error) {
+        throw mapSupabaseError(error);
+      }
+      const fileObjects = (data ?? []) as FileObject[];
+      const items: StoredFile[] = fileObjects.map((item) => {
+        const meta = (item.metadata ?? {}) as SupabaseListItemMetadata;
+        // list() prefixes the key with the listed prefix on the server
+        // side, but the returned `name` is *just* the leaf — re-prefix
+        // here so callers get a key that round-trips through the other
+        // methods (download/head/delete).
+        const fullKey = options?.prefix
+          ? joinPublicUrl(options.prefix, item.name)
+          : item.name;
+        return createStoredFile(
+          {
+            ...(meta.eTag && { etag: stripEtag(meta.eTag) }),
+            key: fullKey,
+            ...(meta.lastModified !== undefined && {
+              lastModified: toMs(meta.lastModified),
+            }),
+            ...(stringifyMetadata(meta as Record<string, unknown>) && {
+              metadata: stringifyMetadata(meta as Record<string, unknown>),
+            }),
+            size: meta.size ?? meta.contentLength ?? 0,
+            type: meta.mimetype ?? "application/octet-stream",
+          },
+          {
+            factory: () => downloadAsBytes(fullKey),
+            kind: "lazy",
+          }
+        );
+      });
+      // Supabase's V1 list is offset/limit, not cursor-based. Encode the
+      // next offset as a numeric string cursor. Only emit it when we got
+      // a full page — a short page means no more rows.
+      const nextOffset = offset + items.length;
+      return {
+        items,
+        ...(items.length === limit && { cursor: String(nextOffset) }),
+      };
+    },
+    name: "supabase",
+    raw: client,
+    async signedUploadUrl(key, signOpts): Promise<SignedUpload> {
+      // Supabase's createSignedUploadUrl has no `content-length-range`
+      // equivalent — there's no way to enforce a max upload size at the
+      // URL level. Throw rather than silently no-op so callers don't
+      // ship a "limit" that does nothing. Same honest-API stance Azure
+      // takes for the same gap.
+      if (signOpts.maxSize !== undefined) {
+        throw new FilesError(
+          "Provider",
+          "supabase: `maxSize` is not supported. Supabase signed upload URLs have no server-enforced size limit equivalent to S3's content-length-range policy. Set the bucket-level file size limit in the Supabase dashboard, or enforce the limit at your application gateway before issuing the signed URL."
+        );
+      }
+      // `expiresIn` is intentionally ignored — Supabase fixes the TTL at
+      // 2 hours server-side and offers no per-URL override.
+      const { data, error } = await bucketRef.createSignedUploadUrl(key, {
+        upsert: true,
+      });
+      if (error) {
+        throw mapSupabaseError(error);
+      }
+      const { signedUrl } = data as { signedUrl: string; token: string };
+      return {
+        headers: {
+          ...(signOpts.contentType && { "Content-Type": signOpts.contentType }),
+          "x-upsert": "true",
+        },
+        method: "PUT",
+        url: signedUrl,
+      };
+    },
+    async upload(key, body, options) {
+      const { data, contentType, contentLength } = await normalizeBody(
+        body,
+        options?.contentType
+      );
+      const fileOptions = {
+        contentType,
+        upsert: true,
+        ...(options?.cacheControl && { cacheControl: options.cacheControl }),
+        ...(options?.metadata && { metadata: options.metadata }),
+      };
+      // Supabase requires `duplex: 'half'` when uploading a ReadableStream.
+      // The SDK threads this through `FileOptions.duplex`.
+      const optsWithDuplex =
+        data instanceof ReadableStream
+          ? { ...fileOptions, duplex: "half" }
+          : fileOptions;
+      const { error } = await bucketRef.upload(key, data, optsWithDuplex);
+      if (error) {
+        throw mapSupabaseError(error);
+      }
+      // For stream bodies we don't know the size locally; ask `info()`
+      // for the authoritative value. For buffer bodies we already have it.
+      let size = contentLength;
+      let etag: string | undefined;
+      let lastModified: number | undefined;
+      if (size === undefined) {
+        const info = await safeInfo(bucketRef, key);
+        size = info?.size ?? 0;
+        etag = stripEtag(info?.etag);
+        lastModified = toMs(info?.lastModified);
+      }
+      return {
+        contentType,
+        ...(etag && { etag }),
+        key,
+        ...(lastModified !== undefined && { lastModified }),
+        size,
+      } satisfies UploadResult;
+    },
+    async url(key, urlOpts): Promise<string> {
+      // Same precedence rule as S3/Azure: `responseContentDisposition`
+      // forces signing even when a public URL is configured, because the
+      // override has to be bound into the signature. Silently dropping
+      // it would be a stored-XSS regression on user-uploaded content.
+      const wantsDisposition = Boolean(urlOpts?.responseContentDisposition);
+      if (publicBaseUrl && !wantsDisposition) {
+        return joinPublicUrl(publicBaseUrl, key);
+      }
+      if (isPublic && !wantsDisposition) {
+        const { data } = bucketRef.getPublicUrl(key);
+        return data.publicUrl;
+      }
+      // Both `public: true` (with disposition) and the default private
+      // path mint a signed URL so the disposition can be bound in.
+      const { data, error } = await bucketRef.createSignedUrl(
+        key,
+        urlOpts?.expiresIn ?? defaultUrlExpiresIn,
+        {
+          ...(urlOpts?.responseContentDisposition && {
+            download: urlOpts.responseContentDisposition,
+          }),
+        }
+      );
+      if (error) {
+        throw mapSupabaseError(error);
+      }
+      return (data as { signedUrl: string }).signedUrl;
+    },
+  };
+};

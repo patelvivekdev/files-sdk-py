@@ -271,7 +271,64 @@ const AzureBlobStorage = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-const icons = [S3, Vercel, R2, GoogleCloudStorage, Minio, AzureBlobStorage];
+const Supabase = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    viewBox="0 0 48 48"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    {...props}
+  >
+    <title>Supabase</title>
+    <rect width="48" height="48" fill="#1C1C1C" />
+    <path
+      d="M26.2061 39.4684C25.3886 40.4979 23.7311 39.9338 23.7114 38.6193L23.4233 19.3931H36.351C38.6926 19.3931 39.9985 22.0976 38.5425 23.9314L26.2061 39.4684Z"
+      fill="url(#paint0_linear_36_2)"
+    />
+    <path
+      d="M26.2061 39.4684C25.3886 40.4979 23.7311 39.9338 23.7114 38.6193L23.4233 19.3931H36.351C38.6926 19.3931 39.9985 22.0976 38.5425 23.9314L26.2061 39.4684Z"
+      fill="url(#paint1_linear_36_2)"
+      fillOpacity="0.2"
+    />
+    <path
+      d="M20.9485 8.53171C21.766 7.50211 23.4235 8.06626 23.4432 9.38078L23.5695 28.607H10.8035C8.46191 28.607 7.15595 25.9025 8.61204 24.0686L20.9485 8.53171Z"
+      fill="#3ECF8E"
+    />
+    <defs>
+      <linearGradient
+        id="paint0_linear_36_2"
+        x1="23.4233"
+        y1="23.656"
+        x2="34.913"
+        y2="28.4748"
+        gradientUnits="userSpaceOnUse"
+      >
+        <stop stopColor="#249361" />
+        <stop offset="1" stopColor="#3ECF8E" />
+      </linearGradient>
+      <linearGradient
+        id="paint1_linear_36_2"
+        x1="18.3294"
+        y1="16.6815"
+        x2="23.5693"
+        y2="26.5453"
+        gradientUnits="userSpaceOnUse"
+      >
+        <stop />
+        <stop offset="1" stopOpacity="0" />
+      </linearGradient>
+    </defs>
+  </svg>
+);
+
+const icons = [
+  S3,
+  Vercel,
+  R2,
+  GoogleCloudStorage,
+  Minio,
+  AzureBlobStorage,
+  Supabase,
+];
 
 export const Hero = () => (
   <section className="hero mt-16">
@@ -293,8 +350,8 @@ export const Hero = () => (
     </div>
     <p className="text-muted-foreground text-balance leading-relaxed">
       A unified storage SDK for object and blob backends — S3, Cloudflare R2,
-      Vercel Blob, MinIO. One small, honest API. Web-standards I/O. An escape
-      hatch when you need the native client.
+      Vercel Blob, MinIO, GCS, Azure, Supabase. One small, honest API.
+      Web-standards I/O. An escape hatch when you need the native client.
     </p>
   </section>
 );
