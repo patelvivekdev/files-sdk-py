@@ -236,14 +236,23 @@ const sharingCreateSharedLinkWithSettingsMock = mock(
   }
 );
 
-const filesUploadSessionStartMock = mock(() =>
-  Promise.resolve(wrapResult({ session_id: "session-1" }))
+const filesUploadSessionStartMock = mock(
+  (_arg: { close: boolean; contents: Buffer }) =>
+    Promise.resolve(wrapResult({ session_id: "session-1" }))
 );
-const filesUploadSessionAppendV2Mock = mock(() =>
-  Promise.resolve(wrapResult({}))
+const filesUploadSessionAppendV2Mock = mock(
+  (_arg: {
+    close: boolean;
+    contents: Buffer;
+    cursor: { offset: number; session_id: string };
+  }) => Promise.resolve(wrapResult({}))
 );
 const filesUploadSessionFinishMock = mock(
-  (arg: { commit: { path: string }; contents: Buffer }) => {
+  (arg: {
+    commit: { path: string; mode?: { ".tag": string }; mute?: boolean };
+    contents: Buffer;
+    cursor: { offset: number; session_id: string };
+  }) => {
     const key = keyFromPath(arg.commit.path);
     const item = makeFile(key, Buffer.from(arg.contents));
     store.set(key, item);
@@ -607,5 +616,472 @@ describe("dropbox adapter", () => {
     const err = await files.head("a.txt").catch((error: unknown) => error);
     expect(err).toBeInstanceOf(FilesError);
     expect((err as FilesError).message).toBe("path/not_found/the-file");
+  });
+
+  test("mapDropboxError falls back to err.message when error_summary is absent", async () => {
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    filesGetMetadataMock.mockImplementationOnce(() =>
+      Promise.reject(
+        responseError(409, {
+          error: { ".tag": "path", path: { ".tag": "not_found" } },
+          message: "fallback message text",
+        })
+      )
+    );
+    const err = await files.head("a.txt").catch((error: unknown) => error);
+    expect(err).toBeInstanceOf(FilesError);
+    expect((err as FilesError).message).toBe("fallback message text");
+  });
+
+  test("mapDropboxError handles non-DropboxResponseError rejections with a status hint", async () => {
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    const err = Object.assign(new Error("boom"), { status: 404 });
+    filesGetMetadataMock.mockImplementationOnce(() => Promise.reject(err));
+    const result = await files.head("a.txt").catch((error: unknown) => error);
+    expect(result).toBeInstanceOf(FilesError);
+    expect((result as FilesError).code).toBe("NotFound");
+    expect((result as FilesError).message).toBe("boom");
+  });
+
+  test.each([
+    [401, "Unauthorized"],
+    [403, "Unauthorized"],
+    [412, "Conflict"],
+  ] as const)(
+    "mapDropboxError classifies plain status %s as %s",
+    async (status, expected) => {
+      const files = new Files({ adapter: dropbox(baseOpts) });
+      const err = Object.assign(new Error(`http ${status}`), { status });
+      filesGetMetadataMock.mockImplementationOnce(() => Promise.reject(err));
+      const result = await files.head("a.txt").catch((error: unknown) => error);
+      expect((result as FilesError).code).toBe(expected);
+    }
+  );
+
+  test("mapDropboxError leaves a thrown FilesError unwrapped", async () => {
+    // Stream-mode download throws a FilesError directly inside the try block
+    // when the temporary-link fetch returns non-OK; that path runs through
+    // mapDropboxError, which must pass it through untouched (same code,
+    // same message, no double-wrapping).
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = ((_input: string | URL | Request) =>
+      Promise.resolve(new Response("nope", { status: 502 }))) as typeof fetch;
+    try {
+      const files = new Files({ adapter: dropbox(baseOpts) });
+      await files.upload("a.txt", "hi");
+      const err = await files
+        .download("a.txt", { as: "stream" })
+        .catch((error: unknown) => error);
+      expect(err).toBeInstanceOf(FilesError);
+      expect((err as FilesError).code).toBe("Provider");
+      expect((err as FilesError).message).toMatch(
+        /temporary-link fetch failed \(502\)/u
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("upload accepts a Uint8Array body", async () => {
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    const bytes = new TextEncoder().encode("u8-body");
+    const r = await files.upload("u8.bin", bytes);
+    expect(r.size).toBe("u8-body".length);
+    expect(r.contentType).toBe("application/octet-stream");
+    const f = await files.download("u8.bin");
+    expect(await f.text()).toBe("u8-body");
+  });
+
+  test("upload accepts an ArrayBufferView (DataView) body", async () => {
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    const ab = new TextEncoder().encode("dv-body").buffer as ArrayBuffer;
+    const view = new DataView(ab);
+    const r = await files.upload("dv.bin", view);
+    expect(r.size).toBe("dv-body".length);
+    expect(r.contentType).toBe("application/octet-stream");
+  });
+
+  test("download accepts ArrayBuffer-shaped fileBinary", async () => {
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    await files.upload("a.txt", "hi");
+    const ab = new TextEncoder().encode("ab-bytes").buffer as ArrayBuffer;
+    filesDownloadMock.mockImplementationOnce(() =>
+      Promise.resolve(
+        wrapResult({
+          ...fileMetadata(makeFile("a.txt", Buffer.from("ab-bytes")), "a.txt"),
+          fileBinary: ab,
+        })
+      )
+    );
+    const f = await files.download("a.txt");
+    expect(await f.text()).toBe("ab-bytes");
+  });
+
+  test("download accepts Blob-shaped fileBlob (browser/Workers shape)", async () => {
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    await files.upload("a.txt", "hi");
+    const blob = new Blob(["blob-bytes"], { type: "application/x-test" });
+    filesDownloadMock.mockImplementationOnce(() =>
+      Promise.resolve(
+        wrapResult({
+          ...fileMetadata(
+            makeFile("a.txt", Buffer.from("blob-bytes")),
+            "a.txt"
+          ),
+          fileBlob: blob,
+        })
+      )
+    );
+    const f = await files.download("a.txt");
+    expect(await f.text()).toBe("blob-bytes");
+  });
+
+  test("download throws Provider when SDK returns neither fileBinary nor fileBlob", async () => {
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    await files.upload("a.txt", "hi");
+    filesDownloadMock.mockImplementationOnce(() =>
+      Promise.resolve(
+        wrapResult(fileMetadata(makeFile("a.txt", Buffer.from("hi")), "a.txt"))
+      )
+    );
+    const err = await files.download("a.txt").catch((error: unknown) => error);
+    expect(err).toBeInstanceOf(FilesError);
+    expect((err as FilesError).code).toBe("Provider");
+    expect((err as FilesError).message).toMatch(
+      /unexpected download response shape/u
+    );
+  });
+
+  test("download(stream) maps temporary-link fetch failure to Provider", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = ((_input: string | URL | Request) =>
+      Promise.resolve(
+        new Response("server down", { status: 503 })
+      )) as typeof fetch;
+    try {
+      const files = new Files({ adapter: dropbox(baseOpts) });
+      await files.upload("a.txt", "hi");
+      const err = await files
+        .download("a.txt", { as: "stream" })
+        .catch((error: unknown) => error);
+      expect((err as FilesError).code).toBe("Provider");
+      expect((err as FilesError).message).toMatch(
+        /temporary-link fetch failed \(503\)/u
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("download infers application/octet-stream for files without extension", async () => {
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    await files.upload("noext", "raw-bytes");
+    const f = await files.download("noext");
+    expect(f.type).toBe("application/octet-stream");
+  });
+
+  test("head throws NotFound when the entry is a folder", async () => {
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    // The SDK union returns FolderMetadata for folders. Cast the off-shape
+    // body — the adapter runtime-checks `.tag` and rejects non-file entries.
+    filesGetMetadataMock.mockImplementationOnce((() =>
+      Promise.resolve(
+        wrapResult({ ".tag": "folder", id: "folder-id", name: "subdir" })
+      )) as never);
+    const err = await files.head("subdir").catch((error: unknown) => error);
+    expect((err as FilesError).code).toBe("NotFound");
+    expect((err as FilesError).message).toMatch(/not a file.*tag=folder/u);
+  });
+
+  test("head throws NotFound when the entry is deleted", async () => {
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    filesGetMetadataMock.mockImplementationOnce((() =>
+      Promise.resolve(
+        wrapResult({ ".tag": "deleted", name: "gone.txt" })
+      )) as never);
+    const err = await files.head("gone.txt").catch((error: unknown) => error);
+    expect((err as FilesError).code).toBe("NotFound");
+    expect((err as FilesError).message).toMatch(/not a file.*tag=deleted/u);
+  });
+
+  test("delete throws non-NotFound errors instead of swallowing them", async () => {
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    filesDeleteV2Mock.mockImplementationOnce(() =>
+      Promise.reject(
+        responseError(409, {
+          error: { ".tag": "path_lookup", path_lookup: { ".tag": "other" } },
+          error_summary: "path_lookup/other/",
+        })
+      )
+    );
+    const err = await files.delete("x.txt").catch((error: unknown) => error);
+    expect(err).toBeInstanceOf(FilesError);
+    expect((err as FilesError).code).toBe("Provider");
+  });
+
+  test("copy maps SDK errors to FilesError", async () => {
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    filesCopyV2Mock.mockImplementationOnce(() =>
+      Promise.reject(
+        responseError(401, {
+          error: { ".tag": "invalid_access_token" },
+          error_summary: "invalid_access_token/",
+        })
+      )
+    );
+    const err = await files
+      .copy("a.txt", "b.txt")
+      .catch((error: unknown) => error);
+    expect((err as FilesError).code).toBe("Unauthorized");
+  });
+
+  test("upload maps SDK errors to FilesError", async () => {
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    filesUploadMock.mockImplementationOnce(() =>
+      Promise.reject(
+        responseError(401, {
+          error: { ".tag": "expired_access_token" },
+          error_summary: "expired_access_token/",
+        })
+      )
+    );
+    const err = await files
+      .upload("a.txt", "hi")
+      .catch((error: unknown) => error);
+    expect((err as FilesError).code).toBe("Unauthorized");
+  });
+
+  test("list maps SDK errors to FilesError", async () => {
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    filesListFolderMock.mockImplementationOnce(() =>
+      Promise.reject(
+        responseError(401, {
+          error: { ".tag": "missing_scope" },
+          error_summary: "missing_scope/files.metadata.read",
+        })
+      )
+    );
+    const err = await files.list().catch((error: unknown) => error);
+    expect((err as FilesError).code).toBe("Unauthorized");
+  });
+
+  test("url maps SDK errors to FilesError", async () => {
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    filesGetTemporaryLinkMock.mockImplementationOnce(() =>
+      Promise.reject(
+        responseError(409, {
+          error: { ".tag": "path", path: { ".tag": "not_found" } },
+          error_summary: "path/not_found/",
+        })
+      )
+    );
+    const err = await files.url("ghost.txt").catch((error: unknown) => error);
+    expect((err as FilesError).code).toBe("NotFound");
+  });
+
+  test("publicByDefault leaves dl=1 URLs unchanged", async () => {
+    const files = new Files({
+      adapter: dropbox({ ...baseOpts, publicByDefault: true }),
+    });
+    // Two calls happen: one during upload, one during url(). Both should
+    // return the dl=1 URL unchanged. The minimal `{ url }` shape is
+    // sufficient for the adapter; cast around the SDK's stricter type.
+    const dl1Result = (() =>
+      Promise.resolve(
+        wrapResult({
+          ".tag": "file",
+          url: "https://www.dropbox.com/scl/fi/x?dl=1",
+        })
+      )) as never;
+    sharingCreateSharedLinkWithSettingsMock.mockImplementationOnce(dl1Result);
+    sharingCreateSharedLinkWithSettingsMock.mockImplementationOnce(dl1Result);
+    await files.upload("a.txt", "hi");
+    const url = await files.url("a.txt");
+    expect(url).toBe("https://www.dropbox.com/scl/fi/x?dl=1");
+  });
+
+  test("publicByDefault appends dl=1 when the URL has no dl param", async () => {
+    const files = new Files({
+      adapter: dropbox({ ...baseOpts, publicByDefault: true }),
+    });
+    // First call (during upload) — no query string at all
+    sharingCreateSharedLinkWithSettingsMock.mockImplementationOnce((() =>
+      Promise.resolve(
+        wrapResult({ ".tag": "file", url: "https://www.dropbox.com/scl/fi/x" })
+      )) as never);
+    // Second call (during url()) — existing query string, no dl=
+    sharingCreateSharedLinkWithSettingsMock.mockImplementationOnce((() =>
+      Promise.resolve(
+        wrapResult({
+          ".tag": "file",
+          url: "https://www.dropbox.com/scl/fi/y?token=abc",
+        })
+      )) as never);
+    await files.upload("a.txt", "hi");
+    const url = await files.url("a.txt");
+    expect(url).toBe("https://www.dropbox.com/scl/fi/y?token=abc&dl=1");
+  });
+
+  test("publicByDefault recovers from shared_link_already_exists by reusing the existing URL", async () => {
+    const files = new Files({
+      adapter: dropbox({ ...baseOpts, publicByDefault: true }),
+    });
+    await files.upload("a.txt", "hi");
+    // The Dropbox SDK exposes the failed-variant body directly at
+    // err.error (no outer { error, error_summary } wrap), so the recovery
+    // branch can read shared_link_already_exists.metadata.url off it.
+    sharingCreateSharedLinkWithSettingsMock.mockImplementationOnce(() =>
+      Promise.reject(
+        responseError(409, {
+          ".tag": "shared_link_already_exists",
+          shared_link_already_exists: {
+            metadata: {
+              url: "https://www.dropbox.com/scl/fi/existing?dl=0",
+            },
+          },
+        })
+      )
+    );
+    const url = await files.url("a.txt");
+    expect(url).toBe("https://www.dropbox.com/scl/fi/existing?dl=1");
+  });
+
+  test("publicByDefault rethrows shared_link errors that don't carry an existing URL", async () => {
+    const files = new Files({
+      adapter: dropbox({ ...baseOpts, publicByDefault: true }),
+    });
+    await files.upload("a.txt", "hi");
+    sharingCreateSharedLinkWithSettingsMock.mockImplementationOnce(() =>
+      Promise.reject(
+        responseError(403, {
+          error: { ".tag": "access_denied" },
+          error_summary: "access_denied/team_policy_disallows_public_links/",
+        })
+      )
+    );
+    const err = await files.url("a.txt").catch((error: unknown) => error);
+    expect((err as FilesError).code).toBe("Unauthorized");
+  });
+
+  test("list filters out the root folder entry when its path equals rootFolderPath", async () => {
+    const files = new Files({
+      adapter: dropbox({ ...baseOpts, rootFolderPath: "rootDir" }),
+    });
+    filesListFolderMock.mockImplementationOnce(() =>
+      Promise.resolve(
+        wrapResult({
+          cursor: "",
+          entries: [
+            {
+              ".tag": "file",
+              client_modified: STABLE_MODIFIED,
+              id: "id:0",
+              name: "rootDir",
+              path_display: "/rootDir",
+              path_lower: "/rootdir",
+              rev: "rev-0",
+              server_modified: STABLE_MODIFIED,
+              size: 0,
+            },
+          ],
+          has_more: false,
+        })
+      )
+    );
+    const r = await files.list();
+    expect(r.items).toEqual([]);
+  });
+
+  test("list skips folder entries", async () => {
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    filesListFolderMock.mockImplementationOnce((() =>
+      Promise.resolve(
+        wrapResult({
+          cursor: "",
+          entries: [
+            { ".tag": "folder", id: "fid", name: "sub", path_display: "/sub" },
+            {
+              ".tag": "file",
+              client_modified: STABLE_MODIFIED,
+              id: "id:1",
+              name: "a.txt",
+              path_display: "/a.txt",
+              path_lower: "/a.txt",
+              rev: "rev-1",
+              server_modified: STABLE_MODIFIED,
+              size: 2,
+            },
+          ],
+          has_more: false,
+        })
+      )) as never);
+    const r = await files.list();
+    expect(r.items.map((i) => i.key)).toEqual(["a.txt"]);
+  });
+
+  test("mapDropboxError tolerates deeply nested error bodies (depth guard)", async () => {
+    // Build a body nested ~8 levels deep — past the recursion guard. The
+    // classifier should still complete without blowing the stack and
+    // gracefully fall back to Provider since no recognized tag is reachable
+    // before the depth limit kicks in.
+    interface DeepNode {
+      nested?: DeepNode;
+      ".tag"?: string;
+    }
+    const body: DeepNode = {};
+    let cur = body;
+    for (let i = 0; i < 8; i += 1) {
+      cur.nested = { ".tag": `level-${i}` };
+      cur = cur.nested;
+    }
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    filesGetMetadataMock.mockImplementationOnce(() =>
+      Promise.reject(responseError(500, body))
+    );
+    const err = await files.head("a.txt").catch((error: unknown) => error);
+    expect(err).toBeInstanceOf(FilesError);
+    expect((err as FilesError).code).toBe("Provider");
+  });
+
+  test("mapDropboxError tolerates non-object error bodies", async () => {
+    // Defensive: the DropboxResponseError contract takes any value as the
+    // body. errorSummary should bail out cleanly on null without throwing.
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    filesGetMetadataMock.mockImplementationOnce(() =>
+      Promise.reject(responseError(500, null))
+    );
+    const err = await files.head("a.txt").catch((error: unknown) => error);
+    expect(err).toBeInstanceOf(FilesError);
+    expect((err as FilesError).code).toBe("Provider");
+    expect((err as FilesError).message).toBe("Dropbox error");
+  });
+
+  test("upload uses the chunked session API for files larger than 150MB", async () => {
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    // 150 MiB + 1 byte — just over the simple-upload threshold.
+    const SIZE = 150 * 1024 * 1024 + 1;
+    const big = Buffer.allocUnsafe(SIZE);
+    const r = await files.upload("big.bin", big);
+    expect(r.size).toBe(SIZE);
+    expect(filesUploadMock).not.toHaveBeenCalled();
+    expect(filesUploadSessionStartMock).toHaveBeenCalledTimes(1);
+    expect(filesUploadSessionFinishMock).toHaveBeenCalledTimes(1);
+    // Chunk size is 8 MiB. After the start (chunk 0) we append until the
+    // remaining tail is <= 8 MiB. For 150MiB+1: append at offsets 8..136
+    // inclusive (17 calls), then finish handles the 6MiB+1 tail at offset 144.
+    expect(filesUploadSessionAppendV2Mock).toHaveBeenCalledTimes(17);
+    const finishArg = filesUploadSessionFinishMock.mock.calls[0]?.[0];
+    expect(finishArg?.cursor.session_id).toBe("session-1");
+    expect(finishArg?.cursor.offset).toBe(144 * 1024 * 1024);
+    expect(finishArg?.commit.path).toBe("/big.bin");
+    // The append cursor offsets must monotonically advance by 8 MiB.
+    const offsets = filesUploadSessionAppendV2Mock.mock.calls.map(
+      (c) => (c[0] as { cursor: { offset: number } }).cursor.offset
+    );
+    expect(offsets[0]).toBe(8 * 1024 * 1024);
+    expect(offsets.at(-1)).toBe(136 * 1024 * 1024);
+    for (let i = 1; i < offsets.length; i += 1) {
+      expect((offsets[i] ?? 0) - (offsets[i - 1] ?? 0)).toBe(8 * 1024 * 1024);
+    }
   });
 });

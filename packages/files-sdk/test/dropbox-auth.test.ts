@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
+import type { Dropbox } from "dropbox";
+
 import { dropbox } from "../src/dropbox/index.js";
 
 interface AuthHandleLike {
@@ -180,6 +182,54 @@ describe("dropbox auth construction", () => {
     } finally {
       restoreEnv("DROPBOX_ACCESS_TOKEN", prev);
     }
+  });
+
+  test("ensureAccessToken on a callable-token adapter awaits and applies the source", async () => {
+    let calls = 0;
+    const adapter = dropbox({
+      accessToken: () => {
+        calls += 1;
+        return Promise.resolve(`callable-${calls}`);
+      },
+    });
+    await handleOf(adapter).ensureAccessToken();
+    await handleOf(adapter).ensureAccessToken();
+    // ensureAccessToken must invoke the source each time — no caching.
+    expect(calls).toBe(2);
+  });
+
+  test("ensureAccessToken on a refresh-token adapter performs the OAuth exchange", async () => {
+    let calls = 0;
+    const fetchMock = mock(() => {
+      calls += 1;
+      return Promise.resolve(
+        Response.json(
+          { access_token: "refresh-tok", expires_in: 3600 },
+          { status: 200 }
+        )
+      );
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const adapter = dropbox({ appKey: "ak", refreshToken: "rt" });
+    await handleOf(adapter).ensureAccessToken();
+    expect(calls).toBe(1);
+    // Subsequent ensure call falls inside the cache window — no re-fetch.
+    await handleOf(adapter).ensureAccessToken();
+    expect(calls).toBe(1);
+  });
+
+  test("pre-built client adapter exposes the underlying SDK token via getAccessToken", async () => {
+    const fakeClient = {
+      auth: {
+        getAccessToken: () => "preset-from-sdk",
+        setAccessToken: () => {},
+      },
+    } as unknown as Dropbox;
+    const adapter = dropbox({ client: fakeClient });
+    expect(await handleOf(adapter).getAccessToken()).toBe("preset-from-sdk");
+    // ensureAccessToken on a pre-built client is a no-op (the caller owns
+    // the token lifecycle), but should still resolve cleanly.
+    await handleOf(adapter).ensureAccessToken();
   });
 
   test("env-var fallback uses DROPBOX_REFRESH_TOKEN + DROPBOX_APP_KEY", async () => {
