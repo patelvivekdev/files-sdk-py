@@ -50,6 +50,10 @@
       "types": "./dist/storj/index.d.ts",
       "import": "./dist/storj/index.js"
     },
+    "./hetzner": {
+      "types": "./dist/hetzner/index.d.ts",
+      "import": "./dist/hetzner/index.js"
+    },
     "./gcs": {
       "types": "./dist/gcs/index.d.ts",
       "import": "./dist/gcs/index.js"

@@ -11,6 +11,7 @@ export default defineConfig({
     "src/minio/index.ts",
     "src/digitalocean-spaces/index.ts",
     "src/storj/index.ts",
+    "src/hetzner/index.ts",
     "src/gcs/index.ts",
     "src/azure/index.ts",
     "src/supabase/index.ts",

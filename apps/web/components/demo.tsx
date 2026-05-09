@@ -75,6 +75,21 @@ const url = await files.url("hello.txt");`,
   },
   {
     code: `import { Files } from "files-sdk";
+import { hetzner } from "files-sdk/hetzner";
+
+// HCLOUD_ACCESS_KEY_ID / HCLOUD_SECRET_ACCESS_KEY read from env.
+const files = new Files({
+  adapter: hetzner({ bucket: "uploads", region: "fsn1" }),
+});
+
+await files.upload("hello.txt", "world");
+const url = await files.url("hello.txt");`,
+    id: "hetzner",
+    label: "Hetzner",
+    lang: "tsx",
+  },
+  {
+    code: `import { Files } from "files-sdk";
 import { gcs } from "files-sdk/gcs";
 
 const files = new Files({

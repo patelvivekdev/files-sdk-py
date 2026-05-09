@@ -33,6 +33,7 @@ const COLUMNS = [
   { key: "minio", label: "MinIO", parent: "MinIO" },
   { key: "spaces", label: "Spaces", parent: "DigitalOcean" },
   { key: "storj", label: "Storj", parent: "Storj" },
+  { key: "hetzner", label: "Hetzner", parent: "Hetzner" },
   { key: "gcs", label: "GCS", parent: "GCS" },
   { key: "azure", label: "Azure", parent: "Azure" },
   { key: "supabase", label: "Supabase", parent: "Supabase" },
@@ -49,6 +50,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       azure: ok,
       fs: ok,
       gcs: ok,
+      hetzner: ok,
       minio: ok,
       "r2-binding": ok,
       "r2-http": ok,
@@ -69,6 +71,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       azure: ok,
       fs: ok,
       gcs: ok,
+      hetzner: ok,
       minio: ok,
       "r2-binding": ok,
       "r2-http": ok,
@@ -89,6 +92,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       azure: ok,
       fs: ok,
       gcs: ok,
+      hetzner: ok,
       minio: ok,
       "r2-binding": ok,
       "r2-http": ok,
@@ -109,6 +113,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       azure: ok,
       fs: ok,
       gcs: ok,
+      hetzner: ok,
       minio: ok,
       "r2-binding": ok,
       "r2-http": ok,
@@ -135,6 +140,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       azure: ok,
       fs: ok,
       gcs: ok,
+      hetzner: ok,
       minio: ok,
       "r2-binding": ok,
       "r2-http": ok,
@@ -161,6 +167,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       ),
       fs: ok,
       gcs: ok,
+      hetzner: ok,
       minio: ok,
       "r2-binding": warn(
         "Read-then-write — Workers bindings have no native copy command, so the source is fetched and re-uploaded. Not server-side atomic; concurrent writes to the source between the get and put are not detected."
@@ -193,6 +200,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
         "Returns a `file://` URL by default — fine for CLIs and tests, not browsers. With `urlBaseUrl` set, returns `<urlBaseUrl>/<key>` so a dev server (Next.js `/public` mount, `serve-static`, etc.) can deliver the body. `responseContentDisposition` requires `urlBaseUrl` — `file://` has no signature mechanism in which to bind the override."
       ),
       gcs: ok,
+      hetzner: ok,
       minio: ok,
       "r2-binding": no(
         "Throws unless `publicBaseUrl` is set on the adapter (an r2.dev subdomain or a custom domain). For a presigned URL from a Worker, switch to hybrid mode by also passing `accountId` + `accessKeyId` + `secretAccessKey`."
@@ -229,6 +237,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
         "Throws without `urlBaseUrl` — the fs adapter has no built-in upload server, so there's nothing to sign against. With `urlBaseUrl` set, returns a PUT URL with `?expires=`, `?content-type=`, and `?max-size=` query params for a dev upload-handler to validate. The fs adapter does not enforce the params itself."
       ),
       gcs: ok,
+      hetzner: ok,
       minio: ok,
       "r2-binding": no(
         "Workers bindings can't sign uploads — the secret access key is not available to the runtime. Use hybrid mode (binding + HTTP credentials) to issue presigned upload URLs."
