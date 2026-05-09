@@ -96,6 +96,22 @@ const files = new Files({
   }),
 });`;
 
+const FS_EXAMPLE = `import { Files } from "files-sdk";
+import { fs } from "files-sdk/fs";
+
+// Writes objects under \`./.uploads\` with a sidecar \`.meta.json\`
+// per file for Content-Type, ETag, and user metadata. Designed for
+// dev and CI — same Adapter contract as the cloud adapters, so swap
+// it in via env without changing call sites.
+const files = new Files({
+  adapter: fs({
+    root: "./.uploads",
+    // Optional: configure if a dev server exposes the same root over
+    // HTTP, so url() returns a browser-friendly URL instead of file://.
+    // urlBaseUrl: "http://localhost:3000/files",
+  }),
+});`;
+
 export const Adapters = () => (
   <section>
     <Heading as="h2">Adapters</Heading>
@@ -116,6 +132,7 @@ export const Adapters = () => (
         <TabsTrigger value="gcs">GCS</TabsTrigger>
         <TabsTrigger value="azure">Azure Blob</TabsTrigger>
         <TabsTrigger value="supabase">Supabase</TabsTrigger>
+        <TabsTrigger value="fs">Filesystem</TabsTrigger>
       </TabsList>
 
       <TabsContent className="flex flex-col gap-4" value="s3">
@@ -422,6 +439,61 @@ export const Adapters = () => (
             at 2 hours server-side. <code>list()</code> uses Supabase's V1
             offset/limit API; the adapter encodes <code>offset</code> as a
             numeric cursor string so it threads through the unified API.
+          </li>
+        </ul>
+      </TabsContent>
+
+      <TabsContent className="flex flex-col gap-4" value="fs">
+        <p>
+          Local filesystem. The dev/test adapter — point it at a directory and
+          it implements the same <code>Adapter</code> contract as the cloud
+          adapters using <code>node:fs/promises</code>. Each upload writes the
+          body and a sidecar <code>.meta.json</code> file alongside it
+          (Content-Type, ETag, user metadata) so reads round-trip cleanly. Not
+          for production: there's no replication, no signing, no auth.
+        </p>
+        <CodeBlock code={FS_EXAMPLE} lang="ts" />
+        <ul>
+          <li>
+            <code>root</code> — required. Absolute or relative directory the
+            adapter manages. Created on first upload. All operations are scoped
+            to this directory; keys that resolve outside it (e.g.{" "}
+            <code>../etc/passwd</code>) throw <code>Provider</code>.
+          </li>
+          <li>
+            <code>urlBaseUrl</code> — optional. When set, <code>url(key)</code>{" "}
+            returns <code>{`\`\${urlBaseUrl}/\${key}\``}</code> — useful when a
+            dev server (Next.js <code>/public</code> mount,{" "}
+            <code>serve-static</code>, etc.) is exposing the same{" "}
+            <code>root</code>. When unset, <code>url()</code> returns a{" "}
+            <code>file://</code> URL — fine for CLIs/tests, not browsers.
+          </li>
+          <li>
+            <code>defaultUrlExpiresIn</code> — number of seconds, optional.
+            Threaded into the <code>?expires=</code> query string of{" "}
+            <code>signedUploadUrl()</code> for parity with the cloud adapters.
+            Defaults to 3600. The fs adapter does not enforce expiry itself; a
+            dev upload-handler can validate the param.
+          </li>
+          <li>
+            <span className="text-foreground">Storage layout.</span> Body at{" "}
+            <code>{`\${root}/\${key}`}</code>; sidecar at{" "}
+            <code>{`\${root}/\${key}.meta.json`}</code>. Sidecars survive{" "}
+            <code>cp -r</code> / <code>git mv</code> / partial-tree deletion.{" "}
+            <code>list()</code> hides them. ETag is a SHA-1-derived stable hash
+            computed at upload time.
+          </li>
+          <li>
+            <span className="text-foreground">Limitations.</span>{" "}
+            <code>signedUploadUrl()</code> throws without{" "}
+            <code>urlBaseUrl</code>— there's no upload server to sign against.{" "}
+            <code>url()</code> throws on <code>responseContentDisposition</code>{" "}
+            without <code>urlBaseUrl</code>: <code>file://</code> has no
+            signature in which to bind the override. Files written by hand into{" "}
+            <code>root</code> without a sidecar are still readable —{" "}
+            <code>contentType</code> falls back to{" "}
+            <code>application/octet-stream</code> and <code>etag</code> is
+            absent.
           </li>
         </ul>
       </TabsContent>

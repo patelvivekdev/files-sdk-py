@@ -44,6 +44,10 @@
     "./supabase": {
       "types": "./dist/supabase/index.d.ts",
       "import": "./dist/supabase/index.js"
+    },
+    "./fs": {
+      "types": "./dist/fs/index.d.ts",
+      "import": "./dist/fs/index.js"
     }
   },
   "scripts": {

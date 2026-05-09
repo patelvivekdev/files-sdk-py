@@ -12,6 +12,7 @@ export default defineConfig({
     "src/gcs/index.ts",
     "src/azure/index.ts",
     "src/supabase/index.ts",
+    "src/fs/index.ts",
   ],
   format: ["esm"],
   sourcemap: true,
