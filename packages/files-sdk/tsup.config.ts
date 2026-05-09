@@ -19,6 +19,7 @@ export default defineConfig({
     "src/supabase/index.ts",
     "src/fs/index.ts",
     "src/uploadthing/index.ts",
+    "src/onedrive/index.ts",
   ],
   format: ["esm"],
   sourcemap: true,

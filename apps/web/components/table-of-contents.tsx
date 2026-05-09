@@ -26,6 +26,7 @@ const sections: Section[] = [
       { id: "adapter-akamai", label: "Akamai Object Storage" },
       { id: "adapter-gcs", label: "Google Cloud Storage" },
       { id: "adapter-google-drive", label: "Google Drive" },
+      { id: "adapter-onedrive", label: "OneDrive" },
       { id: "adapter-azure", label: "Azure Blob Storage" },
       { id: "adapter-supabase", label: "Supabase Storage" },
       { id: "adapter-uploadthing", label: "UploadThing" },

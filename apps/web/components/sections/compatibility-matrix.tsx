@@ -37,6 +37,7 @@ const COLUMNS = [
   { key: "akamai", label: "Akamai", parent: "Akamai" },
   { key: "gcs", label: "GCS", parent: "GCS" },
   { key: "google-drive", label: "Drive", parent: "Google Drive" },
+  { key: "onedrive", label: "OneDrive", parent: "OneDrive" },
   { key: "azure", label: "Azure", parent: "Azure" },
   { key: "supabase", label: "Supabase", parent: "Supabase" },
   { key: "ut-public", label: "public", parent: "UploadThing" },
@@ -56,6 +57,9 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       "google-drive": ok,
       hetzner: ok,
       minio: ok,
+      onedrive: warn(
+        "Single-PUT simple upload, capped at OneDrive's 250 MB simple-upload limit. Bodies above the cap throw — use `signedUploadUrl()` (`createUploadSession` returns a chunkable session URL) or drop to `raw` for chunked uploads. User `metadata` and `cacheControl` throw — Graph drive items have no native arbitrary-metadata field; use `raw` to set Open Extensions if you need them."
+      ),
       "r2-binding": ok,
       "r2-http": ok,
       "r2-hybrid": ok,
@@ -79,6 +83,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       "google-drive": ok,
       hetzner: ok,
       minio: ok,
+      onedrive: ok,
       "r2-binding": ok,
       "r2-http": ok,
       "r2-hybrid": ok,
@@ -102,6 +107,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       "google-drive": ok,
       hetzner: ok,
       minio: ok,
+      onedrive: ok,
       "r2-binding": ok,
       "r2-http": ok,
       "r2-hybrid": ok,
@@ -127,6 +133,9 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       ),
       hetzner: ok,
       minio: ok,
+      onedrive: warn(
+        "Returns immediate-children files only at `rootFolderPath` — no recursion, and subfolders are filtered out. `prefix` is filename-prefix only (matched client-side within the page). Pagination uses Graph's `@odata.nextLink` as the opaque cursor."
+      ),
       "r2-binding": ok,
       "r2-http": ok,
       "r2-hybrid": ok,
@@ -156,6 +165,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       "google-drive": ok,
       hetzner: ok,
       minio: ok,
+      onedrive: ok,
       "r2-binding": ok,
       "r2-http": ok,
       "r2-hybrid": ok,
@@ -185,6 +195,9 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       "google-drive": ok,
       hetzner: ok,
       minio: ok,
+      onedrive: warn(
+        "Async copy on Graph (`POST /items/{id}/copy` returns 202 + monitor URL). The adapter polls the monitor every 500 ms until status is `completed`/`failed`, capped by `copyTimeoutMs` (default 60_000). On timeout the call throws `Provider`; tune `copyTimeoutMs` for large files."
+      ),
       "r2-binding": warn(
         "Read-then-write — Workers bindings have no native copy command, so the source is fetched and re-uploaded. Not server-side atomic; concurrent writes to the source between the get and put are not detected."
       ),
@@ -222,6 +235,9 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       ),
       hetzner: ok,
       minio: ok,
+      onedrive: warn(
+        "Throws by default — Graph has no signed URL primitive. With `publicByDefault: true` at construction, `upload()` calls `createLink` (anonymous-view scope) and `url()` returns the share link's `webUrl`. The link is permanent (`expiresIn` ignored) and `responseContentDisposition` always throws — Graph has no Content-Disposition override. Anonymous links are blocked on tenants where admins disable them."
+      ),
       "r2-binding": no(
         "Throws unless `publicBaseUrl` is set on the adapter (an r2.dev subdomain or a custom domain). For a presigned URL from a Worker, switch to hybrid mode by also passing `accountId` + `accessKeyId` + `secretAccessKey`."
       ),
@@ -263,6 +279,9 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
       ),
       hetzner: ok,
       minio: ok,
+      onedrive: warn(
+        "Initiates a Graph upload session via `POST /createUploadSession` and returns the session URL as a one-shot PUT (the session URL is pre-authenticated by Graph itself). `maxSize` and `minSize` are advisory — Graph does not enforce a server-side `content-length-range` policy on upload sessions; clients can still chunk via `Content-Range` to the same URL."
+      ),
       "r2-binding": no(
         "Workers bindings can't sign uploads — the secret access key is not available to the runtime. Use hybrid mode (binding + HTTP credentials) to issue presigned upload URLs."
       ),
