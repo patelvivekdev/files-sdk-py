@@ -1,6 +1,5 @@
 import { CodeBlock } from "@/components/code-block";
 import { Heading } from "@/components/heading";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const S3_EXAMPLE = `import { Files } from "files-sdk";
 import { s3 } from "files-sdk/s3";
@@ -123,41 +122,36 @@ export const Adapters = () => (
       authenticate, it throws at construction time naming the missing variable.
     </p>
 
-    <Tabs defaultValue="s3">
-      <TabsList>
-        <TabsTrigger value="s3">S3</TabsTrigger>
-        <TabsTrigger value="r2">R2</TabsTrigger>
-        <TabsTrigger value="vercel-blob">Vercel Blob</TabsTrigger>
-        <TabsTrigger value="minio">MinIO</TabsTrigger>
-        <TabsTrigger value="gcs">GCS</TabsTrigger>
-        <TabsTrigger value="azure">Azure Blob</TabsTrigger>
-        <TabsTrigger value="supabase">Supabase</TabsTrigger>
-        <TabsTrigger value="fs">Filesystem</TabsTrigger>
-      </TabsList>
-
-      <TabsContent className="flex flex-col gap-4" value="s3">
-        <p>
-          AWS S3 (and any S3-compatible bucket). Uses the standard AWS
-          credential chain — environment, IAM role, shared profile.
-        </p>
-        <CodeBlock code={S3_EXAMPLE} lang="ts" />
-        <ul>
-          <li>
+    <section>
+      <Heading as="h3" id="adapter-s3">
+        S3
+      </Heading>
+      <p>
+        AWS S3 (and any S3-compatible bucket). Uses the standard AWS credential
+        chain — environment, IAM role, shared profile.
+      </p>
+      <CodeBlock code={S3_EXAMPLE} lang="ts" />
+      <div className="flex flex-col gap-2">
+        <Heading as="h4" id="adapter-s3-options">
+          Options
+        </Heading>
+        <ul className="!list-none !pl-0 !gap-0 rounded-md border border-dotted divide-y divide-dotted">
+          <li className="px-4 py-3">
             <code>bucket</code> — required.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>region</code> — optional. Falls back to{" "}
             <code>AWS_REGION</code>.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>credentials</code> — optional.{" "}
             <code>{"{ accessKeyId, secretAccessKey, sessionToken? }"}</code>.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>endpoint</code> — optional. Override for S3-compatible
             services.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>publicBaseUrl</code> — optional. When set, <code>url()</code>{" "}
             returns <code>{`\`\${publicBaseUrl}/\${key}\``}</code> and skips
             signing — use this if your bucket is fronted by CloudFront or has a
@@ -165,100 +159,116 @@ export const Adapters = () => (
             presigned GetObject (1-hour default).
           </li>
         </ul>
-      </TabsContent>
+      </div>
+    </section>
 
-      <TabsContent className="flex flex-col gap-4" value="r2">
-        <p>
-          Cloudflare R2 over the S3-compatible HTTP API. Auto-loads from{" "}
-          <code>R2_ACCOUNT_ID</code>, <code>R2_ACCESS_KEY_ID</code>,{" "}
-          <code>R2_SECRET_ACCESS_KEY</code>. Inside Cloudflare Workers you can
-          pass an <code>R2Bucket</code> binding directly instead.
-        </p>
-        <CodeBlock code={R2_EXAMPLE} lang="ts" />
-        <p>
-          <code>publicBaseUrl</code> — optional, an <code>r2.dev</code>{" "}
-          subdomain or custom domain bound to the bucket. When set,{" "}
-          <code>url()</code> returns{" "}
-          <code>{`\`\${publicBaseUrl}/\${key}\``}</code> and skips signing.
-        </p>
-        <Heading as="h4">Hybrid: binding + HTTP credentials</Heading>
-        <p>
-          Inside a Worker, you can pass <em>both</em> a binding and HTTP
-          credentials. Reads and writes go through the binding (no egress, no
-          extra round trip); <code>url()</code>, <code>signedUrl()</code>, and{" "}
-          <code>signedUploadUrl()</code> route through the HTTP signer because a
-          Worker binding has no signing primitive. The S3 client is lazy-loaded
-          — bindings-only Workers don't pull <code>@aws-sdk/client-s3</code>{" "}
-          into their bundle.
-        </p>
-        <CodeBlock code={R2_HYBRID_EXAMPLE} lang="ts" />
-      </TabsContent>
+    <section>
+      <Heading as="h3" id="adapter-r2">
+        Cloudflare R2
+      </Heading>
+      <p>
+        Cloudflare R2 over the S3-compatible HTTP API. Auto-loads from{" "}
+        <code>R2_ACCOUNT_ID</code>, <code>R2_ACCESS_KEY_ID</code>,{" "}
+        <code>R2_SECRET_ACCESS_KEY</code>. Inside Cloudflare Workers you can
+        pass an <code>R2Bucket</code> binding directly instead.
+      </p>
+      <CodeBlock code={R2_EXAMPLE} lang="ts" />
+      <p>
+        <code>publicBaseUrl</code> — optional, an <code>r2.dev</code> subdomain
+        or custom domain bound to the bucket. When set, <code>url()</code>{" "}
+        returns <code>{`\`\${publicBaseUrl}/\${key}\``}</code> and skips
+        signing.
+      </p>
+      <Heading as="h4" id="adapter-r2-hybrid">
+        Hybrid: binding + HTTP credentials
+      </Heading>
+      <p>
+        Inside a Worker, you can pass <em>both</em> a binding and HTTP
+        credentials. Reads and writes go through the binding (no egress, no
+        extra round trip); <code>url()</code>, <code>signedUrl()</code>, and{" "}
+        <code>signedUploadUrl()</code> route through the HTTP signer because a
+        Worker binding has no signing primitive. The S3 client is lazy-loaded —
+        bindings-only Workers don't pull <code>@aws-sdk/client-s3</code> into
+        their bundle.
+      </p>
+      <CodeBlock code={R2_HYBRID_EXAMPLE} lang="ts" />
+    </section>
 
-      <TabsContent className="flex flex-col gap-4" value="vercel-blob">
-        <p>
-          Vercel Blob. The <code>BLOB_READ_WRITE_TOKEN</code> is auto-injected
-          when deployed on Vercel; pass <code>token</code> manually for local
-          dev or other hosts.
-        </p>
-        <CodeBlock code={VERCEL_BLOB_EXAMPLE} lang="ts" />
-        <p>
-          <code>downloadTimeoutMs</code> bounds the public-URL fetches issued by{" "}
-          <code>download()</code> and the lazy bodies returned from{" "}
-          <code>head()</code>/<code>list()</code>. Defaults to 5 minutes; pass{" "}
-          <code>0</code> to disable. A hung CDN response would otherwise leak a
-          fetch that never resolves.
-        </p>
-        <p>
-          <code>access</code> selects public or private blobs and is fixed at
-          construction. Default <code>"public"</code> matches the existing
-          behavior. With <code>access: "private"</code>, uploads use Vercel's
-          private mode and reads route through <code>blob.get()</code> with the
-          token instead of a public URL fetch — there is no permanent public URL
-          for private blobs, so <code>url()</code> throws. Need both? Use two
-          adapters.
-        </p>
-        <p>
-          <span className="text-foreground">Limitations.</span>{" "}
-          <code>signedUrl</code> and <code>signedUploadUrl</code> both throw —
-          public blob URLs don't expire, private blobs require an authenticated
-          SDK call, and browser uploads go through <code>handleUpload()</code>{" "}
-          from <code>@vercel/blob/client</code> instead of presigned URLs. User{" "}
-          <code>metadata</code> isn't supported by the underlying API, so it
-          round-trips as <code>undefined</code>.
-        </p>
-      </TabsContent>
+    <section>
+      <Heading as="h3" id="adapter-vercel-blob">
+        Vercel Blob
+      </Heading>
+      <p>
+        Vercel Blob. The <code>BLOB_READ_WRITE_TOKEN</code> is auto-injected
+        when deployed on Vercel; pass <code>token</code> manually for local dev
+        or other hosts.
+      </p>
+      <CodeBlock code={VERCEL_BLOB_EXAMPLE} lang="ts" />
+      <p>
+        <code>downloadTimeoutMs</code> bounds the public-URL fetches issued by{" "}
+        <code>download()</code> and the lazy bodies returned from{" "}
+        <code>head()</code>/<code>list()</code>. Defaults to 5 minutes; pass{" "}
+        <code>0</code> to disable. A hung CDN response would otherwise leak a
+        fetch that never resolves.
+      </p>
+      <p>
+        <code>access</code> selects public or private blobs and is fixed at
+        construction. Default <code>"public"</code> matches the existing
+        behavior. With <code>access: "private"</code>, uploads use Vercel's
+        private mode and reads route through <code>blob.get()</code> with the
+        token instead of a public URL fetch — there is no permanent public URL
+        for private blobs, so <code>url()</code> throws. Need both? Use two
+        adapters.
+      </p>
+      <p>
+        <span className="text-foreground">Limitations.</span>{" "}
+        <code>signedUrl</code> and <code>signedUploadUrl</code> both throw —
+        public blob URLs don't expire, private blobs require an authenticated
+        SDK call, and browser uploads go through <code>handleUpload()</code>{" "}
+        from <code>@vercel/blob/client</code> instead of presigned URLs. User{" "}
+        <code>metadata</code> isn't supported by the underlying API, so it
+        round-trips as <code>undefined</code>.
+      </p>
+    </section>
 
-      <TabsContent className="flex flex-col gap-4" value="minio">
-        <p>
-          MinIO and other self-hosted S3-compatible servers. A thin wrapper
-          around the S3 adapter with MinIO-friendly defaults — path-style
-          addressing on, region defaulted, errors relabelled. Auto-loads from{" "}
-          <code>MINIO_ACCESS_KEY_ID</code> and{" "}
-          <code>MINIO_SECRET_ACCESS_KEY</code>.
-        </p>
-        <CodeBlock code={MINIO_EXAMPLE} lang="ts" />
-        <ul>
-          <li>
+    <section>
+      <Heading as="h3" id="adapter-minio">
+        MinIO
+      </Heading>
+      <p>
+        MinIO and other self-hosted S3-compatible servers. A thin wrapper around
+        the S3 adapter with MinIO-friendly defaults — path-style addressing on,
+        region defaulted, errors relabelled. Auto-loads from{" "}
+        <code>MINIO_ACCESS_KEY_ID</code> and{" "}
+        <code>MINIO_SECRET_ACCESS_KEY</code>.
+      </p>
+      <CodeBlock code={MINIO_EXAMPLE} lang="ts" />
+      <div className="flex flex-col gap-2">
+        <Heading as="h4" id="adapter-minio-options">
+          Options
+        </Heading>
+        <ul className="!list-none !pl-0 !gap-0 rounded-md border border-dotted divide-y divide-dotted">
+          <li className="px-4 py-3">
             <code>bucket</code> — required.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>endpoint</code> — required. The MinIO server URL, e.g.{" "}
             <code>http://localhost:9000</code>.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>accessKeyId</code> / <code>secretAccessKey</code> — required,
             falling back to the matching env vars.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>region</code> — optional. Defaults to <code>us-east-1</code>;
             SigV4 requires some region but MinIO ignores it for routing.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>forcePathStyle</code> — optional. Defaults to{" "}
             <code>true</code>; flip off only if you've set up per-bucket
             subdomain routing.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>publicBaseUrl</code> — optional. When set, <code>url()</code>{" "}
             returns <code>{`\`\${publicBaseUrl}/\${key}\``}</code> and skips
             signing. Use this if you've fronted MinIO with a CDN or set a public
@@ -266,30 +276,37 @@ export const Adapters = () => (
             GetObject (1-hour default).
           </li>
         </ul>
-      </TabsContent>
+      </div>
+    </section>
 
-      <TabsContent className="flex flex-col gap-4" value="gcs">
-        <p>
-          Google Cloud Storage via the official{" "}
-          <code>@google-cloud/storage</code> SDK. Auth follows the standard
-          Google chain — Application Default Credentials by default, with
-          explicit overrides if you need them.
-        </p>
-        <CodeBlock code={GCS_EXAMPLE} lang="ts" />
-        <ul>
-          <li>
+    <section>
+      <Heading as="h3" id="adapter-gcs">
+        Google Cloud Storage
+      </Heading>
+      <p>
+        Google Cloud Storage via the official <code>@google-cloud/storage</code>{" "}
+        SDK. Auth follows the standard Google chain — Application Default
+        Credentials by default, with explicit overrides if you need them.
+      </p>
+      <CodeBlock code={GCS_EXAMPLE} lang="ts" />
+      <div className="flex flex-col gap-2">
+        <Heading as="h4" id="adapter-gcs-options">
+          Options
+        </Heading>
+        <ul className="!list-none !pl-0 !gap-0 rounded-md border border-dotted divide-y divide-dotted">
+          <li className="px-4 py-3">
             <code>bucket</code> — required.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>projectId</code> — optional. Falls back to{" "}
             <code>GOOGLE_CLOUD_PROJECT</code> then <code>GCLOUD_PROJECT</code>.
             ADC carries a project ID, so this is rarely needed.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>keyFilename</code> — optional. Path to a service-account JSON
             file. Use this when ADC isn't available.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>credentials</code> — optional.{" "}
             <code>{"{ client_email, private_key }"}</code>. Useful when you only
             have those fields as separate env vars and don't want to materialize
@@ -298,7 +315,7 @@ export const Adapters = () => (
             <code>iam.serviceAccounts.signBlob</code> permission on the runtime
             service account so the SDK can fall back to IAM SignBlob.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>publicBaseUrl</code> — optional. When set, <code>url()</code>{" "}
             returns <code>{`\`\${publicBaseUrl}/\${key}\``}</code> and skips
             signing. For a public GCS bucket the natural value is{" "}
@@ -308,58 +325,66 @@ export const Adapters = () => (
             days).
           </li>
         </ul>
-      </TabsContent>
+      </div>
+    </section>
 
-      <TabsContent className="flex flex-col gap-4" value="azure">
-        <p>
-          Azure Blob Storage via the official <code>@azure/storage-blob</code>{" "}
-          SDK. Four credential modes: connection string, account name + account
-          key, account name + SAS token, or anonymous (public-read containers
-          only). Connection-string parsing recovers the account name + key so
-          signing methods keep working.
-        </p>
-        <CodeBlock code={AZURE_EXAMPLE} lang="ts" />
-        <ul>
-          <li>
+    <section>
+      <Heading as="h3" id="adapter-azure">
+        Azure Blob Storage
+      </Heading>
+      <p>
+        Azure Blob Storage via the official <code>@azure/storage-blob</code>{" "}
+        SDK. Four credential modes: connection string, account name + account
+        key, account name + SAS token, or anonymous (public-read containers
+        only). Connection-string parsing recovers the account name + key so
+        signing methods keep working.
+      </p>
+      <CodeBlock code={AZURE_EXAMPLE} lang="ts" />
+      <div className="flex flex-col gap-2">
+        <Heading as="h4" id="adapter-azure-options">
+          Options
+        </Heading>
+        <ul className="!list-none !pl-0 !gap-0 rounded-md border border-dotted divide-y divide-dotted">
+          <li className="px-4 py-3">
             <code>container</code> — required. Surfaced as{" "}
             <code>adapter.bucket</code> for cross-adapter API consistency, even
             though Azure's term is "container".
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>connectionString</code> — highest precedence. Falls back to{" "}
             <code>AZURE_STORAGE_CONNECTION_STRING</code>.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>accountName</code> — falls back to{" "}
             <code>AZURE_STORAGE_ACCOUNT_NAME</code> then{" "}
             <code>AZURE_STORAGE_ACCOUNT</code>.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>accountKey</code> — falls back to{" "}
             <code>AZURE_STORAGE_ACCOUNT_KEY</code> then{" "}
             <code>AZURE_STORAGE_KEY</code>. Required if you want{" "}
             <code>url()</code> or <code>signedUploadUrl()</code> to mint new SAS
             tokens.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>sasToken</code> — pre-issued SAS, with or without leading{" "}
             <code>?</code>. Without an account key the signing methods throw —
             reads/writes still work as long as the SAS grants those permissions.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>endpoint</code> — optional. Defaults to{" "}
             <code>https://&lt;accountName&gt;.blob.core.windows.net</code>.
             Override for Azurite (local emulator) or sovereign clouds (US
             Government, China).
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>publicBaseUrl</code> — optional. When set, <code>url()</code>{" "}
             returns <code>{`\`\${publicBaseUrl}/\${key}\``}</code> and skips
             signing. Use for a public-access container or a CDN (
             <code>*.azureedge.net</code>) in front of the account. When unset,{" "}
             <code>url()</code> returns a SAS read URL (1-hour default).
           </li>
-          <li>
+          <li className="px-4 py-3">
             <span className="text-foreground">Limitations.</span>{" "}
             <code>signedUploadUrl()</code> issues PUT-only — Azure SAS has no
             POST-policy equivalent. <code>maxSize</code> throws because Azure
@@ -373,43 +398,50 @@ export const Adapters = () => (
             option.
           </li>
         </ul>
-      </TabsContent>
+      </div>
+    </section>
 
-      <TabsContent className="flex flex-col gap-4" value="supabase">
-        <p>
-          Supabase Storage via the official <code>@supabase/storage-js</code>{" "}
-          SDK. Auto-loads the project URL and an API key from the standard env
-          vars; pass <code>client</code> to share an existing{" "}
-          <code>SupabaseClient</code> with the rest of your app (auth,
-          postgrest).
-        </p>
-        <CodeBlock code={SUPABASE_EXAMPLE} lang="ts" />
-        <ul>
-          <li>
+    <section>
+      <Heading as="h3" id="adapter-supabase">
+        Supabase Storage
+      </Heading>
+      <p>
+        Supabase Storage via the official <code>@supabase/storage-js</code> SDK.
+        Auto-loads the project URL and an API key from the standard env vars;
+        pass <code>client</code> to share an existing{" "}
+        <code>SupabaseClient</code> with the rest of your app (auth, postgrest).
+      </p>
+      <CodeBlock code={SUPABASE_EXAMPLE} lang="ts" />
+      <div className="flex flex-col gap-2">
+        <Heading as="h4" id="adapter-supabase-options">
+          Options
+        </Heading>
+        <ul className="!list-none !pl-0 !gap-0 rounded-md border border-dotted divide-y divide-dotted">
+          <li className="px-4 py-3">
             <code>bucket</code> — required. Must already exist (this SDK does
             not create buckets).
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>client</code> — optional, highest precedence. Either a{" "}
             <code>StorageClient</code> from <code>@supabase/storage-js</code> or
             a <code>SupabaseClient</code> from{" "}
             <code>@supabase/supabase-js</code> — the adapter unwraps{" "}
             <code>client.storage</code> automatically.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>url</code> — Supabase project URL, e.g.{" "}
             <code>https://xxxx.supabase.co</code>. The adapter appends{" "}
             <code>/storage/v1</code>. Falls back to <code>SUPABASE_URL</code>{" "}
             then <code>NEXT_PUBLIC_SUPABASE_URL</code>.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>key</code> — API key. The service role key is required for
             writes on RLS-protected buckets; the anon key works for public
             buckets. Falls back to <code>SUPABASE_SERVICE_ROLE_KEY</code>,{" "}
             <code>SUPABASE_KEY</code>, then{" "}
             <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code>.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>public</code> — boolean, optional. Set to <code>true</code>{" "}
             for a public bucket so <code>url()</code> returns the permanent
             unsigned <code>getPublicUrl()</code> result instead of minting a
@@ -417,18 +449,18 @@ export const Adapters = () => (
             the adapter trusts what you pass — a wrong value yields a 4xx on
             fetch.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>publicBaseUrl</code> — optional. When set, <code>url()</code>{" "}
             returns <code>{`\`\${publicBaseUrl}/\${key}\``}</code> and skips
             both signing and <code>getPublicUrl()</code>. Use for a CDN in front
             of the project. Implies <code>public: true</code>.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>defaultUrlExpiresIn</code> — number of seconds, optional.
             Default expiry for signed read URLs returned by <code>url()</code>.
             Defaults to 3600.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <span className="text-foreground">Limitations.</span>{" "}
             <code>signedUploadUrl()</code> issues PUT-only. <code>maxSize</code>{" "}
             throws — Supabase signed upload URLs have no{" "}
@@ -441,26 +473,34 @@ export const Adapters = () => (
             numeric cursor string so it threads through the unified API.
           </li>
         </ul>
-      </TabsContent>
+      </div>
+    </section>
 
-      <TabsContent className="flex flex-col gap-4" value="fs">
-        <p>
-          Local filesystem. The dev/test adapter — point it at a directory and
-          it implements the same <code>Adapter</code> contract as the cloud
-          adapters using <code>node:fs/promises</code>. Each upload writes the
-          body and a sidecar <code>.meta.json</code> file alongside it
-          (Content-Type, ETag, user metadata) so reads round-trip cleanly. Not
-          for production: there's no replication, no signing, no auth.
-        </p>
-        <CodeBlock code={FS_EXAMPLE} lang="ts" />
-        <ul>
-          <li>
+    <section>
+      <Heading as="h3" id="adapter-fs">
+        Filesystem
+      </Heading>
+      <p>
+        Local filesystem. The dev/test adapter — point it at a directory and it
+        implements the same <code>Adapter</code> contract as the cloud adapters
+        using <code>node:fs/promises</code>. Each upload writes the body and a
+        sidecar <code>.meta.json</code> file alongside it (Content-Type, ETag,
+        user metadata) so reads round-trip cleanly. Not for production: there's
+        no replication, no signing, no auth.
+      </p>
+      <CodeBlock code={FS_EXAMPLE} lang="ts" />
+      <div className="flex flex-col gap-2">
+        <Heading as="h4" id="adapter-fs-options">
+          Options
+        </Heading>
+        <ul className="!list-none !pl-0 !gap-0 rounded-md border border-dotted divide-y divide-dotted">
+          <li className="px-4 py-3">
             <code>root</code> — required. Absolute or relative directory the
             adapter manages. Created on first upload. All operations are scoped
             to this directory; keys that resolve outside it (e.g.{" "}
             <code>../etc/passwd</code>) throw <code>Provider</code>.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>urlBaseUrl</code> — optional. When set, <code>url(key)</code>{" "}
             returns <code>{`\`\${urlBaseUrl}/\${key}\``}</code> — useful when a
             dev server (Next.js <code>/public</code> mount,{" "}
@@ -468,14 +508,14 @@ export const Adapters = () => (
             <code>root</code>. When unset, <code>url()</code> returns a{" "}
             <code>file://</code> URL — fine for CLIs/tests, not browsers.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <code>defaultUrlExpiresIn</code> — number of seconds, optional.
             Threaded into the <code>?expires=</code> query string of{" "}
             <code>signedUploadUrl()</code> for parity with the cloud adapters.
             Defaults to 3600. The fs adapter does not enforce expiry itself; a
             dev upload-handler can validate the param.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <span className="text-foreground">Storage layout.</span> Body at{" "}
             <code>{`\${root}/\${key}`}</code>; sidecar at{" "}
             <code>{`\${root}/\${key}.meta.json`}</code>. Sidecars survive{" "}
@@ -483,10 +523,10 @@ export const Adapters = () => (
             <code>list()</code> hides them. ETag is a SHA-1-derived stable hash
             computed at upload time.
           </li>
-          <li>
+          <li className="px-4 py-3">
             <span className="text-foreground">Limitations.</span>{" "}
             <code>signedUploadUrl()</code> throws without{" "}
-            <code>urlBaseUrl</code>— there's no upload server to sign against.{" "}
+            <code>urlBaseUrl</code> — there's no upload server to sign against.{" "}
             <code>url()</code> throws on <code>responseContentDisposition</code>{" "}
             without <code>urlBaseUrl</code>: <code>file://</code> has no
             signature in which to bind the override. Files written by hand into{" "}
@@ -496,7 +536,7 @@ export const Adapters = () => (
             absent.
           </li>
         </ul>
-      </TabsContent>
-    </Tabs>
+      </div>
+    </section>
   </section>
 );
