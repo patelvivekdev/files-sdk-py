@@ -57,6 +57,20 @@ const url = await files.url("hello.txt");`,
     label: "MinIO",
     lang: "tsx",
   },
+  {
+    code: `import { Files } from "files-sdk";
+import { gcs } from "files-sdk/gcs";
+
+const files = new Files({
+  adapter: gcs({ bucket: "uploads" }),
+});
+
+await files.upload("hello.txt", "world");
+const url = await files.url("hello.txt");`,
+    id: "gcs",
+    label: "GCS",
+    lang: "tsx",
+  },
 ] as const;
 
 export const Demo = () => <CodeTabs tabs={TABS} />;

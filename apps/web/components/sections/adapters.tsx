@@ -58,6 +58,19 @@ const files = new Files({
   }),
 });`;
 
+const GCS_EXAMPLE = `import { Files } from "files-sdk";
+import { gcs } from "files-sdk/gcs";
+
+const files = new Files({
+  adapter: gcs({
+    bucket: "uploads",
+    // No credentials needed in most setups — the @google-cloud/storage
+    // SDK auto-discovers Application Default Credentials from
+    // GOOGLE_APPLICATION_CREDENTIALS, gcloud auth, or the runtime
+    // service account on Cloud Run / GKE / GCE.
+  }),
+});`;
+
 export const Adapters = () => (
   <section>
     <Heading as="h2">Adapters</Heading>
@@ -75,6 +88,7 @@ export const Adapters = () => (
         <TabsTrigger value="r2">R2</TabsTrigger>
         <TabsTrigger value="vercel-blob">Vercel Blob</TabsTrigger>
         <TabsTrigger value="minio">MinIO</TabsTrigger>
+        <TabsTrigger value="gcs">GCS</TabsTrigger>
       </TabsList>
 
       <TabsContent className="flex flex-col gap-4" value="s3">
@@ -206,6 +220,48 @@ export const Adapters = () => (
             signing. Use this if you've fronted MinIO with a CDN or set a public
             bucket policy. When unset, <code>url()</code> returns a presigned
             GetObject (1-hour default).
+          </li>
+        </ul>
+      </TabsContent>
+
+      <TabsContent className="flex flex-col gap-4" value="gcs">
+        <p>
+          Google Cloud Storage via the official{" "}
+          <code>@google-cloud/storage</code> SDK. Auth follows the standard
+          Google chain — Application Default Credentials by default, with
+          explicit overrides if you need them.
+        </p>
+        <CodeBlock code={GCS_EXAMPLE} lang="ts" />
+        <ul>
+          <li>
+            <code>bucket</code> — required.
+          </li>
+          <li>
+            <code>projectId</code> — optional. Falls back to{" "}
+            <code>GOOGLE_CLOUD_PROJECT</code> then <code>GCLOUD_PROJECT</code>.
+            ADC carries a project ID, so this is rarely needed.
+          </li>
+          <li>
+            <code>keyFilename</code> — optional. Path to a service-account JSON
+            file. Use this when ADC isn't available.
+          </li>
+          <li>
+            <code>credentials</code> — optional.{" "}
+            <code>{"{ client_email, private_key }"}</code>. Useful when you only
+            have those fields as separate env vars and don't want to materialize
+            a JSON file. <code>url()</code> and <code>signedUploadUrl()</code>{" "}
+            need either inline credentials or the{" "}
+            <code>iam.serviceAccounts.signBlob</code> permission on the runtime
+            service account so the SDK can fall back to IAM SignBlob.
+          </li>
+          <li>
+            <code>publicBaseUrl</code> — optional. When set, <code>url()</code>{" "}
+            returns <code>{`\`\${publicBaseUrl}/\${key}\``}</code> and skips
+            signing. For a public GCS bucket the natural value is{" "}
+            <code>https://storage.googleapis.com/&lt;bucket&gt;</code>; or point
+            at a Cloud CDN / load balancer host. When unset, <code>url()</code>{" "}
+            returns a V4 signed read URL (1-hour default; GCS caps V4 at 7
+            days).
           </li>
         </ul>
       </TabsContent>

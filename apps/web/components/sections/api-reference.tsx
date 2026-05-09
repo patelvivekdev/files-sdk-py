@@ -30,8 +30,8 @@ if (cursor) {
   const next = await files.list({ prefix: "avatars/", cursor });
 }`;
 
-const URL_EXAMPLE = `// One call, every adapter. S3 / R2 / MinIO sign a GetObject (1h default,
-// override with { expiresIn }); Vercel Blob (public) returns its CDN URL.
+const URL_EXAMPLE = `// One call, every adapter. S3 / R2 / MinIO / GCS sign a GetObject (1h
+// default, override with { expiresIn }); Vercel Blob (public) returns its CDN URL.
 // If you configured \`publicBaseUrl\` on the adapter, that wins and signing
 // is skipped.
 const url = await files.url("avatars/abc.png");
@@ -196,7 +196,7 @@ export const ApiReference = () => (
       <p>
         Returns a URL the caller can use to fetch <code>key</code>. Every
         adapter returns the most direct URL it can produce. Signing adapters
-        (S3, R2 over HTTP, MinIO, R2 binding when HTTP credentials are also
+        (S3, R2 over HTTP, MinIO, GCS, R2 binding when HTTP credentials are also
         configured) sign a <code>GetObject</code> — defaulting to a 1-hour
         expiry, override per-call via <code>{"{ expiresIn }"}</code> or
         per-adapter via <code>defaultUrlExpiresIn</code>. If the adapter is
@@ -247,8 +247,8 @@ export const ApiReference = () => (
         browser) can upload directly to the bucket without proxying bytes
         through your server. The flow is: your server calls{" "}
         <code>signedUploadUrl()</code>, returns the result to the browser, the
-        browser uploads straight to S3/R2/MinIO. Bandwidth and CPU stay off your
-        server.
+        browser uploads straight to S3/R2/MinIO/GCS. Bandwidth and CPU stay off
+        your server.
       </p>
       <p>
         Without <code>maxSize</code>, the adapter returns a presigned PUT URL —

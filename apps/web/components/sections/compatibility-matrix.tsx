@@ -29,6 +29,7 @@ const COLUMNS = [
   { key: "vb-public", label: "public", parent: "Vercel Blob" },
   { key: "vb-private", label: "private", parent: "Vercel Blob" },
   { key: "minio", label: "MinIO", parent: "MinIO" },
+  { key: "gcs", label: "GCS", parent: "GCS" },
 ] as const;
 
 type ColumnKey = (typeof COLUMNS)[number]["key"];
@@ -36,6 +37,7 @@ type ColumnKey = (typeof COLUMNS)[number]["key"];
 const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
   {
     cells: {
+      gcs: ok,
       minio: ok,
       "r2-binding": ok,
       "r2-http": ok,
@@ -48,6 +50,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
   },
   {
     cells: {
+      gcs: ok,
       minio: ok,
       "r2-binding": ok,
       "r2-http": ok,
@@ -60,6 +63,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
   },
   {
     cells: {
+      gcs: ok,
       minio: ok,
       "r2-binding": ok,
       "r2-http": ok,
@@ -72,6 +76,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
   },
   {
     cells: {
+      gcs: ok,
       minio: ok,
       "r2-binding": ok,
       "r2-http": ok,
@@ -84,6 +89,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
   },
   {
     cells: {
+      gcs: ok,
       minio: ok,
       "r2-binding": ok,
       "r2-http": ok,
@@ -96,6 +102,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
   },
   {
     cells: {
+      gcs: ok,
       minio: ok,
       "r2-binding": warn(
         "Read-then-write — Workers bindings have no native copy command, so the source is fetched and re-uploaded. Not server-side atomic; concurrent writes to the source between the get and put are not detected."
@@ -112,6 +119,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
   },
   {
     cells: {
+      gcs: ok,
       minio: ok,
       "r2-binding": no(
         "Throws unless `publicBaseUrl` is set on the adapter (an r2.dev subdomain or a custom domain). For a presigned URL from a Worker, switch to hybrid mode by also passing `accountId` + `accessKeyId` + `secretAccessKey`."
@@ -130,6 +138,7 @@ const ROWS: { method: string; cells: Record<ColumnKey, Cell> }[] = [
   },
   {
     cells: {
+      gcs: ok,
       minio: ok,
       "r2-binding": no(
         "Workers bindings can't sign uploads — the secret access key is not available to the runtime. Use hybrid mode (binding + HTTP credentials) to issue presigned upload URLs."

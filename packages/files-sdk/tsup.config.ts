@@ -9,6 +9,7 @@ export default defineConfig({
     "src/r2/index.ts",
     "src/vercel-blob/index.ts",
     "src/minio/index.ts",
+    "src/gcs/index.ts",
   ],
   format: ["esm"],
   sourcemap: true,
