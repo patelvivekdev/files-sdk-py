@@ -6,6 +6,7 @@ import {
   useCurrentFrame,
 } from "remotion";
 
+import { AiScene } from "./ai-scene";
 import { Background } from "./background";
 import { Browser } from "./browser";
 import { buildLines, charsAtEndOfLine, STEP_LINES } from "./code";
@@ -147,6 +148,13 @@ export const FilesSdkLaunch: React.FC = () => (
       layout="none"
     >
       <CodeAndBrowser />
+    </Sequence>
+    <Sequence
+      from={TIMING.ai.from}
+      durationInFrames={TIMING.ai.duration}
+      layout="none"
+    >
+      <AiScene />
     </Sequence>
     <Sequence
       from={TIMING.outro.from}
