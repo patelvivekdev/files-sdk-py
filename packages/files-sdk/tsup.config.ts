@@ -25,6 +25,7 @@ export default defineConfig({
     "src/box/index.ts",
     "src/ai-sdk/index.ts",
     "src/openai/index.ts",
+    "src/claude/index.ts",
   ],
   format: ["esm"],
   sourcemap: true,

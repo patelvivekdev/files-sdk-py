@@ -59,6 +59,7 @@ const sections: Section[] = [
     children: [
       { id: "openai-tools", label: "OpenAI" },
       { id: "ai-sdk-tools", label: "Vercel AI SDK" },
+      { id: "claude-tools", label: "Claude Agent SDK" },
     ],
     id: "ai-tools",
     label: "AI tools",

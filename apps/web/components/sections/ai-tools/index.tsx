@@ -1,5 +1,6 @@
 import { Heading } from "@/components/heading";
 
+import { Claude } from "./claude";
 import { Openai } from "./openai";
 import { VercelAiSdk } from "./vercel";
 
@@ -22,5 +23,6 @@ export const AiTools = () => (
     </p>
     <Openai />
     <VercelAiSdk />
+    <Claude />
   </section>
 );
