@@ -1,4 +1,12 @@
 import type { Files } from "../index.js";
+import { resolveApproval } from "../internal/ai-tools/approval.js";
+import type { ApprovalConfig } from "../internal/ai-tools/approval.js";
+import { WRITE_TOOL_NAMES } from "../internal/ai-tools/schemas.js";
+import type {
+  FileReadToolName,
+  FileToolName,
+  FileWriteToolName,
+} from "../internal/ai-tools/schemas.js";
 import {
   copyFile,
   deleteFile,
@@ -11,39 +19,12 @@ import {
 } from "./tools.js";
 import type { ToolOverrides } from "./types.js";
 
-export type FileReadToolName =
-  | "listFiles"
-  | "getFileMetadata"
-  | "downloadFile"
-  | "getFileUrl";
-
-export type FileWriteToolName =
-  | "uploadFile"
-  | "deleteFile"
-  | "copyFile"
-  | "signUploadUrl";
-
-export type FileToolName = FileReadToolName | FileWriteToolName;
-
-/**
- * Whether write operations require user approval.
- *
- * - `true` — all write tools need approval (default)
- * - `false` — no approval needed for any write tool
- * - object — per-tool override; unspecified write tools default to `true`
- *
- * @example
- * ```ts
- * requireApproval: {
- *   deleteFile: true,
- *   uploadFile: false,
- *   copyFile: false,
- * }
- * ```
- */
-export type ApprovalConfig =
-  | boolean
-  | Partial<Record<FileWriteToolName, boolean>>;
+export type {
+  ApprovalConfig,
+  FileReadToolName,
+  FileToolName,
+  FileWriteToolName,
+};
 
 export interface FileToolsOptions {
   /**
@@ -94,23 +75,6 @@ export interface FileTools {
 }
 
 export type ReadOnlyFileTools = Pick<FileTools, FileReadToolName>;
-
-const WRITE_TOOL_NAMES: ReadonlySet<FileWriteToolName> = new Set([
-  "uploadFile",
-  "deleteFile",
-  "copyFile",
-  "signUploadUrl",
-]);
-
-const resolveApproval = (
-  toolName: FileWriteToolName,
-  config: ApprovalConfig
-): boolean => {
-  if (typeof config === "boolean") {
-    return config;
-  }
-  return config[toolName] ?? true;
-};
 
 /**
  * Create a set of files-sdk tools for the Vercel AI SDK.
