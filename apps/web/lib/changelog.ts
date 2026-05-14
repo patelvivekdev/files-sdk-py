@@ -309,10 +309,7 @@ const parseChangelog = (source: string): ChangelogRelease[] => {
   return releases;
 };
 
-const here = import.meta.dirname;
-
 const candidatePaths = [
-  join(here, "..", "..", "..", "packages", "files-sdk", "CHANGELOG.md"),
   join(process.cwd(), "..", "..", "packages", "files-sdk", "CHANGELOG.md"),
   join(process.cwd(), "packages", "files-sdk", "CHANGELOG.md"),
 ];
