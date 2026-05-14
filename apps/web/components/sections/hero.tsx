@@ -10,20 +10,17 @@ import * as icons from "./icons";
 const EASE = [0.16, 1, 0.3, 1] as const;
 
 const iconLabels: Record<keyof typeof icons, string> = {
-  Akamai: "Akamai",
   AzureBlobStorage: "Azure Blob Storage",
   Box: "Box",
   DigitalOcean: "DigitalOcean Spaces",
   Dropbox: "Dropbox",
   GoogleCloudStorage: "Google Cloud Storage",
   GoogleDrive: "Google Drive",
-  Hetzner: "Hetzner",
   Minio: "MinIO",
   NetlifyBlobs: "Netlify Blobs",
   OneDrive: "OneDrive",
   R2: "Cloudflare R2",
   S3: "Amazon S3",
-  Storj: "Storj",
   Supabase: "Supabase Storage",
   UploadThing: "UploadThing",
   Vercel: "Vercel Blob",
@@ -88,6 +85,7 @@ export const Hero = () => (
           </Tooltip>
         );
       })}
+      <span className="text-muted-foreground text-xs ml-3">+ 6 more</span>
     </div>
   </section>
 );
