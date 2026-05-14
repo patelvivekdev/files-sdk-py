@@ -73,6 +73,7 @@ interface RootLayoutProps {
 const RootLayout = ({ children, toc }: RootLayoutProps) => (
   <html
     lang="en"
+    data-scroll-behavior="smooth"
     className={cn(
       "scroll-smooth touch-manipulation font-sans antialiased",
       geistSans.variable,
