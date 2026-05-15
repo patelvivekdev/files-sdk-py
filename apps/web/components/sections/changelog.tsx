@@ -108,9 +108,10 @@ export const Release = ({ release }: { release: ChangelogRelease }) => (
           </div>
         ) : null}
         <ul className="flex list-none flex-col gap-6 pl-0">
-          {group.items.map((item) => (
+          {group.items.map((item, itemIndex) => (
             <li
-              key={item.id}
+              // oxlint-disable-next-line react/no-array-index-key -- multiple items can share a commit id (changesets bundles them)
+              key={`${item.id}-${itemIndex}`}
               className="flex flex-col gap-3 border-t border-dotted pt-6 first:border-t-0 first:pt-0"
             >
               <div className="flex items-center gap-2">

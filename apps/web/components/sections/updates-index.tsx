@@ -4,7 +4,6 @@ import { ArrowRightIcon, SearchIcon } from "lucide-react";
 import Link from "next/link";
 import { useId, useMemo, useState } from "react";
 
-import { KindBadge } from "@/components/sections/changelog";
 import type { ReleaseSummary } from "@/lib/changelog";
 
 interface UpdatesIndexProps {
@@ -55,7 +54,7 @@ export const UpdatesIndex = ({ releases }: UpdatesIndexProps) => {
         </p>
       ) : (
         <ul className="flex list-none flex-col gap-0 pl-0">
-          {filtered.map(({ slug, version, kinds, itemCount, headline }) => (
+          {filtered.map(({ slug, version, itemCount, headline }) => (
             <li className="border-b border-dotted last:border-b-0" key={slug}>
               <Link
                 className="group flex items-start gap-4 py-4 transition-colors hover:text-foreground"
@@ -66,9 +65,6 @@ export const UpdatesIndex = ({ releases }: UpdatesIndexProps) => {
                     <span className="font-mono text-sm text-foreground">
                       v{version}
                     </span>
-                    {kinds.map((kind) => (
-                      <KindBadge key={kind} kind={kind} />
-                    ))}
                     <span className="text-xs text-muted-foreground">
                       {itemCount} {itemCount === 1 ? "change" : "changes"}
                     </span>

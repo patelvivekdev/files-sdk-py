@@ -44,14 +44,9 @@ const ReleasePage = async ({ params }: ReleasePageProps) => {
     notFound();
   }
 
-  const { headline } = getReleaseSummary(release);
-  const description =
-    headline ||
-    `Release notes for files-sdk v${release.version}, parsed from the package changelog.`;
-
   return (
     <>
-      <PageHero description={description} title={`v${release.version}`} />
+      <PageHero title={`v${release.version}`} />
       <FadeIn>
         <Release release={release} />
       </FadeIn>
