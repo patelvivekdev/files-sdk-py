@@ -20,9 +20,6 @@ const files = new Files({
 
 export const Uploadthing = () => (
   <section>
-    <Heading as="h2" id="adapter-uploadthing">
-      UploadThing
-    </Heading>
     <p>
       UploadThing via the official <code>uploadthing/server</code> SDK.
       UploadThing generates its own internal file keys, so the adapter maps the
@@ -32,7 +29,7 @@ export const Uploadthing = () => (
     </p>
     <CodeBlock code={UPLOADTHING_EXAMPLE} lang="ts" />
     <div className="flex flex-col gap-2">
-      <Heading as="h3" id="adapter-uploadthing-options">
+      <Heading as="h2" id="options">
         Options
       </Heading>
       <Accordion className="rounded-md border-dotted" type="multiple">
@@ -101,7 +98,7 @@ export const Uploadthing = () => (
       </Accordion>
     </div>
     <div className="flex flex-col gap-2">
-      <Heading as="h3" id="adapter-uploadthing-limitations">
+      <Heading as="h2" id="limitations">
         Limitations
       </Heading>
       <p>

@@ -21,9 +21,6 @@ const files = new Files({
 
 export const Fs = () => (
   <section>
-    <Heading as="h2" id="adapter-fs">
-      Filesystem
-    </Heading>
     <p>
       Local filesystem. The dev/test adapter - point it at a directory and it
       implements the same <code>Adapter</code> contract as the cloud adapters
@@ -34,7 +31,7 @@ export const Fs = () => (
     </p>
     <CodeBlock code={FS_EXAMPLE} lang="ts" />
     <div className="flex flex-col gap-2">
-      <Heading as="h3" id="adapter-fs-options">
+      <Heading as="h2" id="options">
         Options
       </Heading>
       <Accordion className="rounded-md border-dotted" type="multiple">
@@ -76,7 +73,7 @@ export const Fs = () => (
       </Accordion>
     </div>
     <div className="flex flex-col gap-2">
-      <Heading as="h3" id="adapter-fs-storage-layout">
+      <Heading as="h2" id="storage-layout">
         Storage layout
       </Heading>
       <p>
@@ -88,7 +85,7 @@ export const Fs = () => (
       </p>
     </div>
     <div className="flex flex-col gap-2">
-      <Heading as="h3" id="adapter-fs-limitations">
+      <Heading as="h2" id="limitations">
         Limitations
       </Heading>
       <p>

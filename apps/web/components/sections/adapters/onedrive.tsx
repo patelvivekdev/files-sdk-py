@@ -24,9 +24,6 @@ const files = new Files({
 
 export const Onedrive = () => (
   <section>
-    <Heading as="h2" id="adapter-onedrive">
-      OneDrive
-    </Heading>
     <p>
       OneDrive and SharePoint document libraries via the official{" "}
       <code>@microsoft/microsoft-graph-client</code> SDK. Microsoft Graph is
@@ -41,7 +38,7 @@ export const Onedrive = () => (
     </p>
     <CodeBlock code={ONEDRIVE_EXAMPLE} lang="ts" />
     <div className="flex flex-col gap-2">
-      <Heading as="h3" id="adapter-onedrive-options">
+      <Heading as="h2" id="options">
         Options
       </Heading>
       <Accordion className="rounded-md border-dotted" type="multiple">
@@ -162,7 +159,7 @@ export const Onedrive = () => (
       </Accordion>
     </div>
     <div className="flex flex-col gap-2">
-      <Heading as="h3" id="adapter-onedrive-limitations">
+      <Heading as="h2" id="limitations">
         Limitations
       </Heading>
       <p>

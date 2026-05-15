@@ -17,9 +17,6 @@ const files = new Files({
 
 export const BackblazeB2 = () => (
   <section>
-    <Heading as="h2" id="adapter-backblaze-b2">
-      Backblaze B2
-    </Heading>
     <p>
       Backblaze B2 via its S3-compatible API. A thin wrapper around the S3
       adapter - endpoint derived from the cluster code (<code>us-west-002</code>
@@ -31,7 +28,7 @@ export const BackblazeB2 = () => (
     </p>
     <CodeBlock code={B2_EXAMPLE} lang="ts" />
     <div className="flex flex-col gap-2">
-      <Heading as="h3" id="adapter-backblaze-b2-options">
+      <Heading as="h2" id="options">
         Options
       </Heading>
       <Accordion className="rounded-md border-dotted" type="multiple">

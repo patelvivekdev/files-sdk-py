@@ -16,9 +16,6 @@ const files = new Files({
 
 export const Filebase = () => (
   <section>
-    <Heading as="h2" id="adapter-filebase">
-      Filebase
-    </Heading>
     <p>
       Filebase via its S3-compatible API. Filebase fronts decentralized storage
       networks (IPFS, Sia, Storj) behind a standard S3 gateway - the network is
@@ -30,7 +27,7 @@ export const Filebase = () => (
     </p>
     <CodeBlock code={FILEBASE_EXAMPLE} lang="ts" />
     <div className="flex flex-col gap-2">
-      <Heading as="h3" id="adapter-filebase-options">
+      <Heading as="h2" id="options">
         Options
       </Heading>
       <Accordion className="rounded-md border-dotted" type="multiple">

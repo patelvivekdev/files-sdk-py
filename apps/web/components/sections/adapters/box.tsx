@@ -30,9 +30,6 @@ const files = new Files({
 
 export const Box = () => (
   <section>
-    <Heading as="h2" id="adapter-box">
-      Box
-    </Heading>
     <p>
       Box via the official <code>box-typescript-sdk-gen</code> SDK. Box files
       live by ID, not by path, so the adapter walks <code>rootFolderId</code>{" "}
@@ -45,7 +42,7 @@ export const Box = () => (
     </p>
     <CodeBlock code={BOX_EXAMPLE} lang="ts" />
     <div className="flex flex-col gap-2">
-      <Heading as="h3" id="adapter-box-options">
+      <Heading as="h2" id="options">
         Options
       </Heading>
       <Accordion className="rounded-md border-dotted" type="multiple">
@@ -155,7 +152,7 @@ export const Box = () => (
       </Accordion>
     </div>
     <div className="flex flex-col gap-2">
-      <Heading as="h3" id="adapter-box-limitations">
+      <Heading as="h2" id="limitations">
         Limitations
       </Heading>
       <p>
