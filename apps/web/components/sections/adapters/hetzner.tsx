@@ -27,7 +27,7 @@ export const Hetzner = () => (
       Cloud Console under Object Storage → Credentials.
     </p>
     <CodeBlock code={HETZNER_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -100,6 +100,6 @@ export const Hetzner = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
+    </section>
   </section>
 );

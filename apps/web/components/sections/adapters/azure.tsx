@@ -25,7 +25,7 @@ export const Azure = () => (
       methods keep working.
     </p>
     <CodeBlock code={AZURE_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -109,8 +109,8 @@ export const Azure = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
-    <div className="flex flex-col gap-2">
+    </section>
+    <section>
       <Heading as="h2" id="limitations">
         Limitations
       </Heading>
@@ -125,6 +125,6 @@ export const Azure = () => (
         drop down to <code>adapter.raw</code> or wait for a future{" "}
         <code>client</code> option.
       </p>
-    </div>
+    </section>
   </section>
 );

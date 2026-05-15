@@ -24,7 +24,7 @@ export const Gcs = () => (
       Credentials by default, with explicit overrides if you need them.
     </p>
     <CodeBlock code={GCS_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -82,6 +82,6 @@ export const Gcs = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
+    </section>
   </section>
 );

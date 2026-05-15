@@ -27,7 +27,7 @@ export const Vultr = () => (
       customer portal under Object Storage → your subscription → Overview.
     </p>
     <CodeBlock code={VULTR_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -103,6 +103,6 @@ export const Vultr = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
+    </section>
   </section>
 );

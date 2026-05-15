@@ -30,7 +30,7 @@ export const IbmCos = () => (
       <code>IBM_COS_SECRET_ACCESS_KEY</code>.
     </p>
     <CodeBlock code={IBM_COS_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -117,6 +117,6 @@ export const IbmCos = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
+    </section>
   </section>
 );

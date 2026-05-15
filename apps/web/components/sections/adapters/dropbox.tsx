@@ -32,7 +32,7 @@ export const Dropbox = () => (
       and team-space deployments.
     </p>
     <CodeBlock code={DROPBOX_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -138,8 +138,8 @@ export const Dropbox = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
-    <div className="flex flex-col gap-2">
+    </section>
+    <section>
       <Heading as="h2" id="limitations">
         Limitations
       </Heading>
@@ -165,6 +165,6 @@ export const Dropbox = () => (
         rather than streaming through the SDK, since <code>filesDownload</code>{" "}
         buffers the full body.
       </p>
-    </div>
+    </section>
   </section>
 );

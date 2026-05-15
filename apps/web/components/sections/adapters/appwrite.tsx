@@ -25,7 +25,7 @@ export const Appwrite = () => (
       auto-loading configuration from environment variables.
     </p>
     <CodeBlock code={APPWRITE_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -68,8 +68,8 @@ export const Appwrite = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
-    <div className="flex flex-col gap-2">
+    </section>
+    <section>
       <Heading as="h2" id="limitations">
         Limitations
       </Heading>
@@ -91,6 +91,6 @@ export const Appwrite = () => (
         <code>name</code> differs from <code>$id</code> won&apos;t be matched by
         prefix.
       </p>
-    </div>
+    </section>
   </section>
 );

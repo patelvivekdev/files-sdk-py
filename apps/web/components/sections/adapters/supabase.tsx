@@ -25,7 +25,7 @@ export const Supabase = () => (
       the rest of your app (auth, postgrest).
     </p>
     <CodeBlock code={SUPABASE_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -100,8 +100,8 @@ export const Supabase = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
-    <div className="flex flex-col gap-2">
+    </section>
+    <section>
       <Heading as="h2" id="limitations">
         Limitations
       </Heading>
@@ -116,6 +116,6 @@ export const Supabase = () => (
         encodes <code>offset</code> as a numeric cursor string so it threads
         through the unified API.
       </p>
-    </div>
+    </section>
   </section>
 );

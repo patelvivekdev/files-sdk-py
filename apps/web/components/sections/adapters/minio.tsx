@@ -24,7 +24,7 @@ export const Minio = () => (
       <code>MINIO_ACCESS_KEY_ID</code> and <code>MINIO_SECRET_ACCESS_KEY</code>.
     </p>
     <CodeBlock code={MINIO_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -85,6 +85,6 @@ export const Minio = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
+    </section>
   </section>
 );

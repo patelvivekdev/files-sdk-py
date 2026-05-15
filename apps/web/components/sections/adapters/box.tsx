@@ -41,7 +41,7 @@ export const Box = () => (
       <code>Authentication</code> classes.
     </p>
     <CodeBlock code={BOX_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -150,8 +150,8 @@ export const Box = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
-    <div className="flex flex-col gap-2">
+    </section>
+    <section>
       <Heading as="h2" id="limitations">
         Limitations
       </Heading>
@@ -178,6 +178,6 @@ export const Box = () => (
         user-supplied content types on file content, so <code>head()</code> and{" "}
         <code>list()</code> return a type inferred from the filename extension.
       </p>
-    </div>
+    </section>
   </section>
 );

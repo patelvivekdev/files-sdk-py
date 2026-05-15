@@ -27,7 +27,7 @@ export const IdriveE2 = () => (
       iDrive e2 dashboard under Access Keys.
     </p>
     <CodeBlock code={IDRIVE_E2_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -100,6 +100,6 @@ export const IdriveE2 = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
+    </section>
   </section>
 );

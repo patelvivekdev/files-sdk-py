@@ -27,7 +27,7 @@ export const Storj = () => (
       <code>uplink share --register</code>.
     </p>
     <CodeBlock code={STORJ_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -103,6 +103,6 @@ export const Storj = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
+    </section>
   </section>
 );

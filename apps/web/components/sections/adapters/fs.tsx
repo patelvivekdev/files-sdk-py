@@ -30,7 +30,7 @@ export const Fs = () => (
       replication, no signing, no auth.
     </p>
     <CodeBlock code={FS_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -71,8 +71,8 @@ export const Fs = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
-    <div className="flex flex-col gap-2">
+    </section>
+    <section>
       <Heading as="h2" id="storage-layout">
         Storage layout
       </Heading>
@@ -83,8 +83,8 @@ export const Fs = () => (
         <code>list()</code> hides them. ETag is a SHA-1-derived stable hash
         computed at upload time.
       </p>
-    </div>
-    <div className="flex flex-col gap-2">
+    </section>
+    <section>
       <Heading as="h2" id="limitations">
         Limitations
       </Heading>
@@ -97,6 +97,6 @@ export const Fs = () => (
         readable - <code>contentType</code> falls back to{" "}
         <code>application/octet-stream</code> and <code>etag</code> is absent.
       </p>
-    </div>
+    </section>
   </section>
 );

@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 
 import { ADAPTERS } from "@/lib/adapters";
+import { getChangelog } from "@/lib/changelog";
 
 const protocol = process.env.NODE_ENV === "production" ? "https" : "http";
 const origin = process.env.VERCEL_PROJECT_PRODUCTION_URL ?? "localhost:3000";
@@ -15,6 +16,10 @@ const routes: { path: string; priority: number }[] = [
   ...ADAPTERS.map(({ slug }) => ({
     path: `/adapters/${slug}`,
     priority: 0.6,
+  })),
+  ...getChangelog().map(({ slug }) => ({
+    path: `/updates/${slug}`,
+    priority: 0.5,
   })),
 ];
 

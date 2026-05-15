@@ -30,7 +30,7 @@ export const Ovhcloud = () => (
       OVHcloud Control Panel under Public Cloud → Object Storage → S3 users.
     </p>
     <CodeBlock code={OVHCLOUD_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -107,6 +107,6 @@ export const Ovhcloud = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
+    </section>
   </section>
 );

@@ -37,7 +37,7 @@ export const GoogleDrive = () => (
       env-var fallback.
     </p>
     <CodeBlock code={GOOGLE_DRIVE_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -150,8 +150,8 @@ export const GoogleDrive = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
-    <div className="flex flex-col gap-2">
+    </section>
+    <section>
       <Heading as="h2" id="limitations">
         Limitations
       </Heading>
@@ -176,6 +176,6 @@ export const GoogleDrive = () => (
         reserved (the adapter uses that prefix on <code>appProperties</code> for
         bookkeeping).
       </p>
-    </div>
+    </section>
   </section>
 );

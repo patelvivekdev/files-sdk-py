@@ -30,7 +30,7 @@ export const VercelBlob = () => (
       public URL fetch - there is no permanent public URL for private blobs, so{" "}
       <code>url()</code> throws. Need both? Use two adapters.
     </p>
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="limitations">
         Limitations
       </Heading>
@@ -46,6 +46,6 @@ export const VercelBlob = () => (
         supported by the underlying API, so it round-trips as{" "}
         <code>undefined</code>.
       </p>
-    </div>
+    </section>
   </section>
 );

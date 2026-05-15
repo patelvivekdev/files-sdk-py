@@ -27,7 +27,7 @@ export const Scaleway = () => (
       API Keys.
     </p>
     <CodeBlock code={SCALEWAY_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -99,6 +99,6 @@ export const Scaleway = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
+    </section>
   </section>
 );

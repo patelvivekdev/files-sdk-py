@@ -28,7 +28,7 @@ export const Uploadthing = () => (
       routes by your key, not the auto-generated one.
     </p>
     <CodeBlock code={UPLOADTHING_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -96,8 +96,8 @@ export const Uploadthing = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
-    <div className="flex flex-col gap-2">
+    </section>
+    <section>
       <Heading as="h2" id="limitations">
         Limitations
       </Heading>
@@ -119,6 +119,6 @@ export const Uploadthing = () => (
         throws on <code>responseContentDisposition</code> - UploadThing has no
         Content-Disposition override on signed or CDN URLs.
       </p>
-    </div>
+    </section>
   </section>
 );

@@ -22,7 +22,7 @@ export const S3 = () => (
       chain - environment, IAM role, shared profile.
     </p>
     <CodeBlock code={S3_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -70,6 +70,6 @@ export const S3 = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
+    </section>
   </section>
 );

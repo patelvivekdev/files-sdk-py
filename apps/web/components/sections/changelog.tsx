@@ -1,8 +1,6 @@
 import type { BundledLanguage } from "shiki";
 
 import { CodeBlock } from "@/components/code-block";
-import { Heading } from "@/components/heading";
-import { getChangelog } from "@/lib/changelog";
 import type {
   ChangeKind,
   ChangelogBlock,
@@ -89,7 +87,7 @@ const renderBlock = (block: ChangelogBlock, key: string) => {
   );
 };
 
-const KindBadge = ({ kind }: { kind: ChangeKind }) => (
+export const KindBadge = ({ kind }: { kind: ChangeKind }) => (
   <span
     className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider ${KIND_CLASS[kind]}`}
   >
@@ -97,11 +95,8 @@ const KindBadge = ({ kind }: { kind: ChangeKind }) => (
   </span>
 );
 
-const Release = ({ release }: { release: ChangelogRelease }) => (
+export const Release = ({ release }: { release: ChangelogRelease }) => (
   <section>
-    <Heading as="h2" id={release.slug}>
-      v{release.version}
-    </Heading>
     {release.groups.map((group) => (
       <div
         className="flex flex-col gap-4"
@@ -141,14 +136,3 @@ const Release = ({ release }: { release: ChangelogRelease }) => (
     ))}
   </section>
 );
-
-export const Changelog = () => {
-  const releases = getChangelog();
-  return (
-    <div className="flex flex-col gap-16">
-      {releases.map((release) => (
-        <Release key={release.slug} release={release} />
-      ))}
-    </div>
-  );
-};

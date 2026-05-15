@@ -28,7 +28,7 @@ export const Tigris = () => (
       console (or via the Fly CLI: <code>fly storage create</code>).
     </p>
     <CodeBlock code={TIGRIS_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -102,6 +102,6 @@ export const Tigris = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
+    </section>
   </section>
 );

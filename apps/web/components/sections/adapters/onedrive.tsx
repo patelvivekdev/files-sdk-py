@@ -37,7 +37,7 @@ export const Onedrive = () => (
       cases.
     </p>
     <CodeBlock code={ONEDRIVE_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -157,8 +157,8 @@ export const Onedrive = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
-    <div className="flex flex-col gap-2">
+    </section>
+    <section>
       <Heading as="h2" id="limitations">
         Limitations
       </Heading>
@@ -185,6 +185,6 @@ export const Onedrive = () => (
         <code>list()</code> returns immediate-children files only at{" "}
         <code>rootFolderPath</code> - no recursion; subfolders are filtered out.
       </p>
-    </div>
+    </section>
   </section>
 );

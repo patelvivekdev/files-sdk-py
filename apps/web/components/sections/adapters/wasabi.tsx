@@ -28,7 +28,7 @@ export const Wasabi = () => (
       console under Access Keys.
     </p>
     <CodeBlock code={WASABI_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -107,6 +107,6 @@ export const Wasabi = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
+    </section>
   </section>
 );

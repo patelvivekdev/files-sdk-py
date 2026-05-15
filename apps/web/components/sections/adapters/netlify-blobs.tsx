@@ -39,7 +39,7 @@ export const NetlifyBlobs = () => (
       unified <code>StoredFile</code> shape works the same as on the cloud
       adapters.
     </p>
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -89,8 +89,8 @@ export const NetlifyBlobs = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
-    <div className="flex flex-col gap-2">
+    </section>
+    <section>
       <Heading as="h2" id="limitations">
         Limitations
       </Heading>
@@ -115,6 +115,6 @@ export const NetlifyBlobs = () => (
         uploads are buffered up-front because Netlify's <code>set()</code> has
         no streaming form.
       </p>
-    </div>
+    </section>
   </section>
 );

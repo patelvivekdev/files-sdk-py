@@ -29,7 +29,7 @@ export const Exoscale = () => (
       Generate IAM keys in the Exoscale Portal under IAM → API Keys.
     </p>
     <CodeBlock code={EXOSCALE_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -105,6 +105,6 @@ export const Exoscale = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
+    </section>
   </section>
 );

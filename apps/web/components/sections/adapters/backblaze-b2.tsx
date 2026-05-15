@@ -27,7 +27,7 @@ export const BackblazeB2 = () => (
       Application Keys; the bucket's cluster is shown next to its endpoint.
     </p>
     <CodeBlock code={B2_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -106,6 +106,6 @@ export const BackblazeB2 = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
+    </section>
   </section>
 );

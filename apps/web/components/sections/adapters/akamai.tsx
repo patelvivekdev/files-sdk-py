@@ -29,7 +29,7 @@ export const Akamai = () => (
       Cloud Manager under Object Storage → Access Keys.
     </p>
     <CodeBlock code={AKAMAI_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -105,6 +105,6 @@ export const Akamai = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
+    </section>
   </section>
 );

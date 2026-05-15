@@ -24,7 +24,7 @@ export const DigitalOceanSpaces = () => (
       <code>DO_SPACES_KEY</code> and <code>DO_SPACES_SECRET</code>.
     </p>
     <CodeBlock code={DIGITALOCEAN_SPACES_EXAMPLE} lang="ts" />
-    <div className="flex flex-col gap-2">
+    <section>
       <Heading as="h2" id="options">
         Options
       </Heading>
@@ -101,6 +101,6 @@ export const DigitalOceanSpaces = () => (
           </p>
         </PropAccordionItem>
       </Accordion>
-    </div>
+    </section>
   </section>
 );
