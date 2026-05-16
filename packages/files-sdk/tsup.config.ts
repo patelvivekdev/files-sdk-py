@@ -46,6 +46,8 @@ export default defineConfig({
     "src/appwrite/index.ts",
     "src/cloudinary/index.ts",
     "src/sharepoint/index.ts",
+    "src/firebase-storage/index.ts",
+    "src/pocketbase/index.ts",
   ],
   format: ["esm"],
   sourcemap: true,

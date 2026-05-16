@@ -68,6 +68,12 @@ const ADAPTERS = [
   { key: "cloudinary", label: "Cloudinary", parent: "Cloudinary" },
   { key: "fs", label: "Filesystem", parent: "Filesystem" },
   { key: "appwrite", label: "Appwrite", parent: "Appwrite" },
+  {
+    key: "firebase-storage",
+    label: "Firebase Storage",
+    parent: "Firebase Storage",
+  },
+  { key: "pocketbase", label: "PocketBase", parent: "PocketBase" },
 ] as const;
 
 type AdapterKey = (typeof ADAPTERS)[number]["key"];
@@ -110,6 +116,7 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       ),
       exoscale: ok,
       filebase: ok,
+      "firebase-storage": ok,
       fs: ok,
       gcs: ok,
       "google-drive": ok,
@@ -125,6 +132,9 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       ),
       "oracle-cloud": ok,
       ovhcloud: ok,
+      pocketbase: warn(
+        "Stream bodies are buffered up-front - the SDK uploads via multipart `FormData` with a Blob, which has no streaming form. User `metadata` and `cacheControl` throw - PocketBase has no per-file HTTP cache headers and no arbitrary-metadata field on the file; add extra typed columns to the collection and write via `raw` if you need them. Existing keys are updated in place (no duplicate-key error); new keys create a new record."
+      ),
       "r2-binding": ok,
       "r2-http": ok,
       "r2-hybrid": ok,
@@ -167,6 +177,7 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       ),
       exoscale: ok,
       filebase: ok,
+      "firebase-storage": ok,
       fs: ok,
       gcs: ok,
       "google-drive": ok,
@@ -178,6 +189,9 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       onedrive: ok,
       "oracle-cloud": ok,
       ovhcloud: ok,
+      pocketbase: warn(
+        "No streaming primitive - PocketBase's JS SDK has no binary download API, so the adapter resolves the record, mints a short-lived file token via `pb.files.getToken()` when authenticated, and fetches the file URL with `fetch()`. Size and content-type come back from the HTTP response, not the record - PB doesn't store them on the record itself."
+      ),
       "r2-binding": ok,
       "r2-http": ok,
       "r2-hybrid": ok,
@@ -212,6 +226,7 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       dropbox: ok,
       exoscale: ok,
       filebase: ok,
+      "firebase-storage": ok,
       fs: ok,
       gcs: ok,
       "google-drive": ok,
@@ -223,6 +238,7 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       onedrive: ok,
       "oracle-cloud": ok,
       ovhcloud: ok,
+      pocketbase: ok,
       "r2-binding": ok,
       "r2-http": ok,
       "r2-hybrid": ok,
@@ -265,6 +281,7 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       ),
       exoscale: ok,
       filebase: ok,
+      "firebase-storage": ok,
       fs: ok,
       gcs: ok,
       "google-drive": warn(
@@ -282,6 +299,9 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       ),
       "oracle-cloud": ok,
       ovhcloud: ok,
+      pocketbase: warn(
+        "PocketBase's stable list API is offset/limit (page/perPage), not cursor-based. The adapter encodes the next page number as a numeric cursor string so the unified API works unchanged. `prefix` is matched server-side via the `~` operator on the configured `keyField`. List items expose lazy bodies (one fetch per `.text()`/`.arrayBuffer()` call) — PocketBase records don't carry size or content-type, so list entries return `size: 0` and `type: 'application/octet-stream'` until the body is read."
+      ),
       "r2-binding": ok,
       "r2-http": ok,
       "r2-hybrid": ok,
@@ -326,6 +346,7 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       ),
       exoscale: ok,
       filebase: ok,
+      "firebase-storage": ok,
       fs: ok,
       gcs: ok,
       "google-drive": ok,
@@ -339,6 +360,9 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       onedrive: ok,
       "oracle-cloud": ok,
       ovhcloud: ok,
+      pocketbase: warn(
+        "PocketBase records don't carry size, content-type, or etag for their file fields, so `head()` returns `size: 0` and `type: 'application/octet-stream'` until the body is read via the lazy body factory. `lastModified` is sourced from the record's `updated` field. The filename PocketBase generated on upload is exposed under `metadata.filename`."
+      ),
       "r2-binding": ok,
       "r2-http": ok,
       "r2-hybrid": ok,
@@ -377,6 +401,7 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       ),
       exoscale: ok,
       filebase: ok,
+      "firebase-storage": ok,
       fs: ok,
       gcs: ok,
       "google-drive": warn(
@@ -390,6 +415,7 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       onedrive: ok,
       "oracle-cloud": ok,
       ovhcloud: ok,
+      pocketbase: ok,
       "r2-binding": ok,
       "r2-http": ok,
       "r2-hybrid": ok,
@@ -436,6 +462,7 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       dropbox: ok,
       exoscale: ok,
       filebase: ok,
+      "firebase-storage": ok,
       fs: ok,
       gcs: ok,
       "google-drive": ok,
@@ -451,6 +478,9 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       ),
       "oracle-cloud": ok,
       ovhcloud: ok,
+      pocketbase: warn(
+        "Read-then-write — PocketBase has no server-side copy primitive, so the source record's file is downloaded and uploaded as a new record under the destination key. Costs an egress + an ingest; not atomic."
+      ),
       "r2-binding": warn(
         "Read-then-write - Workers bindings have no native copy command, so the source is fetched and re-uploaded. Not server-side atomic; concurrent writes to the source between the get and put are not detected."
       ),
@@ -505,6 +535,7 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       ),
       exoscale: ok,
       filebase: ok,
+      "firebase-storage": ok,
       fs: warn(
         "Returns a `file://` URL by default - fine for CLIs and tests, not browsers. With `urlBaseUrl` set, returns `<urlBaseUrl>/<key>` so a dev server (Next.js `/public` mount, `serve-static`, etc.) can deliver the body. `responseContentDisposition` requires `urlBaseUrl` - `file://` has no signature mechanism in which to bind the override."
       ),
@@ -524,6 +555,9 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       ),
       "oracle-cloud": ok,
       ovhcloud: ok,
+      pocketbase: warn(
+        "Default returns `pb.files.getURL(record, filename)` — permanent for public collections, threaded with a short-lived file token from `pb.files.getToken()` when the client is authenticated. With `publicBaseUrl`, returns `<publicBaseUrl>/<key>`. `expiresIn` is silently ignored — PocketBase fixes the file-token TTL server-side. `responseContentDisposition` always throws — PB has no per-URL Content-Disposition override; use `raw` and the `?download=true` query string instead."
+      ),
       "r2-binding": no(
         "Throws unless `publicBaseUrl` is set on the adapter (an r2.dev subdomain or a custom domain). For a presigned URL from a Worker, switch to hybrid mode by also passing `accountId` + `accessKeyId` + `secretAccessKey`."
       ),
@@ -584,6 +618,7 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       ),
       exoscale: ok,
       filebase: ok,
+      "firebase-storage": ok,
       fs: warn(
         "Throws without `urlBaseUrl` - the fs adapter has no built-in upload server, so there's nothing to sign against. With `urlBaseUrl` set, returns a PUT URL with `?expires=`, `?content-type=`, and `?max-size=` query params for a dev upload-handler to validate. The fs adapter does not enforce the params itself."
       ),
@@ -603,6 +638,9 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       ),
       "oracle-cloud": ok,
       ovhcloud: ok,
+      pocketbase: no(
+        "Throws — PocketBase has no presigned upload primitive. Writes always go through the authenticated API; mint a short-lived auth token for the client and call `create`/`update` directly, or proxy uploads through your application."
+      ),
       "r2-binding": no(
         "Workers bindings can't sign uploads - the secret access key is not available to the runtime. Use hybrid mode (binding + HTTP credentials) to issue presigned upload URLs."
       ),

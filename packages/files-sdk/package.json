@@ -188,6 +188,14 @@
     "./sharepoint": {
       "types": "./dist/sharepoint/index.d.ts",
       "import": "./dist/sharepoint/index.js"
+    },
+    "./firebase-storage": {
+      "types": "./dist/firebase-storage/index.d.ts",
+      "import": "./dist/firebase-storage/index.js"
+    },
+    "./pocketbase": {
+      "types": "./dist/pocketbase/index.d.ts",
+      "import": "./dist/pocketbase/index.js"
     }
   },
   "scripts": {
@@ -215,8 +223,10 @@
     "cloudinary": "^2.10.0",
     "commander": "^12.1.0",
     "dropbox": "^10.34.0",
+    "firebase-admin": "^13.10.0",
     "google-auth-library": "^9.15.1",
     "node-appwrite": "^24.1.0",
+    "pocketbase": "^0.26.9",
     "uploadthing": "^7"
   },
   "devDependencies": {

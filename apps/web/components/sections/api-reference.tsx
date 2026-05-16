@@ -141,8 +141,8 @@ export const ApiReference = () => (
               <code>head()</code> and <code>list()</code> where the provider
               supports it. Vercel Blob and UploadThing have no user-metadata
               primitive, so it round-trips as <code>undefined</code> there.
-              Bunny Storage has no arbitrary metadata primitive in the
-              TypeScript SDK, so its adapter throws when this option is passed.
+              Bunny Storage, Appwrite, and PocketBase have no arbitrary metadata
+              primitive, so those adapters throw when this option is passed.
             </p>
           </PropAccordionItem>
         </Accordion>
@@ -312,7 +312,7 @@ export const ApiReference = () => (
               force a download. <strong>Forces the signing path</strong> on
               adapters that can sign (overrides <code>publicBaseUrl</code>,
               because permanent CDN URLs can't carry the override). Throws on
-              Vercel Blob, UploadThing, and Bunny Storage (no
+              Vercel Blob, UploadThing, Bunny Storage, and PocketBase (no
               Content-Disposition primitive on those URL shapes) and on the R2
               binding without HTTP credentials.
             </p>
@@ -342,19 +342,21 @@ export const ApiReference = () => (
         the URL can DoS your storage costs until <code>expiresIn</code> elapses.
       </p>
       <p>
-        Vercel Blob and Bunny Storage throw here - Vercel's upload model goes
-        through <code>handleUpload()</code> from{" "}
-        <code>@vercel/blob/client</code> instead of presigned URLs, and Bunny
-        Storage writes require the Storage API <code>AccessKey</code> header.
-        The R2 Workers binding throws unless you've configured hybrid mode
-        (binding + HTTP credentials). Azure, Supabase, and UploadThing return
-        PUT URLs but treat <code>maxSize</code> as advisory rather than enforced
-        — Azure and Supabase have no <code>content-length-range</code>{" "}
-        equivalent (Azure throws on the option, Supabase throws too), and
-        UploadThing enforces caps via the file-router config tied to the
-        adapter's <code>slug</code> instead of via the URL signature. Enforce
-        upload caps at your application gateway (or at the provider's
-        dashboard-level bucket/route setting).
+        Vercel Blob, Bunny Storage, Appwrite, and PocketBase throw here -
+        Vercel's upload model goes through <code>handleUpload()</code> from{" "}
+        <code>@vercel/blob/client</code> instead of presigned URLs, Bunny
+        Storage writes require the Storage API <code>AccessKey</code> header,
+        and Appwrite/PocketBase have no presigned upload primitive at all (mint
+        a short-lived auth token for the client instead). The R2 Workers binding
+        throws unless you've configured hybrid mode (binding + HTTP
+        credentials). Azure, Supabase, and UploadThing return PUT URLs but treat{" "}
+        <code>maxSize</code> as advisory rather than enforced — Azure and
+        Supabase have no <code>content-length-range</code> equivalent (Azure
+        throws on the option, Supabase throws too), and UploadThing enforces
+        caps via the file-router config tied to the adapter's <code>slug</code>{" "}
+        instead of via the URL signature. Enforce upload caps at your
+        application gateway (or at the provider's dashboard-level bucket/route
+        setting).
       </p>
       <CodeBlock code={SIGNED_UPLOAD_EXAMPLE} lang="ts" />
       <div className="flex flex-col gap-2">

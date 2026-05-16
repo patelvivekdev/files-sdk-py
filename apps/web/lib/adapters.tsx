@@ -13,6 +13,7 @@ import { DigitalOceanSpaces } from "@/components/sections/adapters/digitalocean-
 import { Dropbox } from "@/components/sections/adapters/dropbox";
 import { Exoscale } from "@/components/sections/adapters/exoscale";
 import { Filebase } from "@/components/sections/adapters/filebase";
+import { FirebaseStorage } from "@/components/sections/adapters/firebase-storage";
 import { Fs } from "@/components/sections/adapters/fs";
 import { Gcs } from "@/components/sections/adapters/gcs";
 import { GoogleDrive } from "@/components/sections/adapters/google-drive";
@@ -24,6 +25,7 @@ import { NetlifyBlobs } from "@/components/sections/adapters/netlify-blobs";
 import { Onedrive } from "@/components/sections/adapters/onedrive";
 import { OracleCloud } from "@/components/sections/adapters/oracle-cloud";
 import { Ovhcloud } from "@/components/sections/adapters/ovhcloud";
+import { Pocketbase } from "@/components/sections/adapters/pocketbase";
 import { R2 } from "@/components/sections/adapters/r2";
 import { S3 } from "@/components/sections/adapters/s3";
 import { Scaleway } from "@/components/sections/adapters/scaleway";
@@ -260,6 +262,14 @@ export const ADAPTERS: Adapter[] = [
     slug: "gcs",
   },
   {
+    Component: FirebaseStorage,
+    description:
+      "Firebase Cloud Storage via the official firebase-admin SDK. Underlying client is @google-cloud/storage, so V4 signed URLs and POST policy uploads come for free.",
+    name: "Firebase Storage",
+    sections: [OPTIONS, LIMITATIONS],
+    slug: "firebase-storage",
+  },
+  {
     Component: GoogleDrive,
     description:
       "Google Drive via the official Drive v3 client. Maps unified string keys onto Drive's appProperties with a per-instance LRU cache.",
@@ -334,6 +344,14 @@ export const ADAPTERS: Adapter[] = [
     name: "Appwrite",
     sections: [OPTIONS, LIMITATIONS],
     slug: "appwrite",
+  },
+  {
+    Component: Pocketbase,
+    description:
+      "PocketBase via the official JS SDK. Maps the unified key/blob API onto a dedicated collection with a unique key field and a single-file body field.",
+    name: "PocketBase",
+    sections: [OPTIONS, LIMITATIONS],
+    slug: "pocketbase",
   },
   {
     Component: Cloudinary,
