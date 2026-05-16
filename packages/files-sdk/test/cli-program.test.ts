@@ -1,9 +1,26 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { buildProgram } from "../src/cli/program.js";
+// The mcp subcommand dynamically imports ./mcp.js, which requires the optional
+// @modelcontextprotocol/sdk dep and would otherwise block on stdio. Stub it
+// before the dispatcher loads so the success path is exercisable in-process —
+// the mock has to be installed *before* `program.js` is loaded so its dynamic
+// import resolves to the stub, hence the await-import dance below.
+const MCP_MODULE_PATH = fileURLToPath(
+  new URL("../src/cli/mcp.ts", import.meta.url)
+);
+let mcpStartCalls = 0;
+mock.module(MCP_MODULE_PATH, () => ({
+  startMcpServer: () => {
+    mcpStartCalls += 1;
+    return Promise.resolve();
+  },
+}));
+
+const { buildProgram } = await import("../src/cli/program.js");
 
 // Integration tests for program.ts — they drive `parseAsync` end-to-end against
 // the fs adapter so the wrap()/resolveOpts/action-builder paths get exercised.
@@ -272,5 +289,28 @@ describe("cli/program parseAsync (fs end-to-end)", () => {
     );
     // Pretty JSON has at least one newline + 2-space indent
     expect(cap.stdout.join("")).toContain('"action": "head"');
+  });
+
+  test("intArg rejects non-numeric values from commander", async () => {
+    // intArg() throws TypeError; commander wraps it as InvalidArgumentError and
+    // routes through its parse-error path (process.exit(1) by default).
+    await expect(
+      run(
+        "--provider",
+        "fs",
+        "--root",
+        root,
+        "--dry-run",
+        "list",
+        "--limit",
+        "not-a-number"
+      )
+    ).rejects.toThrow(/expected an integer/u);
+  });
+
+  test("mcp action invokes startMcpServer on the (mocked) mcp module", async () => {
+    const before = mcpStartCalls;
+    await run("--provider", "fs", "--root", root, "mcp");
+    expect(mcpStartCalls).toBe(before + 1);
   });
 });
