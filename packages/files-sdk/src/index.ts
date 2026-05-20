@@ -13,7 +13,41 @@ export type Body =
   | Uint8Array
   | string;
 
-export interface UploadOptions {
+export interface RetryBackoffContext {
+  /**
+   * Retry attempt number, starting at 1 for the first retry after the
+   * initial failed call.
+   */
+  attempt: number;
+  error: FilesError;
+}
+
+export type RetryOptions =
+  | number
+  | {
+      max: number;
+      backoff?: (ctx: RetryBackoffContext) => number;
+    };
+
+export interface OperationOptions {
+  /**
+   * Abort the operation when this signal is aborted. When both constructor
+   * and per-call signals are provided, either one can abort the call.
+   */
+  signal?: AbortSignal;
+  /**
+   * Overall timeout in milliseconds, applied to each attempt. A timeout
+   * aborts the operation and is not retried. `0` or a negative value
+   * disables timeout handling.
+   */
+  timeout?: number;
+  /**
+   * Retry provider failures. A number is treated as `{ max: number }`.
+   */
+  retries?: RetryOptions;
+}
+
+export interface UploadOptions extends OperationOptions {
   /**
    * MIME type stored alongside the object and returned to readers in the
    * `Content-Type` response header. Inferred from `File` / `Blob` `type`
@@ -59,11 +93,11 @@ export interface StoredFile {
   metadata?: Record<string, string>;
 }
 
-export interface DownloadOptions {
+export interface DownloadOptions extends OperationOptions {
   as?: "blob" | "stream";
 }
 
-export interface ListOptions {
+export interface ListOptions extends OperationOptions {
   /**
    * Filter results to keys that start with this string. Omit to list
    * everything in the bucket.
@@ -86,7 +120,7 @@ export interface ListResult {
   cursor?: string;
 }
 
-export interface UrlOptions {
+export interface UrlOptions extends OperationOptions {
   /**
    * Override the adapter's default URL expiry, in seconds.
    *
@@ -131,7 +165,7 @@ export interface UrlOptions {
   responseContentDisposition?: string;
 }
 
-export interface SignUploadOptions {
+export interface SignUploadOptions extends OperationOptions {
   /**
    * How long the signed URL stays valid, in seconds. After it elapses, the
    * URL stops working and the client must request a new one.
@@ -188,7 +222,7 @@ export interface Adapter<Raw = unknown> {
    * issue a full GET on first use. If you only want metadata, don't call
    * the body accessors. They are not free.
    */
-  head(key: string): Promise<StoredFile>;
+  head(key: string, opts?: OperationOptions): Promise<StoredFile>;
   /**
    * Check whether `key` exists without fetching its body.
    *
@@ -196,9 +230,9 @@ export interface Adapter<Raw = unknown> {
    * `NotFound`, and rethrows every other error (permissions, transport
    * failures, bad credentials, etc.).
    */
-  exists(key: string): Promise<boolean>;
-  delete(key: string): Promise<void>;
-  copy(from: string, to: string): Promise<void>;
+  exists(key: string, opts?: OperationOptions): Promise<boolean>;
+  delete(key: string, opts?: OperationOptions): Promise<void>;
+  copy(from: string, to: string, opts?: OperationOptions): Promise<void>;
   list(opts?: ListOptions): Promise<ListResult>;
   /**
    * Return a URL the caller can use to fetch `key`.
@@ -229,7 +263,7 @@ export interface Adapter<Raw = unknown> {
   signedUploadUrl(key: string, opts: SignUploadOptions): Promise<SignedUpload>;
 }
 
-export interface FilesOptions<A extends Adapter> {
+export interface FilesOptions<A extends Adapter> extends OperationOptions {
   adapter: A;
   prefix?: string;
 }
@@ -238,22 +272,187 @@ export interface FileHandle {
   readonly key: string;
   upload(body: Body, opts?: UploadOptions): Promise<UploadResult>;
   download(opts?: DownloadOptions): Promise<StoredFile>;
-  head(): Promise<StoredFile>;
-  exists(): Promise<boolean>;
-  delete(): Promise<void>;
+  head(opts?: OperationOptions): Promise<StoredFile>;
+  exists(opts?: OperationOptions): Promise<boolean>;
+  delete(opts?: OperationOptions): Promise<void>;
   url(opts?: UrlOptions): Promise<string>;
   signedUploadUrl(opts: SignUploadOptions): Promise<SignedUpload>;
-  copyTo(destinationKey: string): Promise<void>;
-  copyFrom(sourceKey: string): Promise<void>;
+  copyTo(destinationKey: string, opts?: OperationOptions): Promise<void>;
+  copyFrom(sourceKey: string, opts?: OperationOptions): Promise<void>;
 }
 
-const run = async <T>(fn: () => Promise<T>): Promise<T> => {
-  try {
+const DEFAULT_RETRY_BACKOFF_MS = 100;
+// Cap the built-in exponential backoff so a large `retries` count can't
+// schedule an absurd sleep (and `2 ** attempt` can't overflow to Infinity).
+// Only applies to the default curve — a caller-supplied `backoff` is theirs.
+const MAX_DEFAULT_RETRY_BACKOFF_MS = 30_000;
+
+const timeoutError = (timeout: number): FilesError =>
+  new FilesError(
+    "Provider",
+    `Operation timed out after ${timeout}ms`,
+    undefined,
+    {
+      aborted: true,
+    }
+  );
+
+const mergeSignals = (
+  signals: AbortSignal[],
+  timeout?: number
+): { signal?: AbortSignal; cleanup?: () => void } => {
+  if (signals.length === 0 && (timeout ?? 0) <= 0) {
+    return {};
+  }
+  if (signals.length === 1 && (timeout ?? 0) <= 0) {
+    return { signal: signals[0] };
+  }
+
+  const controller = new AbortController();
+  const listeners: (() => void)[] = [];
+  const abort = (reason: unknown) => {
+    if (!controller.signal.aborted) {
+      controller.abort(reason);
+    }
+  };
+
+  for (const signal of signals) {
+    if (signal.aborted) {
+      abort(signal.reason);
+    } else {
+      const onAbort = () => abort(signal.reason);
+      signal.addEventListener("abort", onAbort, { once: true });
+      listeners.push(() => signal.removeEventListener("abort", onAbort));
+    }
+  }
+
+  const timer =
+    timeout !== undefined && timeout > 0
+      ? setTimeout(() => {
+          abort(timeoutError(timeout));
+        }, timeout)
+      : undefined;
+
+  return {
+    cleanup: () => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+      for (const cleanup of listeners) {
+        cleanup();
+      }
+    },
+    signal: controller.signal,
+  };
+};
+
+const abortError = (reason: unknown): FilesError => {
+  if (reason instanceof FilesError) {
+    return reason;
+  }
+  if (reason instanceof Error) {
+    return new FilesError(
+      "Provider",
+      `Operation aborted: ${reason.message}`,
+      reason,
+      { aborted: true }
+    );
+  }
+  return new FilesError(
+    "Provider",
+    reason === undefined
+      ? "Operation aborted"
+      : `Operation aborted: ${String(reason)}`,
+    reason,
+    { aborted: true }
+  );
+};
+
+const runWithSignal = async <T>(
+  signal: AbortSignal | undefined,
+  fn: () => Promise<T>
+): Promise<T> => {
+  if (!signal) {
     return await fn();
-  } catch (error) {
-    throw FilesError.wrap(error);
+  }
+  if (signal.aborted) {
+    throw abortError(signal.reason);
+  }
+
+  // oxlint-disable-next-line promise/avoid-new -- AbortSignal needs callback interop.
+  return await new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortError(signal.reason));
+    signal.addEventListener("abort", onAbort, { once: true });
+    fn()
+      .then(resolve, reject)
+      .finally(() => {
+        signal.removeEventListener("abort", onAbort);
+      });
+  });
+};
+
+const sleep = async (
+  ms: number,
+  signal: AbortSignal | undefined
+): Promise<void> => {
+  if (ms <= 0) {
+    return;
+  }
+  if (signal?.aborted) {
+    throw abortError(signal.reason);
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  try {
+    // oxlint-disable-next-line promise/avoid-new -- setTimeout and AbortSignal are callback APIs.
+    await new Promise<void>((resolve, reject) => {
+      timer = setTimeout(resolve, ms);
+      onAbort = () => {
+        clearTimeout(timer);
+        reject(abortError(signal?.reason));
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+    if (signal && onAbort) {
+      signal.removeEventListener("abort", onAbort);
+    }
   }
 };
+
+const maxRetries = (
+  retries: RetryOptions | undefined,
+  retryable: boolean
+): number => {
+  if (!retryable) {
+    return 0;
+  }
+  const max = typeof retries === "number" ? retries : retries?.max;
+  return Math.max(0, Math.floor(max ?? 0));
+};
+
+const retryBackoff = (
+  retries: RetryOptions | undefined,
+  attempt: number,
+  error: FilesError
+): number => {
+  if (typeof retries === "object" && retries.backoff) {
+    return Math.max(0, retries.backoff({ attempt, error }));
+  }
+  const backoff = DEFAULT_RETRY_BACKOFF_MS * 2 ** (attempt - 1);
+  return Math.min(MAX_DEFAULT_RETRY_BACKOFF_MS, backoff);
+};
+
+const canRetry = (
+  error: FilesError,
+  attempt: number,
+  maxAttempts: number
+): boolean =>
+  attempt < maxAttempts && error.code === "Provider" && !error.aborted;
 
 // Catch the obviously-broken cases at the SDK boundary so callers get a
 // useful error from us instead of an opaque provider 400. We deliberately
@@ -288,11 +487,14 @@ const normalizePrefix = (prefix: string | undefined): string => {
 
 export class Files<A extends Adapter = Adapter> {
   readonly #adapter: A;
+  readonly #defaults: OperationOptions;
   readonly #prefix: string;
 
   constructor(opts: FilesOptions<A>) {
-    this.#adapter = opts.adapter;
-    this.#prefix = normalizePrefix(opts.prefix);
+    const { adapter, prefix, ...defaults } = opts;
+    this.#adapter = adapter;
+    this.#prefix = normalizePrefix(prefix);
+    this.#defaults = defaults;
   }
 
   get raw(): A["raw"] {
@@ -306,12 +508,12 @@ export class Files<A extends Adapter = Adapter> {
   file(key: string): FileHandle {
     assertValidKey(key);
     return {
-      copyFrom: (sourceKey) => this.copy(sourceKey, key),
-      copyTo: (destinationKey) => this.copy(key, destinationKey),
-      delete: () => this.delete(key),
+      copyFrom: (sourceKey, opts) => this.copy(sourceKey, key, opts),
+      copyTo: (destinationKey, opts) => this.copy(key, destinationKey, opts),
+      delete: (opts) => this.delete(key, opts),
       download: (opts) => this.download(key, opts),
-      exists: () => this.exists(key),
-      head: () => this.head(key),
+      exists: (opts) => this.exists(key, opts),
+      head: (opts) => this.head(key, opts),
       key,
       signedUploadUrl: (opts) => this.signedUploadUrl(key, opts),
       upload: (body, opts) => this.upload(key, body, opts),
@@ -320,16 +522,19 @@ export class Files<A extends Adapter = Adapter> {
   }
 
   upload(key: string, body: Body, opts?: UploadOptions): Promise<UploadResult> {
-    return run(async () =>
-      this.#uploadResult(
-        await this.#adapter.upload(this.#path(key), body, opts)
-      )
+    const path = this.#path(key);
+    return this.#run(
+      opts,
+      async (attemptOpts) =>
+        this.#uploadResult(await this.#adapter.upload(path, body, attemptOpts)),
+      !(body instanceof ReadableStream)
     );
   }
 
   download(key: string, opts?: DownloadOptions): Promise<StoredFile> {
-    return run(async () =>
-      this.#storedFile(await this.#adapter.download(this.#path(key), opts))
+    const path = this.#path(key);
+    return this.#run(opts, async (attemptOpts) =>
+      this.#storedFile(await this.#adapter.download(path, attemptOpts))
     );
   }
 
@@ -341,9 +546,10 @@ export class Files<A extends Adapter = Adapter> {
    * issue a full GET on first use. If you only want metadata, don't call
    * the body accessors. They are not free.
    */
-  head(key: string): Promise<StoredFile> {
-    return run(async () =>
-      this.#storedFile(await this.#adapter.head(this.#path(key)))
+  head(key: string, opts?: OperationOptions): Promise<StoredFile> {
+    const path = this.#path(key);
+    return this.#run(opts, async (attemptOpts) =>
+      this.#storedFile(await this.#adapter.head(path, attemptOpts))
     );
   }
 
@@ -354,32 +560,37 @@ export class Files<A extends Adapter = Adapter> {
    * reports `NotFound`. Other failures still propagate so callers do not
    * accidentally treat auth or transport errors as "missing file".
    */
-  exists(key: string): Promise<boolean> {
-    return run(() => this.#adapter.exists(this.#path(key)));
+  exists(key: string, opts?: OperationOptions): Promise<boolean> {
+    const path = this.#path(key);
+    return this.#run(opts, (attemptOpts) =>
+      this.#adapter.exists(path, attemptOpts)
+    );
   }
 
-  delete(key: string): Promise<void> {
-    return run(() => this.#adapter.delete(this.#path(key)));
+  delete(key: string, opts?: OperationOptions): Promise<void> {
+    const path = this.#path(key);
+    return this.#run(opts, (attemptOpts) =>
+      this.#adapter.delete(path, attemptOpts)
+    );
   }
 
-  copy(from: string, to: string): Promise<void> {
-    return run(() =>
-      this.#adapter.copy(
-        this.#path(from, "copy source"),
-        this.#path(to, "copy destination")
-      )
+  copy(from: string, to: string, opts?: OperationOptions): Promise<void> {
+    const fromPath = this.#path(from, "copy source");
+    const toPath = this.#path(to, "copy destination");
+    return this.#run(opts, (attemptOpts) =>
+      this.#adapter.copy(fromPath, toPath, attemptOpts)
     );
   }
 
   list(opts?: ListOptions): Promise<ListResult> {
     if (!this.#prefix) {
-      return run(() => this.#adapter.list(opts));
+      return this.#run(opts, (attemptOpts) => this.#adapter.list(attemptOpts));
     }
     const prefix = opts?.prefix
       ? `${this.#prefix}/${opts.prefix.replace(/^\/+/u, "")}`
       : `${this.#prefix}/`;
-    return run(async () => {
-      const result = await this.#adapter.list({ ...opts, prefix });
+    return this.#run(opts, async (attemptOpts) => {
+      const result = await this.#adapter.list({ ...attemptOpts, prefix });
       return {
         ...result,
         items: result.items.map((item) => this.#storedFile(item)),
@@ -404,11 +615,62 @@ export class Files<A extends Adapter = Adapter> {
    * from untrusted input, callers should validate or escape it.
    */
   url(key: string, opts?: UrlOptions): Promise<string> {
-    return run(() => this.#adapter.url(this.#path(key), opts));
+    const path = this.#path(key);
+    return this.#run(opts, (attemptOpts) =>
+      this.#adapter.url(path, attemptOpts)
+    );
   }
 
   signedUploadUrl(key: string, opts: SignUploadOptions): Promise<SignedUpload> {
-    return run(() => this.#adapter.signedUploadUrl(this.#path(key), opts));
+    const path = this.#path(key);
+    return this.#run(opts, (attemptOpts) =>
+      this.#adapter.signedUploadUrl(path, attemptOpts as SignUploadOptions)
+    );
+  }
+
+  async #run<O extends OperationOptions, T>(
+    opts: O | undefined,
+    fn: (opts: O | undefined) => Promise<T>,
+    retryable = true
+  ): Promise<T> {
+    const { retries: _retries, timeout: _timeout, ...adapterOpts } = opts ?? {};
+    const baseOpts = opts ? (adapterOpts as O) : undefined;
+    const retryOptions = opts?.retries ?? this.#defaults.retries;
+    const maxAttempts = maxRetries(retryOptions, retryable);
+    const signals = [this.#defaults.signal, opts?.signal].filter(
+      (signal): signal is AbortSignal => signal !== undefined
+    );
+
+    for (let attempt = 0; ; attempt += 1) {
+      const runtime = mergeSignals(
+        signals,
+        opts?.timeout ?? this.#defaults.timeout
+      );
+      const attemptOpts = runtime.signal
+        ? ({ ...baseOpts, signal: runtime.signal } as O)
+        : baseOpts;
+      try {
+        return await runWithSignal(runtime.signal, () => fn(attemptOpts));
+      } catch (error) {
+        const wrapped = runtime.signal?.aborted
+          ? abortError(runtime.signal.reason)
+          : FilesError.wrap(error);
+        if (!canRetry(wrapped, attempt, maxAttempts)) {
+          throw wrapped;
+        }
+        const wait = mergeSignals(signals);
+        try {
+          await sleep(
+            retryBackoff(retryOptions, attempt + 1, wrapped),
+            wait.signal
+          );
+        } finally {
+          wait.cleanup?.();
+        }
+      } finally {
+        runtime.cleanup?.();
+      }
+    }
   }
 
   #path(key: string, label = "key"): string {
