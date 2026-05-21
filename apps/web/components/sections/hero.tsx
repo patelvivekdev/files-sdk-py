@@ -19,10 +19,11 @@ const iconList = Object.entries(icons) as [
 const marqueeList = [...iconList, ...iconList];
 
 interface HeroProps {
+  adapterCount: number;
   latestVersion: string;
 }
 
-export const Hero = ({ latestVersion }: HeroProps) => (
+export const Hero = ({ adapterCount, latestVersion }: HeroProps) => (
   <section className="relative overflow-hidden">
     <div className="mx-auto flex max-w-5xl flex-col items-center px-6 pt-24 pb-20 text-center sm:pt-32 sm:pb-24 lg:pt-40 lg:pb-28">
       <motion.div
@@ -97,7 +98,7 @@ export const Hero = ({ latestVersion }: HeroProps) => (
         </div>
       </div>
       <p className="mt-8 text-center font-mono text-xs text-muted-foreground">
-        and 26 more —{" "}
+        and {adapterCount - iconList.length} more —{" "}
         <Link
           href="/adapters"
           className="text-foreground underline-offset-4 hover:underline"

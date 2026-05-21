@@ -2,8 +2,13 @@ import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
+import { ADAPTERS } from "@/lib/adapters";
 
 import * as icons from "./icons";
+
+// Round down to the nearest ten so the headline reads "40+", "50+", … and
+// stays truthful as the catalog grows, without hardcoding the count.
+const ADAPTER_FLOOR = Math.floor(ADAPTERS.length / 10) * 10;
 
 const ICON_META: Record<keyof typeof icons, { label: string; slug: string }> = {
   AzureBlobStorage: { label: "Azure Blob Storage", slug: "azure" },
@@ -31,7 +36,9 @@ export const AdapterCloud = () => (
   <section>
     <div className="mx-auto max-w-6xl px-6 py-24 sm:py-32">
       <div>
-        <p className="font-mono text-xs text-muted-foreground">40+ adapters</p>
+        <p className="font-mono text-xs text-muted-foreground">
+          {ADAPTER_FLOOR}+ adapters
+        </p>
         <h2 className="mt-3 max-w-[24ch] text-4xl font-medium tracking-tight text-balance text-foreground sm:text-5xl">
           Bring whatever storage you already have.
         </h2>

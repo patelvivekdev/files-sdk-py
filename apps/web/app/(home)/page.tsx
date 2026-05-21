@@ -5,6 +5,7 @@ import { Features } from "@/components/sections/features";
 import { FinalCta } from "@/components/sections/final-cta";
 import { GetStarted } from "@/components/sections/get-started";
 import { Hero } from "@/components/sections/hero";
+import { ADAPTERS } from "@/lib/adapters";
 import { getLatestVersion } from "@/lib/version";
 
 const Home = () => {
@@ -12,7 +13,7 @@ const Home = () => {
 
   return (
     <>
-      <Hero latestVersion={latestVersion} />
+      <Hero adapterCount={ADAPTERS.length} latestVersion={latestVersion} />
       <FadeIn>
         <AdapterCloud />
       </FadeIn>
