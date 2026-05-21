@@ -196,6 +196,10 @@
     "./pocketbase": {
       "types": "./dist/pocketbase/index.d.ts",
       "import": "./dist/pocketbase/index.js"
+    },
+    "./providers": {
+      "types": "./dist/providers/index.d.ts",
+      "import": "./dist/providers/index.js"
     }
   },
   "scripts": {

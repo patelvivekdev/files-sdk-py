@@ -142,6 +142,13 @@ export const PROVIDERS: Record<string, ProviderRegistration> = {
     },
     required: ["--bucket", "--endpoint"],
   },
+  alibaba: {
+    load: async (opts) => {
+      const { alibaba } = await import("../alibaba/index.js");
+      return cast(alibaba, merge(s3LikeOpts(opts), opts.extra));
+    },
+    required: ["--bucket", "--region"],
+  },
   appwrite: {
     load: async (opts) => {
       const { appwrite } = await import("../appwrite/index.js");
@@ -185,6 +192,15 @@ export const PROVIDERS: Record<string, ProviderRegistration> = {
     },
     notes:
       "OAuth-based — configure via --config-json (clientId, clientSecret, refreshToken, etc.) or BOX_* env vars",
+    required: [],
+  },
+  "bunny-storage": {
+    load: async (opts) => {
+      const { bunnyStorage } = await import("../bunny-storage/index.js");
+      return cast(bunnyStorage, merge({}, opts.extra));
+    },
+    notes:
+      "configure via --config-json (zone, accessKey, region, publicBaseUrl) or BUNNY_STORAGE_* env vars (STORAGE_* as aliases)",
     required: [],
   },
   cloudinary: {
@@ -450,6 +466,13 @@ export const PROVIDERS: Record<string, ProviderRegistration> = {
     },
     required: ["--bucket"],
   },
+  tencent: {
+    load: async (opts) => {
+      const { tencent } = await import("../tencent/index.js");
+      return cast(tencent, merge(s3LikeOpts(opts), opts.extra));
+    },
+    required: ["--bucket", "--region"],
+  },
   tigris: {
     load: async (opts) => {
       const { tigris } = await import("../tigris/index.js");
@@ -498,6 +521,22 @@ export const PROVIDERS: Record<string, ProviderRegistration> = {
     },
     required: ["--bucket", "--region"],
   },
+  yandex: {
+    load: async (opts) => {
+      const { yandex } = await import("../yandex/index.js");
+      return cast(yandex, merge(s3LikeOpts(opts), opts.extra));
+    },
+    required: ["--bucket"],
+  },
 };
+
+/**
+ * Providers in the `files-sdk/providers` catalog that the CLI deliberately
+ * does not surface. `bun-s3` is Bun-only; the CLI runs under Node, where
+ * `Bun.S3Client` doesn't exist — Node users reach for the `s3` provider
+ * instead. The `providers.test.ts` drift guard treats this as the only
+ * allowed gap between the catalog and this registry.
+ */
+export const CLI_EXCLUDED_PROVIDERS = new Set(["bun-s3"]);
 
 export const PROVIDER_NAMES = Object.keys(PROVIDERS).toSorted();

@@ -48,6 +48,7 @@ export default defineConfig({
     "src/sharepoint/index.ts",
     "src/firebase-storage/index.ts",
     "src/pocketbase/index.ts",
+    "src/providers/index.ts",
   ],
   format: ["esm"],
   sourcemap: true,

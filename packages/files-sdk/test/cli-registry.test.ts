@@ -40,6 +40,7 @@ const cases: Record<string, Case> = {
     expectedName: "akamai",
     opts: { ...baseS3, endpoint: "https://akamai.test" },
   },
+  alibaba: { expectedName: "alibaba", opts: baseS3 },
   appwrite: {
     expectedName: "appwrite",
     opts: {
@@ -63,6 +64,10 @@ const cases: Record<string, Case> = {
   box: {
     expectedName: "box",
     opts: { configJson: { developerToken: "tok" } },
+  },
+  "bunny-storage": {
+    expectedName: "bunny-storage",
+    opts: { configJson: { accessKey: "key", region: "de", zone: "test-zone" } },
   },
   cloudinary: {
     expectedName: "cloudinary",
@@ -171,6 +176,7 @@ const cases: Record<string, Case> = {
       url: "https://project.supabase.co",
     },
   },
+  tencent: { expectedName: "tencent", opts: baseS3 },
   tigris: {
     expectedName: "tigris",
     opts: { ...baseS3, region: undefined },
@@ -185,6 +191,7 @@ const cases: Record<string, Case> = {
   },
   vultr: { expectedName: "vultr", opts: baseS3 },
   wasabi: { expectedName: "wasabi", opts: baseS3 },
+  yandex: { expectedName: "yandex", opts: baseS3 },
 };
 
 describe("cli/registry load() per provider", () => {

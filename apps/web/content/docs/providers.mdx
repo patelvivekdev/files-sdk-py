@@ -1,0 +1,79 @@
+---
+title: Providers
+description: A zero-dependency catalog of every provider the SDK ships and the environment variables each one reads - useful for building config UIs, sync engines, and onboarding flows.
+---
+
+## `files-sdk/providers`
+
+The `files-sdk/providers` subpath is a static, zero-dependency catalog of every storage provider in the SDK. It imports no provider SDKs and no adapter code, so you can pull it into a build script, a config UI, or a multi-provider sync engine without dragging in `@aws-sdk/client-s3` and friends.
+
+Each entry carries the display name, a one-line description, the optional peer dependencies the adapter needs, and a structured spec of the environment variables it reads.
+
+```ts lineNumbers
+import { PROVIDER_NAMES, getProvider } from "files-sdk/providers";
+
+for (const slug of PROVIDER_NAMES) {
+  const provider = getProvider(slug)!;
+  console.log(provider.name, provider.peerDeps);
+}
+```
+
+`PROVIDER_NAMES` (the sorted list of slugs) and the `Provider` / `ProviderSlug` types are also re-exported from the package root for discovery, but the catalog data and helpers live on the subpath.
+
+## Environment variables
+
+The env spec models how providers actually authenticate, rather than flattening everything into a single "required" flag:
+
+- **`required`** - variables needed regardless of which credential mode is used (e.g. `SUPABASE_URL`, an Azure `container`).
+- **`credentialModes`** - mutually exclusive ways to authenticate. You satisfy exactly **one** group. Azure, for instance, accepts a connection string **or** an account key **or** a SAS token **or** anonymous access.
+- **`optional`** - tuning variables that are safe to omit.
+- **`config`** - non-env configuration the adapter still needs as a constructor option (e.g. `bucket`, `region`, `endpoint`).
+
+Each variable is tagged with whether it is a `secret` and who reads it:
+
+- `readBy: "files-sdk"` - the adapter reads it directly.
+- `readBy: "sdk-chain"` - files-sdk never reads it; the underlying provider SDK's credential chain resolves it (the AWS SDK reading `AWS_ACCESS_KEY_ID`, Google Application Default Credentials, etc.). It is listed for completeness, but it may also come from an IAM role, shared profile, or metadata server.
+
+```ts lineNumbers
+import { getProvider, getSecretEnvVars } from "files-sdk/providers";
+
+// Every secret to inject for one provider:
+const secrets = getSecretEnvVars("s3").map((v) => v.key);
+// → ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"]
+
+// Validate that one of Azure's credential modes is fully satisfied:
+const azure = getProvider("azure")!;
+const ok = azure.env.credentialModes?.some((mode) =>
+  mode.vars.every(
+    (v) => process.env[v.key] ?? v.aliases?.some((a) => process.env[a])
+  )
+);
+```
+
+## Types
+
+<AutoTypeTable
+  path="../../packages/files-sdk/src/providers/index.ts"
+  name="Provider"
+/>
+
+<AutoTypeTable
+  path="../../packages/files-sdk/src/providers/index.ts"
+  name="ProviderEnvSpec"
+/>
+
+<AutoTypeTable
+  path="../../packages/files-sdk/src/providers/index.ts"
+  name="EnvGroup"
+/>
+
+<AutoTypeTable
+  path="../../packages/files-sdk/src/providers/index.ts"
+  name="EnvVar"
+/>
+
+## Helpers
+
+- **`getProvider(slug)`** - look up one provider; returns `undefined` for unknown slugs.
+- **`listEnvVars(slug)`** - every env var a provider references, flattened across `required`, all credential modes, and `optional`, de-duplicated by key.
+- **`getSecretEnvVars(slug)`** - the subset of `listEnvVars` flagged as secrets.
