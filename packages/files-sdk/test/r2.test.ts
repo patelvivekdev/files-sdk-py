@@ -162,6 +162,17 @@ describe("r2 adapter — HTTP path", () => {
       expect(calls).toHaveLength(1);
     });
 
+    test("deleteMany delegates to the inner s3 adapter's bulk delete", async () => {
+      const { DeleteObjectsCommand } = await import("@aws-sdk/client-s3");
+      s3Mock.on(DeleteObjectsCommand).resolves({
+        Deleted: [{ Key: "a.txt" }, { Key: "b.txt" }],
+      });
+      const files = new Files({ adapter: makeAdapter() });
+      const result = await files.deleteMany(["a.txt", "b.txt"]);
+      expect(result.deleted.toSorted()).toEqual(["a.txt", "b.txt"]);
+      expect(s3Mock.commandCalls(DeleteObjectsCommand)).toHaveLength(1);
+    });
+
     test("download issues a GetObjectCommand and returns a StoredFile", async () => {
       s3Mock.on(GetObjectCommand).resolves({
         Body: streamBody("hello"),
@@ -464,6 +475,24 @@ describe("r2 adapter — Workers binding path", () => {
       throw new Error("should have thrown");
     } catch (error) {
       expect((error as FilesError).code).toBe("Unauthorized");
+    }
+  });
+
+  test("head() maps a non-NotFound error thrown by binding head()", async () => {
+    // Distinct from the `exists` cases above: this drives the failure
+    // through head() itself, whose catch wraps the error via mapR2Error.
+    const { bucket } = fakeBinding();
+    const files = new Files({ adapter: r2({ binding: bucket as never }) });
+    bucket.head = (() =>
+      Promise.reject(
+        Object.assign(new Error("auth"), { code: 10_004, name: "R2Error" })
+      )) as never;
+    try {
+      await files.head("a.txt");
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect((error as FilesError).code).toBe("Unauthorized");
+      expect((error as FilesError).message).toBe("auth");
     }
   });
 

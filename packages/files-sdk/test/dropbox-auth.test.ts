@@ -184,6 +184,34 @@ describe("dropbox auth construction", () => {
     }
   });
 
+  test("ensureAccessToken on a static-token adapter is a no-op that resolves", async () => {
+    // A verbatim string token is already applied at construction, so
+    // ensureAccessToken has nothing to refresh — it should just resolve.
+    const adapter = dropbox({ accessToken: "tok-static" });
+    await expect(
+      handleOf(adapter).ensureAccessToken()
+    ).resolves.toBeUndefined();
+    // The token is unchanged by the no-op.
+    expect(await handleOf(adapter).getAccessToken()).toBe("tok-static");
+  });
+
+  test("refresh-token exchange failure tolerates an unreadable error body", async () => {
+    // The non-OK branch reads the response body for context but guards it
+    // with `.catch(() => "")`; if reading the body itself throws, the error
+    // falls back to the status text rather than blowing up.
+    globalThis.fetch = (() =>
+      Promise.resolve({
+        ok: false,
+        status: 500,
+        statusText: "Server Error",
+        text: () => Promise.reject(new Error("stream broken")),
+      })) as unknown as typeof fetch;
+    const adapter = dropbox({ appKey: "ak", refreshToken: "rt" });
+    await expect(handleOf(adapter).getAccessToken()).rejects.toThrow(
+      /refresh-token exchange failed \(500\): Server Error/iu
+    );
+  });
+
   test("ensureAccessToken on a callable-token adapter awaits and applies the source", async () => {
     let calls = 0;
     const adapter = dropbox({

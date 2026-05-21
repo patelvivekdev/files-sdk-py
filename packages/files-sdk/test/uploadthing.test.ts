@@ -399,6 +399,55 @@ describe("uploadthing adapter", () => {
     expect(deleteFilesMock.mock.calls[0]?.[0]).toEqual(["a.txt", "b.txt"]);
   });
 
+  test("deleteMany short-circuits an empty list without calling deleteFiles", async () => {
+    const files = new Files({ adapter: uploadthing() });
+    const result = await files.deleteMany([]);
+    expect(result).toEqual({ deleted: [] });
+    expect(deleteFilesMock).not.toHaveBeenCalled();
+  });
+
+  test("deleteMany maps a whole-request failure onto every key", async () => {
+    deleteFilesMock.mockImplementationOnce(() =>
+      Promise.reject(
+        Object.assign(new Error("denied"), { code: "FORBIDDEN", status: 403 })
+      )
+    );
+    const files = new Files({ adapter: uploadthing() });
+    const result = await files.deleteMany(["a.txt", "b.txt"]);
+    expect(result.deleted).toEqual([]);
+    expect(result.errors?.map((e) => e.key)).toEqual(["a.txt", "b.txt"]);
+    for (const entry of result.errors ?? []) {
+      expect(entry.error).toBeInstanceOf(FilesError);
+      expect(entry.error.code).toBe("Unauthorized");
+    }
+    // One batched call, not one per key.
+    expect(deleteFilesMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("deleteMany with stopOnError deletes one key at a time and halts at the first failure", async () => {
+    // stopOnError forces the per-key fallback (one deleteFiles call per key)
+    // rather than the single batched call.
+    deleteFilesMock
+      .mockImplementationOnce(() =>
+        Promise.resolve({ deletedCount: 1, success: true })
+      )
+      .mockImplementationOnce(() =>
+        Promise.reject(new Error("file not found"))
+      );
+    const files = new Files({ adapter: uploadthing() });
+    const result = await files.deleteMany(["a.txt", "b.txt", "c.txt"], {
+      stopOnError: true,
+    });
+    expect(result.deleted).toEqual(["a.txt"]);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors?.[0]?.key).toBe("b.txt");
+    expect(result.errors?.[0]?.error.code).toBe("NotFound");
+    // Each key is a separate call, and the third is never attempted.
+    expect(deleteFilesMock).toHaveBeenCalledTimes(2);
+    expect(deleteFilesMock.mock.calls[0]?.[0]).toBe("a.txt");
+    expect(deleteFilesMock.mock.calls[1]?.[0]).toBe("b.txt");
+  });
+
   test("copy streams source through a re-upload", async () => {
     const files = new Files({ adapter: uploadthing() });
     await files.copy("a.txt", "b.txt");
@@ -479,6 +528,22 @@ describe("uploadthing adapter", () => {
     const files = new Files({ adapter: uploadthing({ acl: "private" }) });
     await files.url("a.txt", { expiresIn: 120 });
     expect(generateSignedURLMock.mock.calls[0]?.[1]?.expiresIn).toBe(120);
+  });
+
+  test("url maps a generateSignedURL failure through mapUploadThingError", async () => {
+    generateSignedURLMock.mockImplementationOnce(() =>
+      Promise.reject(
+        Object.assign(new Error("denied"), { code: "FORBIDDEN", status: 403 })
+      )
+    );
+    const files = new Files({ adapter: uploadthing({ acl: "private" }) });
+    try {
+      await files.url("a.txt");
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(FilesError);
+      expect((error as FilesError).code).toBe("Unauthorized");
+    }
   });
 
   test("signedUploadUrl returns a PUT URL with documented query params and a recomputable signature", async () => {

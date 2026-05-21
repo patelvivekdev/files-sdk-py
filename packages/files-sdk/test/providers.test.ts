@@ -8,6 +8,7 @@ import {
 } from "../src/cli/registry.js";
 import {
   getProvider,
+  getSecretEnvVars,
   listEnvVars,
   PROVIDER_NAMES,
   PROVIDERS,
@@ -96,6 +97,72 @@ describe("providers catalog", () => {
           expect(declared.has(key as string)).toBe(true);
         }
       });
+    }
+  });
+});
+
+describe("getProvider", () => {
+  test("returns the entry for a known slug", () => {
+    const provider = getProvider("s3");
+    expect(provider?.slug).toBe("s3");
+    expect(provider?.name).toBe("S3");
+  });
+
+  test("returns undefined for an unknown slug", () => {
+    expect(getProvider("not-a-real-provider")).toBeUndefined();
+  });
+});
+
+describe("listEnvVars", () => {
+  test("returns an empty array for an unknown slug", () => {
+    expect(listEnvVars("not-a-real-provider")).toEqual([]);
+  });
+
+  test("flattens required, credential-mode, and optional vars together", () => {
+    // bunny-storage has one of each: a required zone, a credential-mode access
+    // key, and an optional region.
+    const keys = listEnvVars("bunny-storage").map((envVar) => envVar.key);
+    expect(keys).toContain("BUNNY_STORAGE_ZONE");
+    expect(keys).toContain("BUNNY_STORAGE_ACCESS_KEY");
+    expect(keys).toContain("BUNNY_STORAGE_REGION");
+  });
+
+  test("de-duplicates a var shared across credential modes", () => {
+    // Azure repeats AZURE_STORAGE_ACCOUNT_NAME across three of its four modes;
+    // it must come back exactly once.
+    const occurrences = listEnvVars("azure").filter(
+      (envVar) => envVar.key === "AZURE_STORAGE_ACCOUNT_NAME"
+    );
+    expect(occurrences).toHaveLength(1);
+  });
+
+  test("returns no vars for a credential-free provider", () => {
+    expect(listEnvVars("fs")).toEqual([]);
+  });
+});
+
+describe("getSecretEnvVars", () => {
+  test("returns only the vars marked secret", () => {
+    const secrets = getSecretEnvVars("azure");
+    expect(secrets.length).toBeGreaterThan(0);
+    expect(secrets.every((envVar) => envVar.secret)).toBe(true);
+    // The account name is not a secret, so it must be filtered out.
+    expect(secrets.map((envVar) => envVar.key)).not.toContain(
+      "AZURE_STORAGE_ACCOUNT_NAME"
+    );
+  });
+
+  test("returns an empty array for a credential-free provider", () => {
+    expect(getSecretEnvVars("fs")).toEqual([]);
+  });
+
+  test("is always a secret-only subset of listEnvVars for every provider", () => {
+    for (const slug of PROVIDER_NAMES) {
+      const allKeys = new Set(listEnvVars(slug).map((envVar) => envVar.key));
+      for (const secret of getSecretEnvVars(slug)) {
+        expect(secret.secret).toBe(true);
+        expect(allKeys.has(secret.key)).toBe(true);
+      }
     }
   });
 });

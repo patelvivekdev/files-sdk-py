@@ -467,6 +467,21 @@ describe("supabase adapter", () => {
       );
       await expect(files.exists("missing.txt")).resolves.toBe(false);
     });
+
+    test("exists rethrows a non-NotFound error rather than reporting false", async () => {
+      // Only a NotFound is swallowed into `false`; anything else (auth,
+      // transport) must surface so callers don't mistake it for absence.
+      infoMock.mockImplementationOnce(() =>
+        Promise.resolve(fail(403, "Unauthorized", "denied"))
+      );
+      try {
+        await makeAdapter().exists("a.txt");
+        throw new Error("should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(FilesError);
+        expect((error as FilesError).code).toBe("Unauthorized");
+      }
+    });
   });
 
   describe("delete", () => {
@@ -496,6 +511,47 @@ describe("supabase adapter", () => {
         throw new Error("expected remove");
       }
       expect(removeCall[0]).toEqual(["a.txt", "b.txt"]);
+    });
+
+    test("deleteMany short-circuits an empty list without calling remove", async () => {
+      const files = new Files({ adapter: makeAdapter() });
+      const result = await files.deleteMany([]);
+      expect(result).toEqual({ deleted: [] });
+      expect(removeMock).not.toHaveBeenCalled();
+    });
+
+    test("deleteMany maps a batch-level remove() error onto every key", async () => {
+      removeMock.mockImplementationOnce(() =>
+        Promise.resolve(fail(403, "Unauthorized", "denied"))
+      );
+      const files = new Files({ adapter: makeAdapter() });
+      const result = await files.deleteMany(["a.txt", "b.txt"]);
+      expect(result.deleted).toEqual([]);
+      expect(result.errors?.map((e) => e.key)).toEqual(["a.txt", "b.txt"]);
+      for (const entry of result.errors ?? []) {
+        expect(entry.error).toBeInstanceOf(FilesError);
+        expect(entry.error.code).toBe("Unauthorized");
+      }
+    });
+
+    test("deleteMany with stopOnError removes one key at a time and stops at the first failure", async () => {
+      // stopOnError takes the per-key fallback path (one remove() per key)
+      // rather than the single batched remove().
+      removeMock
+        .mockImplementationOnce(() => Promise.resolve(ok([])))
+        .mockImplementationOnce(() =>
+          Promise.resolve(fail(404, "NotFound", "gone"))
+        );
+      const files = new Files({ adapter: makeAdapter() });
+      const result = await files.deleteMany(["a.txt", "b.txt", "c.txt"], {
+        stopOnError: true,
+      });
+      expect(result.deleted).toEqual(["a.txt"]);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors?.[0]?.key).toBe("b.txt");
+      expect(result.errors?.[0]?.error.code).toBe("NotFound");
+      // The third key is never attempted once the second fails.
+      expect(removeMock).toHaveBeenCalledTimes(2);
     });
   });
 
