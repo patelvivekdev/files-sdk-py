@@ -127,7 +127,9 @@ const keyFromStorageFile = (
       directory = directory.slice(zone.length + 1);
     }
   }
-  directory = directory.replace(/\/+$/u, "");
+  // `(?<!\/)` anchors the match to the first trailing slash so the engine
+  // can't re-attempt at every slash — avoids the polynomial `\/+$` ReDoS.
+  directory = directory.replace(/(?<!\/)\/+$/u, "");
   if (!pathIsDirectory) {
     return directory || name;
   }

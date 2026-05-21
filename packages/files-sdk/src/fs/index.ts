@@ -148,7 +148,11 @@ const sha1Etag = (bytes: Uint8Array): string => {
 
 // Windows ignores trailing dots and spaces in a path segment, so
 // `x.meta.json.` and `x.meta.json ` open the same file as `x.meta.json`.
-const FS_TRAILING_NOISE = /[. ]+$/u;
+// The `(?<![. ])` anchors each match to the first character of the trailing
+// noise run, so the engine can't re-attempt at every dot/space — that
+// backtracking is what makes a bare `[. ]+$` polynomial (ReDoS) on input like
+// `"x.meta.json....    "`.
+const FS_TRAILING_NOISE = /(?<![. ])[. ]+$/u;
 
 // True when `resolved`'s final segment lands on a reserved sidecar path.
 // We compare the basename the way the filesystem resolves names — folded

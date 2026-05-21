@@ -527,7 +527,11 @@ const normalizePrefix = (prefix: string | undefined): string => {
   if (typeof prefix !== "string") {
     throw new FilesError("Provider", "prefix must be a string");
   }
-  const normalized = prefix.replaceAll(/^\/+|\/+$/gu, "");
+  // The `(?<!\/)` before the trailing-slash run anchors each match to the
+  // first slash of the run, so the engine can't re-attempt at every slash —
+  // that backtracking is what makes a bare `\/+$` polynomial (ReDoS) on input
+  // like `"users////…"`.
+  const normalized = prefix.replaceAll(/^\/+|(?<!\/)\/+$/gu, "");
   assertValidKey(normalized, "prefix");
   return normalized;
 };
