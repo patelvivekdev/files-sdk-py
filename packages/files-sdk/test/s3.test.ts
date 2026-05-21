@@ -4,6 +4,7 @@ import { Readable } from "node:stream";
 import {
   CopyObjectCommand,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
@@ -129,6 +130,74 @@ describe("s3 adapter", () => {
     const [{ input }] = firstCall(calls).args;
     expect(input.Bucket).toBe("test-bucket");
     expect(input.Key).toBe("a.txt");
+  });
+
+  test("deleteMany uses DeleteObjectsCommand when stopOnError is false", async () => {
+    s3Mock.on(DeleteObjectsCommand).resolves({
+      Deleted: [{ Key: "a.txt" }, { Key: "c.txt" }],
+      Errors: [{ Code: "AccessDenied", Key: "b.txt", Message: "denied" }],
+    });
+    const files = new Files({
+      adapter: s3({ bucket: "test-bucket", region: "us-east-1" }),
+    });
+
+    const result = await files.deleteMany(["a.txt", "b.txt", "c.txt"]);
+
+    expect(result.deleted).toEqual(["a.txt", "c.txt"]);
+    expect(result.errors?.map((item) => item.key)).toEqual(["b.txt"]);
+    expect(result.errors?.[0]?.error.code).toBe("Unauthorized");
+    const calls = s3Mock.commandCalls(DeleteObjectsCommand);
+    expect(calls).toHaveLength(1);
+    const [{ input }] = firstCall(calls).args;
+    expect(input.Delete?.Objects).toEqual([
+      { Key: "a.txt" },
+      { Key: "b.txt" },
+      { Key: "c.txt" },
+    ]);
+  });
+
+  test("deleteMany stops on the first error when stopOnError is true", async () => {
+    s3Mock
+      .on(DeleteObjectCommand)
+      .resolvesOnce({})
+      .rejectsOnce(
+        Object.assign(new Error("denied"), {
+          $metadata: { httpStatusCode: 403 },
+          name: "AccessDenied",
+        })
+      );
+    const files = new Files({
+      adapter: s3({ bucket: "test-bucket", region: "us-east-1" }),
+    });
+
+    const result = await files.deleteMany(["a.txt", "b.txt", "c.txt"], {
+      stopOnError: true,
+    });
+
+    expect(result.deleted).toEqual(["a.txt"]);
+    expect(result.errors?.map((item) => item.key)).toEqual(["b.txt"]);
+    expect(s3Mock.commandCalls(DeleteObjectCommand)).toHaveLength(2);
+    expect(s3Mock.commandCalls(DeleteObjectsCommand)).toHaveLength(0);
+  });
+
+  test("deleteMany chunks DeleteObjectsCommand into batches of 1000", async () => {
+    const keys = Array.from({ length: 1500 }, (_, i) => `k-${i}.txt`);
+    s3Mock
+      .on(DeleteObjectsCommand)
+      .resolvesOnce({ Deleted: keys.slice(0, 1000).map((Key) => ({ Key })) })
+      .resolvesOnce({ Deleted: keys.slice(1000).map((Key) => ({ Key })) });
+    const files = new Files({
+      adapter: s3({ bucket: "test-bucket", region: "us-east-1" }),
+    });
+
+    const result = await files.deleteMany(keys);
+
+    expect(result.deleted).toEqual(keys);
+    expect(result.errors).toBeUndefined();
+    const calls = s3Mock.commandCalls(DeleteObjectsCommand);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.args[0].input.Delete?.Objects).toHaveLength(1000);
+    expect(calls[1]?.args[0].input.Delete?.Objects).toHaveLength(500);
   });
 
   test("copy sends CopyObjectCommand with encoded source", async () => {

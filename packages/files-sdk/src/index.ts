@@ -1,8 +1,9 @@
+import { deleteManyWithFallback } from "./internal/core.js";
 import { FilesError } from "./internal/errors.js";
 
 export { FilesError, type FilesErrorCode } from "./internal/errors.js";
+export type { BodySource, StoredFileMeta } from "./internal/stored-file.js";
 export { createStoredFile } from "./internal/stored-file.js";
-export type { StoredFileMeta, BodySource } from "./internal/stored-file.js";
 
 export type Body =
   | Blob
@@ -120,6 +121,34 @@ export interface ListResult {
   cursor?: string;
 }
 
+export interface DeleteManyOptions {
+  /**
+   * How many per-key deletes run in parallel when an adapter falls back to
+   * repeated `delete()` calls. Defaults to `8`. Adapters with a native bulk
+   * primitive (S3, Supabase, UploadThing) ignore this — they delete in one
+   * request.
+   */
+  concurrency?: number;
+  /**
+   * When `true`, stop at the first failure and return immediately with the
+   * keys deleted so far plus that error. When `false` (default), process
+   * every key and collect per-key failures in `errors`.
+   */
+  stopOnError?: boolean;
+}
+
+export interface DeleteManyError {
+  key: string;
+  error: FilesError;
+}
+
+export interface DeleteManyResult {
+  /** Keys that were deleted, in the order they were supplied. */
+  deleted: string[];
+  /** Per-key failures. Omitted entirely when every key succeeded. */
+  errors?: DeleteManyError[];
+}
+
 export interface UrlOptions extends OperationOptions {
   /**
    * Override the adapter's default URL expiry, in seconds.
@@ -232,6 +261,15 @@ export interface Adapter<Raw = unknown> {
    */
   exists(key: string, opts?: OperationOptions): Promise<boolean>;
   delete(key: string, opts?: OperationOptions): Promise<void>;
+  /**
+   * Delete many keys in one call. Optional: when an adapter omits it, the
+   * SDK fans out to `delete()` with bounded concurrency. Adapters that
+   * implement it should use a native bulk primitive where one exists.
+   */
+  deleteMany?(
+    keys: string[],
+    opts?: DeleteManyOptions
+  ): Promise<DeleteManyResult>;
   copy(from: string, to: string, opts?: OperationOptions): Promise<void>;
   list(opts?: ListOptions): Promise<ListResult>;
   /**
@@ -572,6 +610,83 @@ export class Files<A extends Adapter = Adapter> {
     return this.#run(opts, (attemptOpts) =>
       this.#adapter.delete(path, attemptOpts)
     );
+  }
+
+  /**
+   * Delete many keys in one call, returning a structured result rather than
+   * throwing on partial failure. Uses the adapter's native bulk primitive
+   * when available, otherwise fans out to `delete()` with bounded
+   * concurrency. Invalid keys are reported in `errors` alongside provider
+   * failures; with `stopOnError`, the first invalid key short-circuits
+   * before any delete is attempted.
+   */
+  async deleteMany(
+    keys: string[],
+    opts?: DeleteManyOptions
+  ): Promise<DeleteManyResult> {
+    if (!Array.isArray(keys)) {
+      throw new FilesError("Provider", "keys must be an array");
+    }
+
+    // Track each error's position in the caller's array so the final
+    // `errors` list stays in input order, even when invalid keys (caught
+    // here) interleave with provider failures (reported by the adapter).
+    const errors: (DeleteManyError & { index: number })[] = [];
+    // Adapters operate on prefixed paths; map each back so the result
+    // reflects the keys the caller passed, not the internal path.
+    const paths: string[] = [];
+    const keyByPath = new Map<string, string>();
+    const indexByPath = new Map<string, number>();
+
+    for (const [index, key] of keys.entries()) {
+      let path: string;
+      try {
+        path = this.#path(key);
+      } catch (error) {
+        if (opts?.stopOnError) {
+          // Short-circuit before any delete is attempted.
+          return {
+            deleted: [],
+            errors: [{ error: FilesError.wrap(error), key: String(key) }],
+          };
+        }
+        errors.push({ error: FilesError.wrap(error), index, key: String(key) });
+        continue;
+      }
+      paths.push(path);
+      if (!keyByPath.has(path)) {
+        keyByPath.set(path, key);
+        indexByPath.set(path, index);
+      }
+    }
+
+    const toKey = (path: string): string => keyByPath.get(path) ?? path;
+
+    const result = this.#adapter.deleteMany
+      ? await this.#adapter.deleteMany(paths, opts)
+      : await deleteManyWithFallback(
+          paths,
+          (path) => this.#adapter.delete(path),
+          opts
+        );
+
+    const deleted = result.deleted.map(toKey);
+    for (const entry of result.errors ?? []) {
+      errors.push({
+        error: entry.error,
+        index: indexByPath.get(entry.key) ?? Number.MAX_SAFE_INTEGER,
+        key: toKey(entry.key),
+      });
+    }
+
+    if (errors.length === 0) {
+      return { deleted };
+    }
+    errors.sort((a, b) => a.index - b.index);
+    return {
+      deleted,
+      errors: errors.map(({ error, key }) => ({ error, key })),
+    };
   }
 
   copy(from: string, to: string, opts?: OperationOptions): Promise<void> {

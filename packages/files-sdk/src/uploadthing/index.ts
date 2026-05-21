@@ -8,7 +8,11 @@ import type {
   StoredFile,
   UploadResult,
 } from "../index.js";
-import { DEFAULT_URL_EXPIRES_IN, existsByProbe } from "../internal/core.js";
+import {
+  DEFAULT_URL_EXPIRES_IN,
+  deleteManyWithFallback,
+  existsByProbe,
+} from "../internal/core.js";
 import { readEnv } from "../internal/env.js";
 import { FilesError } from "../internal/errors.js";
 import type { FilesErrorCode } from "../internal/errors.js";
@@ -380,6 +384,32 @@ export const uploadthing = (
         await utapi.deleteFiles(key);
       } catch (error) {
         throw mapUploadThingError(error);
+      }
+    },
+    async deleteMany(keys, deleteOpts) {
+      if (keys.length === 0) {
+        return { deleted: [] };
+      }
+      if (deleteOpts?.stopOnError) {
+        return deleteManyWithFallback(
+          keys,
+          (key) => adapter.delete(key),
+          deleteOpts,
+          mapUploadThingError
+        );
+      }
+      try {
+        // No documented per-request key cap, so send the whole list in one
+        // call. `deleteFiles` reports only whole-request failure, not per-key,
+        // so on error the mapped error is attributed to every key.
+        await utapi.deleteFiles(keys);
+        return { deleted: [...keys] };
+      } catch (error) {
+        const mapped = mapUploadThingError(error);
+        return {
+          deleted: [],
+          errors: keys.map((key) => ({ error: mapped, key })),
+        };
       }
     },
     async download(key, downloadOpts) {

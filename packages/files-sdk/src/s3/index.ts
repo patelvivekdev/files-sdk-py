@@ -1,6 +1,7 @@
 import {
   CopyObjectCommand,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
@@ -13,6 +14,8 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 import type {
   Adapter,
+  DeleteManyOptions,
+  DeleteManyResult,
   SignedUpload,
   StoredFile,
   UploadResult,
@@ -109,6 +112,9 @@ const S3_NOT_FOUND_CODES: ReadonlySet<string> = new Set([
 ]);
 const S3_UNAUTH_CODES: ReadonlySet<string> = new Set(["AccessDenied"]);
 const S3_CONFLICT_CODES: ReadonlySet<string> = new Set(["PreconditionFailed"]);
+// `DeleteObjects` rejects requests with more than 1000 keys, so the bulk path
+// has to chunk longer key lists into separate requests.
+const S3_DELETE_BATCH_LIMIT = 1000;
 
 const extractS3Error = (
   err: unknown
@@ -253,6 +259,72 @@ export const s3 = (opts: S3AdapterOptions): S3Adapter => {
       } catch (error) {
         throw wrapErr(error);
       }
+    },
+    async deleteMany(
+      keys: string[],
+      deleteOpts?: DeleteManyOptions
+    ): Promise<DeleteManyResult> {
+      if (keys.length === 0) {
+        return { deleted: [] };
+      }
+      if (deleteOpts?.stopOnError) {
+        const deleted: string[] = [];
+        const errors: NonNullable<DeleteManyResult["errors"]> = [];
+        for (const key of keys) {
+          try {
+            await client.send(
+              new DeleteObjectCommand({ Bucket: bucket, Key: key })
+            );
+            deleted.push(key);
+          } catch (error) {
+            errors.push({ error: wrapErr(error), key });
+            return { deleted, errors };
+          }
+        }
+        return { deleted };
+      }
+      const deletedKeys = new Set<string>();
+      const errors: NonNullable<DeleteManyResult["errors"]> = [];
+      // `DeleteObjects` caps each request at 1000 keys; send in chunks and
+      // merge the per-key results so callers see one combined result.
+      for (let start = 0; start < keys.length; start += S3_DELETE_BATCH_LIMIT) {
+        const batch = keys.slice(start, start + S3_DELETE_BATCH_LIMIT);
+        try {
+          const result = await client.send(
+            new DeleteObjectsCommand({
+              Bucket: bucket,
+              Delete: { Objects: batch.map((key) => ({ Key: key })) },
+            })
+          );
+          for (const item of result.Deleted ?? []) {
+            if (item.Key !== undefined) {
+              deletedKeys.add(item.Key);
+            }
+          }
+          for (const item of result.Errors ?? []) {
+            errors.push({
+              error: wrapErr({
+                Code: item.Code,
+                message: item.Message ?? item.Code ?? "Delete failed",
+                name: item.Code,
+              }),
+              key: item.Key ?? "",
+            });
+          }
+        } catch (error) {
+          // The whole batch failed — S3 doesn't tell us which keys, so map
+          // the error onto every key in this batch and keep going.
+          const mapped = wrapErr(error);
+          for (const key of batch) {
+            errors.push({ error: mapped, key });
+          }
+        }
+      }
+      const deleted = keys.filter((key) => deletedKeys.has(key));
+      if (errors.length === 0) {
+        return { deleted };
+      }
+      return { deleted, errors };
     },
     async download(key, downloadOpts) {
       try {
