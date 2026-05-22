@@ -168,7 +168,7 @@ describe("r2 adapter — HTTP path", () => {
         Deleted: [{ Key: "a.txt" }, { Key: "b.txt" }],
       });
       const files = new Files({ adapter: makeAdapter() });
-      const result = await files.deleteMany(["a.txt", "b.txt"]);
+      const result = await files.delete(["a.txt", "b.txt"]);
       expect(result.deleted.toSorted()).toEqual(["a.txt", "b.txt"]);
       expect(s3Mock.commandCalls(DeleteObjectsCommand)).toHaveLength(1);
     });

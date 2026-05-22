@@ -141,7 +141,7 @@ describe("s3 adapter", () => {
       adapter: s3({ bucket: "test-bucket", region: "us-east-1" }),
     });
 
-    const result = await files.deleteMany(["a.txt", "b.txt", "c.txt"]);
+    const result = await files.delete(["a.txt", "b.txt", "c.txt"]);
 
     expect(result.deleted).toEqual(["a.txt", "c.txt"]);
     expect(result.errors?.map((item) => item.key)).toEqual(["b.txt"]);
@@ -170,7 +170,7 @@ describe("s3 adapter", () => {
       adapter: s3({ bucket: "test-bucket", region: "us-east-1" }),
     });
 
-    const result = await files.deleteMany(["a.txt", "b.txt", "c.txt"], {
+    const result = await files.delete(["a.txt", "b.txt", "c.txt"], {
       stopOnError: true,
     });
 
@@ -190,7 +190,7 @@ describe("s3 adapter", () => {
       adapter: s3({ bucket: "test-bucket", region: "us-east-1" }),
     });
 
-    const result = await files.deleteMany(keys);
+    const result = await files.delete(keys);
 
     expect(result.deleted).toEqual(keys);
     expect(result.errors).toBeUndefined();

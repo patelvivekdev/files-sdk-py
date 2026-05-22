@@ -332,14 +332,14 @@ export const buildProgram = (): Command => {
     );
 
   program
-    .command("delete <key>")
+    .command("delete <keys...>")
     .description(
-      "delete an object (idempotency is adapter-dependent: some throw NotFound, some succeed silently)"
+      "delete one or many objects (one key throws on failure; many returns a structured result and exits non-zero on any failure; idempotency is adapter-dependent)"
     )
     .action(
       wrap(runDelete as (opts: never) => Promise<void>, (args, common) => {
-        const [key] = args as [string];
-        return { ...common, key } as CommonRunOpts;
+        const [keys] = args as [string[]];
+        return { ...common, keys } as CommonRunOpts;
       })
     );
 

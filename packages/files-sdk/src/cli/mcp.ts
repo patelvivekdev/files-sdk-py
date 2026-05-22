@@ -197,12 +197,16 @@ export const startMcpServer = async (opts: McpServerOpts): Promise<void> => {
   server.registerTool(
     "delete",
     {
-      description: "Permanently delete the object at `key`.",
-      inputSchema: { key: z.string() },
-      title: "Delete a key",
+      description:
+        "Permanently delete the object at `key`. Pass an array of keys to delete many in one call — that form returns a structured `{ deleted, errors? }` result instead of throwing on partial failure.",
+      inputSchema: { key: z.union([z.string(), z.array(z.string())]) },
+      title: "Delete one or many keys",
     },
     async ({ key }) => {
       try {
+        if (Array.isArray(key)) {
+          return ok(await files.delete(key));
+        }
         await files.delete(key);
         return ok({ deleted: true, key });
       } catch (error) {

@@ -393,7 +393,7 @@ describe("uploadthing adapter", () => {
 
   test("deleteMany delegates to utapi.deleteFiles with the keys", async () => {
     const files = new Files({ adapter: uploadthing() });
-    const result = await files.deleteMany(["a.txt", "b.txt"]);
+    const result = await files.delete(["a.txt", "b.txt"]);
     expect(result).toEqual({ deleted: ["a.txt", "b.txt"] });
     expect(deleteFilesMock).toHaveBeenCalledTimes(1);
     expect(deleteFilesMock.mock.calls[0]?.[0]).toEqual(["a.txt", "b.txt"]);
@@ -401,7 +401,7 @@ describe("uploadthing adapter", () => {
 
   test("deleteMany short-circuits an empty list without calling deleteFiles", async () => {
     const files = new Files({ adapter: uploadthing() });
-    const result = await files.deleteMany([]);
+    const result = await files.delete([]);
     expect(result).toEqual({ deleted: [] });
     expect(deleteFilesMock).not.toHaveBeenCalled();
   });
@@ -413,7 +413,7 @@ describe("uploadthing adapter", () => {
       )
     );
     const files = new Files({ adapter: uploadthing() });
-    const result = await files.deleteMany(["a.txt", "b.txt"]);
+    const result = await files.delete(["a.txt", "b.txt"]);
     expect(result.deleted).toEqual([]);
     expect(result.errors?.map((e) => e.key)).toEqual(["a.txt", "b.txt"]);
     for (const entry of result.errors ?? []) {
@@ -435,7 +435,7 @@ describe("uploadthing adapter", () => {
         Promise.reject(new Error("file not found"))
       );
     const files = new Files({ adapter: uploadthing() });
-    const result = await files.deleteMany(["a.txt", "b.txt", "c.txt"], {
+    const result = await files.delete(["a.txt", "b.txt", "c.txt"], {
       stopOnError: true,
     });
     expect(result.deleted).toEqual(["a.txt"]);

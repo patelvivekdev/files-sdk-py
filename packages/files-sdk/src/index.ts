@@ -618,29 +618,43 @@ export class Files<A extends Adapter = Adapter> {
     );
   }
 
-  delete(key: string, opts?: OperationOptions): Promise<void> {
+  /**
+   * Remove one key or many.
+   *
+   * - `delete(key)` removes a single object and resolves to `void`. A failure
+   *   (including a missing key on providers that don't treat delete as
+   *   idempotent) **throws** a {@link FilesError}.
+   * - `delete(keys)` removes many in one call and resolves to a
+   *   {@link DeleteManyResult}. It does **not** throw on partial failure —
+   *   per-key failures (and invalid keys) are collected in `errors`, deleted
+   *   keys in `deleted`, both in the order supplied. The adapter's native
+   *   bulk primitive is used when available, otherwise the SDK fans out to
+   *   single deletes with bounded `concurrency`. With `stopOnError`, the first
+   *   failure short-circuits and returns the keys deleted so far plus that
+   *   error.
+   *
+   * Both forms honor the client's `prefix`; the array form reports the keys
+   * the caller passed, not the internal prefixed paths.
+   */
+  delete(key: string, opts?: OperationOptions): Promise<void>;
+  delete(keys: string[], opts?: DeleteManyOptions): Promise<DeleteManyResult>;
+  delete(
+    key: string | string[],
+    opts?: OperationOptions | DeleteManyOptions
+  ): Promise<void | DeleteManyResult> {
+    if (Array.isArray(key)) {
+      return this.#deleteMany(key, opts as DeleteManyOptions | undefined);
+    }
     const path = this.#path(key);
-    return this.#run(opts, (attemptOpts) =>
+    return this.#run(opts as OperationOptions | undefined, (attemptOpts) =>
       this.#adapter.delete(path, attemptOpts)
     );
   }
 
-  /**
-   * Delete many keys in one call, returning a structured result rather than
-   * throwing on partial failure. Uses the adapter's native bulk primitive
-   * when available, otherwise fans out to `delete()` with bounded
-   * concurrency. Invalid keys are reported in `errors` alongside provider
-   * failures; with `stopOnError`, the first invalid key short-circuits
-   * before any delete is attempted.
-   */
-  async deleteMany(
+  async #deleteMany(
     keys: string[],
     opts?: DeleteManyOptions
   ): Promise<DeleteManyResult> {
-    if (!Array.isArray(keys)) {
-      throw new FilesError("Provider", "keys must be an array");
-    }
-
     // Track each error's position in the caller's array so the final
     // `errors` list stays in input order, even when invalid keys (caught
     // here) interleave with provider failures (reported by the adapter).

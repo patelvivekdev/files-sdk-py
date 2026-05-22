@@ -294,7 +294,7 @@ describe("cli/commands (fs integration)", () => {
     await runUpload({ ...common(), file: src, key: "kill.txt" });
     stdoutChunks.length = 0;
 
-    await runDelete({ ...common(), key: "kill.txt" });
+    await runDelete({ ...common(), keys: ["kill.txt"] });
     const { files } = await loadFiles({ provider: "fs", root });
     expect(await files.exists("kill.txt")).toBe(false);
   });

@@ -75,14 +75,31 @@ describe("Files class", () => {
     expect(adapter.has("d.txt")).toBe(false);
   });
 
-  test("deleteMany removes multiple objects", async () => {
+  test("delete overload: string resolves void, array resolves a result", async () => {
+    const adapter = fakeAdapter();
+    const files = new Files({ adapter });
+    await files.upload("one.txt", "x");
+    await files.upload("two.txt", "y");
+
+    // String form resolves to void.
+    const single = await files.delete("one.txt");
+    expect(single).toBeUndefined();
+    expect(adapter.has("one.txt")).toBe(false);
+
+    // Array form resolves to a structured DeleteManyResult.
+    const many = await files.delete(["two.txt"]);
+    expect(many).toEqual({ deleted: ["two.txt"] });
+    expect(adapter.has("two.txt")).toBe(false);
+  });
+
+  test("delete (array) removes multiple objects", async () => {
     const adapter = fakeAdapter();
     const files = new Files({ adapter });
     await files.upload("a.txt", "a");
     await files.upload("b.txt", "b");
     await files.upload("c.txt", "c");
 
-    const result = await files.deleteMany(["a.txt", "b.txt", "c.txt"]);
+    const result = await files.delete(["a.txt", "b.txt", "c.txt"]);
 
     expect(result).toEqual({ deleted: ["a.txt", "b.txt", "c.txt"] });
     expect(adapter.has("a.txt")).toBe(false);
@@ -90,13 +107,13 @@ describe("Files class", () => {
     expect(adapter.has("c.txt")).toBe(false);
   });
 
-  test("deleteMany returns per-key errors and continues when stopOnError is false", async () => {
+  test("delete (array) returns per-key errors and continues when stopOnError is false", async () => {
     const adapter = fakeAdapter();
     const files = new Files({ adapter });
     await files.upload("ok-1.txt", "1");
     await files.upload("ok-2.txt", "2");
 
-    const result = await files.deleteMany(
+    const result = await files.delete(
       ["ok-1.txt", "fail/a.txt", "ok-2.txt", "fail/b.txt"],
       { stopOnError: false }
     );
@@ -110,28 +127,27 @@ describe("Files class", () => {
     expect(adapter.has("ok-2.txt")).toBe(false);
   });
 
-  test("deleteMany stops on the first error when stopOnError is true", async () => {
+  test("delete (array) stops on the first error when stopOnError is true", async () => {
     const adapter = fakeAdapter();
     const files = new Files({ adapter });
     await files.upload("ok-1.txt", "1");
     await files.upload("ok-2.txt", "2");
 
-    const result = await files.deleteMany(
-      ["ok-1.txt", "fail/a.txt", "ok-2.txt"],
-      { stopOnError: true }
-    );
+    const result = await files.delete(["ok-1.txt", "fail/a.txt", "ok-2.txt"], {
+      stopOnError: true,
+    });
 
     expect(result.deleted).toEqual(["ok-1.txt"]);
     expect(result.errors?.map((item) => item.key)).toEqual(["fail/a.txt"]);
     expect(adapter.has("ok-2.txt")).toBe(true);
   });
 
-  test("deleteMany returns validation errors without skipping valid keys", async () => {
+  test("delete (array) returns validation errors without skipping valid keys", async () => {
     const adapter = fakeAdapter();
     const files = new Files({ adapter });
     await files.upload("ok.txt", "1");
 
-    const result = await files.deleteMany(["", "ok.txt", "foo\0bar"], {
+    const result = await files.delete(["", "ok.txt", "foo\0bar"], {
       stopOnError: false,
     });
 
@@ -139,13 +155,13 @@ describe("Files class", () => {
     expect(result.errors?.map((item) => item.key)).toEqual(["", "foo\0bar"]);
   });
 
-  test("deleteMany applies the configured prefix but reports caller keys", async () => {
+  test("delete (array) applies the configured prefix but reports caller keys", async () => {
     const adapter = fakeAdapter();
     const files = new Files({ adapter, prefix: "uploads" });
     await files.upload("a.txt", "a");
     await files.upload("b.txt", "b");
 
-    const result = await files.deleteMany(["a.txt", "b.txt"]);
+    const result = await files.delete(["a.txt", "b.txt"]);
 
     // Result reflects the keys the caller passed, not the prefixed paths.
     expect(result).toEqual({ deleted: ["a.txt", "b.txt"] });
@@ -153,9 +169,9 @@ describe("Files class", () => {
     expect(adapter.has("uploads/b.txt")).toBe(false);
   });
 
-  test("deleteMany falls back to per-key delete and forwards stopOnError", async () => {
+  test("delete (array) falls back to per-key delete and forwards stopOnError", async () => {
     const base = fakeAdapter();
-    // Drop the native bulk path so Files.deleteMany uses the fallback.
+    // Drop the native bulk path so delete([...]) uses the fallback.
     const { deleteMany: _omitted, ...rest } = base;
     const attempted: string[] = [];
     const adapter: Adapter = {
@@ -170,10 +186,9 @@ describe("Files class", () => {
     };
     const files = new Files({ adapter });
 
-    const result = await files.deleteMany(
-      ["ok-1.txt", "fail/x.txt", "ok-2.txt"],
-      { stopOnError: true }
-    );
+    const result = await files.delete(["ok-1.txt", "fail/x.txt", "ok-2.txt"], {
+      stopOnError: true,
+    });
 
     expect(result.deleted).toEqual(["ok-1.txt"]);
     expect(result.errors?.map((item) => item.key)).toEqual(["fail/x.txt"]);
@@ -181,9 +196,9 @@ describe("Files class", () => {
     expect(attempted).toEqual(["ok-1.txt", "fail/x.txt"]);
   });
 
-  test("deleteMany fallback bounds concurrency and preserves order", async () => {
+  test("delete (array) fallback bounds concurrency and preserves order", async () => {
     const base = fakeAdapter();
-    // Drop the native bulk path so Files.deleteMany uses the worker pool.
+    // Drop the native bulk path so delete([...]) uses the worker pool.
     const { deleteMany: _omitted, ...rest } = base;
     let inFlight = 0;
     let maxInFlight = 0;
@@ -212,7 +227,7 @@ describe("Files class", () => {
       "f.txt",
     ];
 
-    const result = await files.deleteMany(keys, { concurrency: 2 });
+    const result = await files.delete(keys, { concurrency: 2 });
 
     expect(result.deleted).toEqual(["a.txt", "c.txt", "d.txt", "f.txt"]);
     expect(result.errors?.map((item) => item.key)).toEqual([
@@ -225,12 +240,12 @@ describe("Files class", () => {
     expect(maxInFlight).toBeGreaterThan(1);
   });
 
-  test("deleteMany orders errors by input position across validation and provider failures", async () => {
+  test("delete (array) orders errors by input position across validation and provider failures", async () => {
     const adapter = fakeAdapter();
     const files = new Files({ adapter });
     await files.upload("ok.txt", "1");
 
-    const result = await files.deleteMany(
+    const result = await files.delete(
       ["fail/a.txt", "", "ok.txt", "fail/b.txt", "x\0y"],
       { stopOnError: false }
     );

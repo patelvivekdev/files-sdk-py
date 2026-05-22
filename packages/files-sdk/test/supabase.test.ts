@@ -503,7 +503,7 @@ describe("supabase adapter", () => {
 
     test("deleteMany delegates to remove(keys)", async () => {
       const files = new Files({ adapter: makeAdapter() });
-      const result = await files.deleteMany(["a.txt", "b.txt"]);
+      const result = await files.delete(["a.txt", "b.txt"]);
       expect(result).toEqual({ deleted: ["a.txt", "b.txt"] });
       expect(removeMock).toHaveBeenCalledTimes(1);
       const [removeCall] = removeMock.mock.calls;
@@ -515,7 +515,7 @@ describe("supabase adapter", () => {
 
     test("deleteMany short-circuits an empty list without calling remove", async () => {
       const files = new Files({ adapter: makeAdapter() });
-      const result = await files.deleteMany([]);
+      const result = await files.delete([]);
       expect(result).toEqual({ deleted: [] });
       expect(removeMock).not.toHaveBeenCalled();
     });
@@ -525,7 +525,7 @@ describe("supabase adapter", () => {
         Promise.resolve(fail(403, "Unauthorized", "denied"))
       );
       const files = new Files({ adapter: makeAdapter() });
-      const result = await files.deleteMany(["a.txt", "b.txt"]);
+      const result = await files.delete(["a.txt", "b.txt"]);
       expect(result.deleted).toEqual([]);
       expect(result.errors?.map((e) => e.key)).toEqual(["a.txt", "b.txt"]);
       for (const entry of result.errors ?? []) {
@@ -543,7 +543,7 @@ describe("supabase adapter", () => {
           Promise.resolve(fail(404, "NotFound", "gone"))
         );
       const files = new Files({ adapter: makeAdapter() });
-      const result = await files.deleteMany(["a.txt", "b.txt", "c.txt"], {
+      const result = await files.delete(["a.txt", "b.txt", "c.txt"], {
         stopOnError: true,
       });
       expect(result.deleted).toEqual(["a.txt"]);

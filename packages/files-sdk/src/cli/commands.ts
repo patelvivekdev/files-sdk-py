@@ -1,6 +1,7 @@
 import { FilesError } from "../internal/errors.js";
 import {
   emit,
+  exitCode,
   parseKeyValuePairs,
   readBody,
   storedFileToJson,
@@ -122,13 +123,32 @@ export const runExists = async (opts: KeyOnlyCmdOpts): Promise<void> => {
   }
 };
 
-export const runDelete = async (opts: KeyOnlyCmdOpts): Promise<void> => {
+export interface DeleteCmdOpts extends CommonRunOpts {
+  keys: string[];
+}
+
+export const runDelete = async (opts: DeleteCmdOpts): Promise<void> => {
   if (opts.dryRun) {
-    return dryRun("delete", { key: opts.key }, opts);
+    return dryRun("delete", { keys: opts.keys }, opts);
   }
   const { files } = await loadFiles(opts.global);
-  await files.delete(opts.key);
-  emit({ deleted: true, key: opts.key }, opts);
+
+  // One key keeps the original throw-on-failure contract and output shape.
+  if (opts.keys.length === 1) {
+    const key = opts.keys[0] as string;
+    await files.delete(key);
+    emit({ deleted: true, key }, opts);
+    return;
+  }
+
+  // Many keys return a structured result instead of throwing on partial
+  // failure. Surface that failure to scripts via a non-zero exit code,
+  // mapped from the first error like the single-key path does.
+  const result = await files.delete(opts.keys);
+  emit(result, opts);
+  if (result.errors?.length) {
+    process.exit(exitCode(result.errors[0]?.error.code ?? "Provider"));
+  }
 };
 
 export interface CopyCmdOpts extends CommonRunOpts {

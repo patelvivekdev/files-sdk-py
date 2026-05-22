@@ -154,7 +154,7 @@ describe("cli/commands dry-run", () => {
     expect(lastJson(cap.stdout).action).toBe("exists");
     cap.stdout.length = 0;
 
-    await runDelete({ ...baseOpts({ dryRun: true }), key: "k" });
+    await runDelete({ ...baseOpts({ dryRun: true }), keys: ["k"] });
     expect(lastJson(cap.stdout).action).toBe("delete");
   });
 
@@ -283,9 +283,20 @@ describe("cli/commands real (fs adapter)", () => {
     const local = path.join(root, "in.txt");
     await uploadFile("gone.txt", "x", local);
     cap.stdout.length = 0;
-    await runDelete({ ...baseOpts(), key: "gone.txt" });
+    await runDelete({ ...baseOpts(), keys: ["gone.txt"] });
     expect(lastJson(cap.stdout)).toEqual({ deleted: true, key: "gone.txt" });
     await expect(fsp.access(path.join(root, "gone.txt"))).rejects.toThrow();
+  });
+
+  test("delete removes many keys and returns a structured result", async () => {
+    const local = path.join(root, "in.txt");
+    await uploadFile("m-a.txt", "a", local);
+    await uploadFile("m-b.txt", "b", local);
+    cap.stdout.length = 0;
+    await runDelete({ ...baseOpts(), keys: ["m-a.txt", "m-b.txt"] });
+    expect(lastJson(cap.stdout)).toEqual({ deleted: ["m-a.txt", "m-b.txt"] });
+    await expect(fsp.access(path.join(root, "m-a.txt"))).rejects.toThrow();
+    await expect(fsp.access(path.join(root, "m-b.txt"))).rejects.toThrow();
   });
 
   test("copy duplicates the object server-side", async () => {

@@ -56,20 +56,20 @@ const missing = await files.exists("avatars/missing.png");
 // → true / false
 ```
 
-### files.delete(key)
+### files.delete(key) / files.delete(keys)
 
-Removes an object. No-op friendly: a missing key resolves successfully on providers that treat delete as idempotent, and throws `FilesError` with `code: "NotFound"` on ones that don't.
+Pass a single key to remove one object, or an array to remove many in one call. The two forms differ in how failures surface.
+
+**One key** removes a single object and resolves to `void`. No-op friendly: a missing key resolves successfully on providers that treat delete as idempotent, and throws `FilesError` with `code: "NotFound"` on ones that don't.
 
 ```ts lineNumbers
 await files.delete("avatars/abc.png");
 ```
 
-### files.deleteMany(keys, options?)
-
-Removes many keys in one call and returns a structured result instead of throwing on partial failure. Adapters with a native bulk primitive (S3 `DeleteObjects`, Supabase, UploadThing) delete in a single request — the S3 path chunks into batches of 1000, the provider limit — while the rest fan out to `delete()` with bounded concurrency. Like `delete`, it honors the client's `prefix` and is no-op friendly on providers that treat a missing key as success.
+**Many keys** returns a structured result instead of throwing on partial failure. Adapters with a native bulk primitive (S3 `DeleteObjects`, Supabase, UploadThing) delete in a single request — the S3 path chunks into batches of 1000, the provider limit — while the rest fan out to single deletes with bounded concurrency. Like the single form, it honors the client's `prefix` and is no-op friendly on providers that treat a missing key as success.
 
 ```ts lineNumbers
-const result = await files.deleteMany(
+const result = await files.delete(
   ["avatars/a.png", "avatars/b.png", "avatars/c.png"],
   { concurrency: 8, stopOnError: false }
 );
@@ -78,7 +78,7 @@ result.deleted; // string[] — keys removed, in the order supplied
 result.errors; // undefined when every key succeeded
 ```
 
-The result is always an object of this shape:
+The array form always resolves to an object of this shape:
 
 ```ts
 type DeleteManyResult = {
@@ -89,7 +89,7 @@ type DeleteManyResult = {
 
 With the default `stopOnError: false`, every key is attempted and per-key failures are collected in `errors`. With `stopOnError: true`, the call stops at the first failure and returns the keys deleted so far plus that error. Invalid keys (empty, or containing null bytes) are reported in `errors` rather than thrown. When a native bulk provider only reports that the whole request failed, the provider error is mapped onto each affected key.
 
-#### Options
+#### Options (array form)
 
 <AutoTypeTable
   path="../../packages/files-sdk/src/index.ts"

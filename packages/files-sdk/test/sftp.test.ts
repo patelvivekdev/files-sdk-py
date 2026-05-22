@@ -236,7 +236,7 @@ describe("sftp adapter", () => {
     const files = newFiles();
     await files.upload("a.txt", "1");
     await files.upload("b.txt", "2");
-    const result = await files.deleteMany(["a.txt", "b.txt", "missing.txt"]);
+    const result = await files.delete(["a.txt", "b.txt", "missing.txt"]);
     // Missing deletes are idempotent, so all three count as deleted.
     expect(result.deleted).toEqual(["a.txt", "b.txt", "missing.txt"]);
     expect(result.errors).toBeUndefined();

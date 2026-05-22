@@ -21,7 +21,7 @@ const humanize = (data: unknown): string => {
   return JSON.stringify(data, null, 2);
 };
 
-const exitCode = (code: string): number => {
+export const exitCode = (code: string): number => {
   switch (code) {
     case "NotFound": {
       return 1;
