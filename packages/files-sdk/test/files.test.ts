@@ -261,6 +261,205 @@ describe("Files class", () => {
     ]);
   });
 
+  test("upload (array) stores many and returns results in input order", async () => {
+    const adapter = fakeAdapter();
+    const files = new Files({ adapter });
+
+    const result = await files.upload([
+      { body: "a", contentType: "text/plain", key: "a.txt" },
+      { body: "b", key: "b.txt" },
+      { body: new Uint8Array([1, 2, 3]), key: "c.txt" },
+    ]);
+
+    expect(result.uploaded.map((u) => u.key)).toEqual([
+      "a.txt",
+      "b.txt",
+      "c.txt",
+    ]);
+    expect(result.errors).toBeUndefined();
+    expect(result.uploaded[0]?.contentType).toBe("text/plain");
+    expect(adapter.has("a.txt")).toBe(true);
+    expect(adapter.has("c.txt")).toBe(true);
+  });
+
+  test("upload (array) collects per-item errors without throwing", async () => {
+    const adapter = fakeAdapter();
+    const files = new Files({ adapter });
+
+    const result = await files.upload([
+      { body: "x", key: "ok.txt" },
+      { body: "y", key: "" },
+      { body: "z", key: "foo\0bar" },
+    ]);
+
+    expect(result.uploaded.map((u) => u.key)).toEqual(["ok.txt"]);
+    expect(result.errors?.map((e) => e.key)).toEqual(["", "foo\0bar"]);
+  });
+
+  test("upload (array) applies the prefix but reports caller keys", async () => {
+    const adapter = fakeAdapter();
+    const files = new Files({ adapter, prefix: "uploads" });
+
+    const result = await files.upload([
+      { body: "a", key: "a.txt" },
+      { body: "b", key: "b.txt" },
+    ]);
+
+    expect(result.uploaded.map((u) => u.key)).toEqual(["a.txt", "b.txt"]);
+    expect(adapter.has("uploads/a.txt")).toBe(true);
+    expect(adapter.has("uploads/b.txt")).toBe(true);
+  });
+
+  test("upload (array) stops on the first error when stopOnError is true", async () => {
+    const base = fakeAdapter();
+    const attempted: string[] = [];
+    const adapter: Adapter = {
+      ...base,
+      upload(key: string, body, opts) {
+        attempted.push(key);
+        if (key.startsWith("fail/")) {
+          return Promise.reject(new FilesError("Provider", `nope: ${key}`));
+        }
+        return base.upload(key, body, opts);
+      },
+    };
+    const files = new Files({ adapter });
+
+    const result = await files.upload(
+      [
+        { body: "1", key: "ok-1.txt" },
+        { body: "2", key: "fail/x.txt" },
+        { body: "3", key: "ok-2.txt" },
+      ],
+      { stopOnError: true }
+    );
+
+    expect(result.uploaded.map((u) => u.key)).toEqual(["ok-1.txt"]);
+    expect(result.errors?.map((e) => e.key)).toEqual(["fail/x.txt"]);
+    // stopOnError short-circuits: ok-2.txt is never attempted.
+    expect(attempted).toEqual(["ok-1.txt", "fail/x.txt"]);
+  });
+
+  test("download (array) returns files in order and collects misses", async () => {
+    const adapter = fakeAdapter();
+    const files = new Files({ adapter });
+    await files.upload("a.txt", "aa");
+    await files.upload("c.txt", "cccc");
+
+    const result = await files.download(["a.txt", "missing.txt", "c.txt"]);
+
+    expect(result.downloaded.map((f) => f.key)).toEqual(["a.txt", "c.txt"]);
+    expect(result.errors?.map((e) => e.key)).toEqual(["missing.txt"]);
+    expect(await result.downloaded[0]?.text()).toBe("aa");
+  });
+
+  test("download (array) applies the prefix but reports caller keys", async () => {
+    const adapter = fakeAdapter();
+    const files = new Files({ adapter, prefix: "p" });
+    await files.upload("a.txt", "a");
+
+    const result = await files.download(["a.txt", "missing.txt"]);
+
+    expect(result.downloaded.map((f) => f.key)).toEqual(["a.txt"]);
+    expect(result.errors?.map((e) => e.key)).toEqual(["missing.txt"]);
+  });
+
+  test("download (array) bounds concurrency and preserves order", async () => {
+    const base = fakeAdapter();
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const adapter: Adapter = {
+      ...base,
+      async download(key: string, opts) {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await Promise.resolve();
+        await Promise.resolve();
+        inFlight -= 1;
+        return base.download(key, opts);
+      },
+    };
+    const files = new Files({ adapter });
+    const keys = ["a", "b", "c", "d", "e", "f"];
+    for (const key of keys) {
+      await files.upload(key, key);
+    }
+
+    const result = await files.download(keys, { concurrency: 2 });
+
+    expect(result.downloaded.map((f) => f.key)).toEqual(keys);
+    expect(maxInFlight).toBeLessThanOrEqual(2);
+    expect(maxInFlight).toBeGreaterThan(1);
+  });
+
+  test("head (array) returns metadata files and collects misses", async () => {
+    const adapter = fakeAdapter();
+    const files = new Files({ adapter });
+    await files.upload("a.txt", "aa");
+    await files.upload("b.txt", "bbb");
+
+    const result = await files.head(["a.txt", "missing.txt", "b.txt"]);
+
+    expect(result.files.map((f) => f.key)).toEqual(["a.txt", "b.txt"]);
+    expect(result.files.map((f) => f.size)).toEqual([2, 3]);
+    expect(result.errors?.map((e) => e.key)).toEqual(["missing.txt"]);
+  });
+
+  test("exists (array) splits existing and missing in input order", async () => {
+    const adapter = fakeAdapter();
+    const files = new Files({ adapter });
+    await files.upload("a.txt", "a");
+    await files.upload("c.txt", "c");
+
+    const result = await files.exists(["a.txt", "b.txt", "c.txt", "d.txt"]);
+
+    expect(result).toEqual({
+      existing: ["a.txt", "c.txt"],
+      missing: ["b.txt", "d.txt"],
+    });
+  });
+
+  test("exists (array) collects hard errors separately from missing", async () => {
+    const base = fakeAdapter();
+    const adapter: Adapter = {
+      ...base,
+      exists(key: string, opts) {
+        if (key.startsWith("fail/")) {
+          return Promise.reject(new FilesError("Unauthorized", `nope: ${key}`));
+        }
+        return base.exists(key, opts);
+      },
+    };
+    const files = new Files({ adapter });
+    await files.upload("a.txt", "a");
+
+    const result = await files.exists(["a.txt", "missing.txt", "fail/x.txt"]);
+
+    expect(result.existing).toEqual(["a.txt"]);
+    expect(result.missing).toEqual(["missing.txt"]);
+    expect(result.errors?.map((e) => e.key)).toEqual(["fail/x.txt"]);
+  });
+
+  test("exists (array) applies the prefix but reports caller keys", async () => {
+    const adapter = fakeAdapter();
+    const files = new Files({ adapter, prefix: "p" });
+    await files.upload("a.txt", "a");
+
+    const result = await files.exists(["a.txt", "b.txt"]);
+
+    expect(result).toEqual({ existing: ["a.txt"], missing: ["b.txt"] });
+    expect(adapter.has("p/a.txt")).toBe(true);
+  });
+
+  test("bulk forms accept an empty array", async () => {
+    const files = new Files({ adapter: fakeAdapter() });
+
+    expect(await files.upload([])).toEqual({ uploaded: [] });
+    expect(await files.download([])).toEqual({ downloaded: [] });
+    expect(await files.head([])).toEqual({ files: [] });
+    expect(await files.exists([])).toEqual({ existing: [], missing: [] });
+  });
+
   test("copy duplicates an object", async () => {
     const files = new Files({ adapter: fakeAdapter() });
     await files.upload("from.txt", "payload");

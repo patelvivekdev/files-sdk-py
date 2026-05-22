@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
 import { Files, FilesError } from "../src/index.js";
+import type { Body } from "../src/index.js";
 
 // `appId: "myapp"`, `apiKey: "sk_test"`, `regions: ["sea1"]`
 const TEST_TOKEN = btoa(
@@ -612,15 +613,14 @@ describe("uploadthing adapter", () => {
         c.close();
       },
     });
-    const inputs: { name: string; body: Parameters<typeof files.upload>[1] }[] =
-      [
-        { body: "hello", name: "string" },
-        { body: bytes, name: "Uint8Array" },
-        { body: bytes.buffer, name: "ArrayBuffer" },
-        { body: wrapped, name: "ArrayBufferView" },
-        { body: new Blob(["hello"], { type: "text/plain" }), name: "Blob" },
-        { body: stream, name: "ReadableStream" },
-      ];
+    const inputs: { name: string; body: Body }[] = [
+      { body: "hello", name: "string" },
+      { body: bytes, name: "Uint8Array" },
+      { body: bytes.buffer, name: "ArrayBuffer" },
+      { body: wrapped, name: "ArrayBufferView" },
+      { body: new Blob(["hello"], { type: "text/plain" }), name: "Blob" },
+      { body: stream, name: "ReadableStream" },
+    ];
     for (const { body } of inputs) {
       uploadFilesMock.mockClear();
       const out = await files.upload("a.bin", body);

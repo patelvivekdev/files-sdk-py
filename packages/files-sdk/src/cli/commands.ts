@@ -97,28 +97,70 @@ export const runDownload = async (opts: DownloadCmdOpts): Promise<void> => {
   }
 };
 
-export interface KeyOnlyCmdOpts extends CommonRunOpts {
-  key: string;
+export interface HeadCmdOpts extends CommonRunOpts {
+  keys: string[];
 }
 
-export const runHead = async (opts: KeyOnlyCmdOpts): Promise<void> => {
+export const runHead = async (opts: HeadCmdOpts): Promise<void> => {
   if (opts.dryRun) {
-    return dryRun("head", { key: opts.key }, opts);
+    return dryRun("head", { keys: opts.keys }, opts);
   }
   const { files } = await loadFiles(opts.global);
-  const file = await files.head(opts.key);
-  emit(storedFileToJson(file), opts);
+
+  // One key keeps the original throw-on-failure contract and output shape.
+  if (opts.keys.length === 1) {
+    const file = await files.head(opts.keys[0] as string);
+    emit(storedFileToJson(file), opts);
+    return;
+  }
+
+  // Many keys return a structured result instead of throwing on partial
+  // failure. Surface that failure to scripts via a non-zero exit code,
+  // mapped from the first error like the single-key path does.
+  const result = await files.head(opts.keys);
+  emit(
+    {
+      files: result.files.map(storedFileToJson),
+      ...(result.errors && { errors: result.errors }),
+    },
+    opts
+  );
+  if (result.errors?.length) {
+    process.exit(exitCode(result.errors[0]?.error.code ?? "Provider"));
+  }
 };
 
-export const runExists = async (opts: KeyOnlyCmdOpts): Promise<void> => {
+export interface ExistsCmdOpts extends CommonRunOpts {
+  keys: string[];
+}
+
+export const runExists = async (opts: ExistsCmdOpts): Promise<void> => {
   if (opts.dryRun) {
-    return dryRun("exists", { key: opts.key }, opts);
+    return dryRun("exists", { keys: opts.keys }, opts);
   }
   const { files } = await loadFiles(opts.global);
-  const exists = await files.exists(opts.key);
-  emit({ exists, key: opts.key }, opts);
-  if (!exists) {
-    // exit 1 = missing, matches `test -e` convention
+
+  // One key keeps the original { exists, key } shape and `test -e` exit code.
+  if (opts.keys.length === 1) {
+    const key = opts.keys[0] as string;
+    const exists = await files.exists(key);
+    emit({ exists, key }, opts);
+    if (!exists) {
+      // exit 1 = missing, matches `test -e` convention
+      process.exit(1);
+    }
+    return;
+  }
+
+  // Many keys: a structured existing/missing split. A hard error (auth,
+  // transport) exits with its mapped code; otherwise any missing key exits 1,
+  // scaling the single-key `test -e` convention to "all keys must exist".
+  const result = await files.exists(opts.keys);
+  emit(result, opts);
+  if (result.errors?.length) {
+    process.exit(exitCode(result.errors[0]?.error.code ?? "Provider"));
+  }
+  if (result.missing.length) {
     process.exit(1);
   }
 };

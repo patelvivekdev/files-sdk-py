@@ -146,11 +146,11 @@ describe("cli/commands dry-run", () => {
   });
 
   test("head / exists / delete dry-runs name the action", async () => {
-    await runHead({ ...baseOpts({ dryRun: true }), key: "k" });
+    await runHead({ ...baseOpts({ dryRun: true }), keys: ["k"] });
     expect(lastJson(cap.stdout).action).toBe("head");
     cap.stdout.length = 0;
 
-    await runExists({ ...baseOpts({ dryRun: true }), key: "k" });
+    await runExists({ ...baseOpts({ dryRun: true }), keys: ["k"] });
     expect(lastJson(cap.stdout).action).toBe("exists");
     cap.stdout.length = 0;
 
@@ -258,25 +258,82 @@ describe("cli/commands real (fs adapter)", () => {
     const local = path.join(root, "in.txt");
     await uploadFile("h.txt", "abcd", local);
     cap.stdout.length = 0;
-    await runHead({ ...baseOpts(), key: "h.txt" });
+    await runHead({ ...baseOpts(), keys: ["h.txt"] });
     expect(lastJson(cap.stdout)).toMatchObject({ key: "h.txt", size: 4 });
+  });
+
+  test("head returns a structured { files } result for many keys", async () => {
+    const local = path.join(root, "in.txt");
+    await uploadFile("hm-a.txt", "aa", local);
+    await uploadFile("hm-b.txt", "bbbb", local);
+    cap.stdout.length = 0;
+    await runHead({ ...baseOpts(), keys: ["hm-a.txt", "hm-b.txt"] });
+    const out = lastJson(cap.stdout) as { files: { key: string }[] };
+    expect(out.files.map((f) => f.key)).toEqual(["hm-a.txt", "hm-b.txt"]);
+    expect(out).not.toHaveProperty("errors");
+    expect(cap.exits).toEqual([]);
+  });
+
+  test("head (many) reports per-key errors and exits non-zero", async () => {
+    const local = path.join(root, "in.txt");
+    await uploadFile("hp.txt", "x", local);
+    cap.stdout.length = 0;
+    await expect(
+      runHead({ ...baseOpts(), keys: ["hp.txt", "nope.txt"] })
+    ).rejects.toThrow("__exit:1");
+    const out = lastJson(cap.stdout) as {
+      files: { key: string }[];
+      errors: { key: string }[];
+    };
+    expect(out.files.map((f) => f.key)).toEqual(["hp.txt"]);
+    expect(out.errors.map((e) => e.key)).toEqual(["nope.txt"]);
+    // NotFound maps to exit code 1.
+    expect(cap.exits).toEqual([1]);
   });
 
   test("exists prints true for present key and does not exit", async () => {
     const local = path.join(root, "in.txt");
     await uploadFile("present", "z", local);
     cap.stdout.length = 0;
-    await runExists({ ...baseOpts(), key: "present" });
+    await runExists({ ...baseOpts(), keys: ["present"] });
     expect(lastJson(cap.stdout)).toEqual({ exists: true, key: "present" });
     expect(cap.exits).toEqual([]);
   });
 
   test("exists exits 1 when key is missing", async () => {
-    await expect(runExists({ ...baseOpts(), key: "missing" })).rejects.toThrow(
-      "__exit:1"
-    );
+    await expect(
+      runExists({ ...baseOpts(), keys: ["missing"] })
+    ).rejects.toThrow("__exit:1");
     expect(cap.exits).toEqual([1]);
     expect(lastJson(cap.stdout)).toEqual({ exists: false, key: "missing" });
+  });
+
+  test("exists (many) splits existing/missing and exits 1 if any missing", async () => {
+    const local = path.join(root, "in.txt");
+    await uploadFile("ex-a.txt", "a", local);
+    await uploadFile("ex-b.txt", "b", local);
+    cap.stdout.length = 0;
+    await expect(
+      runExists({ ...baseOpts(), keys: ["ex-a.txt", "gone.txt", "ex-b.txt"] })
+    ).rejects.toThrow("__exit:1");
+    expect(lastJson(cap.stdout)).toEqual({
+      existing: ["ex-a.txt", "ex-b.txt"],
+      missing: ["gone.txt"],
+    });
+    expect(cap.exits).toEqual([1]);
+  });
+
+  test("exists (many) exits 0 when every key exists", async () => {
+    const local = path.join(root, "in.txt");
+    await uploadFile("all-a.txt", "a", local);
+    await uploadFile("all-b.txt", "b", local);
+    cap.stdout.length = 0;
+    await runExists({ ...baseOpts(), keys: ["all-a.txt", "all-b.txt"] });
+    expect(lastJson(cap.stdout)).toEqual({
+      existing: ["all-a.txt", "all-b.txt"],
+      missing: [],
+    });
+    expect(cap.exits).toEqual([]);
   });
 
   test("delete removes the underlying file", async () => {

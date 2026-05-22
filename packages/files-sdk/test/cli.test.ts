@@ -261,7 +261,7 @@ describe("cli/commands (fs integration)", () => {
     await runUpload({ ...common(), file: src, key: "meta.bin" });
     stdoutChunks.length = 0;
 
-    await runHead({ ...common(), key: "meta.bin" });
+    await runHead({ ...common(), keys: ["meta.bin"] });
     const meta = JSON.parse(captureStdout()) as { key: string; size: number };
     expect(meta.key).toBe("meta.bin");
     expect(meta.size).toBe(4);
@@ -273,7 +273,7 @@ describe("cli/commands (fs integration)", () => {
     await runUpload({ ...common(), file: src, key: "present.txt" });
     stdoutChunks.length = 0;
 
-    await runExists({ ...common(), key: "present.txt" });
+    await runExists({ ...common(), keys: ["present.txt"] });
     const payload = JSON.parse(captureStdout()) as { exists: boolean };
     expect(payload.exists).toBe(true);
   });

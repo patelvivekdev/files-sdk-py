@@ -237,7 +237,7 @@ describe("cli/program parseAsync (fs end-to-end)", () => {
     expect(lastJson(cap.stdout)).toMatchObject({
       action: "head",
       dryRun: true,
-      key: "key",
+      keys: ["key"],
       provider: "fs",
     });
   });

@@ -8,6 +8,8 @@
 
 import type {
   Body,
+  BulkError,
+  BulkOptions,
   DeleteManyError,
   DeleteManyOptions,
   DeleteManyResult,
@@ -376,4 +378,85 @@ export const deleteManyWithFallback = async (
   }
 
   return { deleted, errors };
+};
+
+/**
+ * Run an operation over many items with bounded concurrency, collecting typed
+ * successes and per-key failures in input order — the generic engine behind
+ * the array form of `upload` / `download` / `head` / `exists`. No provider
+ * exposes a native batch primitive for those, so every adapter fans out here.
+ *
+ * Mirrors {@link deleteManyWithFallback}: `stopOnError` runs sequentially and
+ * returns at the first failure; otherwise a worker pool of `concurrency`
+ * (default 8) drains the list, recording each outcome at its input index so
+ * the returned `results` and `errors` stay in the order the caller supplied.
+ * A separate `success` flag guards against an `Out` value that is itself
+ * falsy.
+ */
+export const mapMany = async <Item, Out>(
+  items: Item[],
+  keyOf: (item: Item) => string,
+  run: (item: Item) => Promise<Out>,
+  opts?: BulkOptions,
+  mapError: (error: unknown) => FilesError = FilesError.wrap
+): Promise<{ results: Out[]; errors: BulkError[] }> => {
+  const results: Out[] = [];
+  const errors: BulkError[] = [];
+
+  if (items.length === 0) {
+    return { errors, results };
+  }
+
+  if (opts?.stopOnError) {
+    for (const item of items) {
+      try {
+        results.push(await run(item));
+      } catch (error) {
+        errors.push({ error: mapError(error), key: keyOf(item) });
+        return { errors, results };
+      }
+    }
+    return { errors, results };
+  }
+
+  const concurrency =
+    Number.isInteger(opts?.concurrency) && (opts?.concurrency ?? 0) > 0
+      ? (opts?.concurrency as number)
+      : 8;
+  const success = Array.from<boolean>({ length: items.length }).fill(false);
+  const succeeded = Array.from<Out | undefined>({ length: items.length });
+  const failed = Array.from<BulkError | undefined>({ length: items.length });
+  let index = 0;
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+      while (index < items.length) {
+        const current = index;
+        index += 1;
+        const item = items[current];
+        if (item === undefined) {
+          return;
+        }
+        try {
+          succeeded[current] = await run(item);
+          success[current] = true;
+        } catch (error) {
+          failed[current] = { error: mapError(error), key: keyOf(item) };
+        }
+      }
+    })
+  );
+
+  for (const [current] of items.entries()) {
+    if (success[current]) {
+      results.push(succeeded[current] as Out);
+      continue;
+    }
+    const failure = failed[current];
+    if (failure) {
+      errors.push(failure);
+    }
+  }
+
+  return { errors, results };
 };

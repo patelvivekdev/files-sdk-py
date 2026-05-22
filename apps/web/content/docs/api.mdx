@@ -5,7 +5,7 @@ description: The full Files SDK API - eight unified methods, the StoredFile type
 
 ## Functions
 
-### files.upload(key, body, options?)
+### files.upload(key, body, options?) / files.upload(items)
 
 Writes a body to `key`. Accepts native `File`, `Blob`, `ReadableStream`, `ArrayBuffer`, or `string`. Content type is inferred from the input when possible.
 
@@ -25,7 +25,36 @@ await files.upload("avatars/abc.png", file, {
   name="UploadOptions"
 />
 
-### files.download(key, options?)
+**Many items** — pass an array of `{ key, body, ...options }` to upload many in one call. Each item carries its own `contentType` / `cacheControl` / `metadata`. The call returns a structured result instead of throwing on partial failure: successes land in `uploaded`, per-item failures (including invalid keys) in `errors`, both in the order supplied. It honors the client's `prefix` and fans out with bounded `concurrency` (default 8); `stopOnError: true` stops at the first failure.
+
+```ts lineNumbers
+const result = await files.upload(
+  [
+    { key: "avatars/a.png", body: a, contentType: "image/png" },
+    { key: "avatars/b.png", body: b },
+  ],
+  { concurrency: 8, stopOnError: false }
+);
+
+result.uploaded; // UploadResult[] — successes, in the order supplied
+result.errors; // undefined when every item succeeded
+```
+
+#### Item (array form)
+
+<AutoTypeTable
+  path="../../packages/files-sdk/src/index.ts"
+  name="UploadManyItem"
+/>
+
+#### Options (array form)
+
+<AutoTypeTable
+  path="../../packages/files-sdk/src/index.ts"
+  name="BulkOptions"
+/>
+
+### files.download(key, options?) / files.download(keys)
 
 Reads an object. Returns a `StoredFile` by default (Blob-backed). Pass `{ as: "stream" }` to opt into a `ReadableStream` for large objects.
 
@@ -37,7 +66,16 @@ const stream = await files.download("avatars/abc.png", { as: "stream" });
 // → ReadableStream
 ```
 
-### files.head(key)
+**Many keys** — pass an array to download many in one call. Returns `{ downloaded, errors? }` instead of throwing on partial failure; a missing key lands in `errors`. `as` applies to every download, and the call fans out with bounded `concurrency` (default 8) / `stopOnError`.
+
+```ts lineNumbers
+const result = await files.download(["avatars/a.png", "avatars/b.png"]);
+
+result.downloaded; // StoredFile[] — successes, in the order supplied
+result.errors; // undefined when every key succeeded
+```
+
+### files.head(key) / files.head(keys)
 
 Returns the same `StoredFile` shape as `download`, without materializing the body. Calling a body accessor on the result lazy-fetches.
 
@@ -46,7 +84,16 @@ const info = await files.head("avatars/abc.png");
 // → StoredFile with no body materialized
 ```
 
-### files.exists(key)
+**Many keys** — pass an array to fetch metadata for many in one call. Returns `{ files, errors? }` instead of throwing on partial failure (a missing key lands in `errors`), honoring `concurrency` / `stopOnError`.
+
+```ts lineNumbers
+const result = await files.head(["avatars/a.png", "avatars/b.png"]);
+
+result.files; // StoredFile[] — successes, in the order supplied
+result.errors; // undefined when every key succeeded
+```
+
+### files.exists(key) / files.exists(keys)
 
 Checks whether an object exists without fetching its body. Returns `true` when the key exists and `false` when the provider reports `NotFound`. Permission, auth, and transport failures still throw so callers do not accidentally treat them as a missing file.
 
@@ -54,6 +101,16 @@ Checks whether an object exists without fetching its body. Returns `true` when t
 const present = await files.exists("avatars/abc.png");
 const missing = await files.exists("avatars/missing.png");
 // → true / false
+```
+
+**Many keys** — pass an array to check many in one call. Returns `{ existing, missing, errors? }`: keys split into `existing` / `missing` (both in input order), with hard errors (auth, transport) collected in `errors` rather than thrown. Fans out with bounded `concurrency` (default 8) / `stopOnError`.
+
+```ts lineNumbers
+const result = await files.exists(["avatars/a.png", "avatars/b.png"]);
+
+result.existing; // string[] — keys that exist
+result.missing; // string[] — keys the provider reports as absent
+result.errors; // undefined unless a key hard-errored
 ```
 
 ### files.delete(key) / files.delete(keys)

@@ -1,4 +1,4 @@
-import { deleteManyWithFallback } from "./internal/core.js";
+import { deleteManyWithFallback, mapMany } from "./internal/core.js";
 import { FilesError } from "./internal/errors.js";
 
 export { FilesError, type FilesErrorCode } from "./internal/errors.js";
@@ -156,6 +156,81 @@ export interface DeleteManyResult {
   deleted: string[];
   /** Per-key failures. Omitted entirely when every key succeeded. */
   errors?: DeleteManyError[];
+}
+
+/**
+ * Shared controls for the array form of the bulk methods (`upload`,
+ * `download`, `head`, `exists`). Unlike `delete`, none of these have a native
+ * provider batch primitive, so the SDK always fans out to per-key calls.
+ */
+export interface BulkOptions {
+  /**
+   * How many per-key operations run in parallel. Defaults to `8`. Ignored
+   * when `stopOnError` is set — that path runs sequentially.
+   */
+  concurrency?: number;
+  /**
+   * When `true`, stop at the first failure and return immediately with the
+   * results gathered so far plus that error. When `false` (default), process
+   * every item and collect per-key failures in `errors`.
+   */
+  stopOnError?: boolean;
+}
+
+/** A single per-key failure from the array form of a bulk method. */
+export interface BulkError {
+  key: string;
+  error: FilesError;
+}
+
+/** One item in the array form of {@link Files.upload}. */
+export interface UploadManyItem {
+  key: string;
+  body: Body;
+  /** Per-item MIME type. See {@link UploadOptions.contentType}. */
+  contentType?: string;
+  /** Per-item `Cache-Control`. See {@link UploadOptions.cacheControl}. */
+  cacheControl?: string;
+  /** Per-item user metadata. See {@link UploadOptions.metadata}. */
+  metadata?: Record<string, string>;
+}
+
+export interface UploadManyResult {
+  /** Successful uploads, in the order their items were supplied. */
+  uploaded: UploadResult[];
+  /** Per-item failures. Omitted entirely when every item succeeded. */
+  errors?: BulkError[];
+}
+
+export interface DownloadManyOptions extends BulkOptions {
+  /** Applied to every download. See {@link DownloadOptions.as}. */
+  as?: "blob" | "stream";
+}
+
+export interface DownloadManyResult {
+  /** Downloaded files, in the order their keys were supplied. */
+  downloaded: StoredFile[];
+  /** Per-key failures. Omitted entirely when every key succeeded. */
+  errors?: BulkError[];
+}
+
+export interface HeadManyResult {
+  /** Metadata results, in the order their keys were supplied. */
+  files: StoredFile[];
+  /** Per-key failures. Omitted entirely when every key succeeded. */
+  errors?: BulkError[];
+}
+
+export interface ExistsManyResult {
+  /** Keys that exist, in input order. */
+  existing: string[];
+  /** Keys the provider reports as missing, in input order. */
+  missing: string[];
+  /**
+   * Keys whose existence couldn't be determined — a hard error (auth,
+   * transport) rather than a clean present/absent answer. Omitted when none.
+   */
+  errors?: BulkError[];
 }
 
 export interface UrlOptions extends OperationOptions {
@@ -572,8 +647,40 @@ export class Files<A extends Adapter = Adapter> {
     };
   }
 
-  upload(key: string, body: Body, opts?: UploadOptions): Promise<UploadResult> {
-    const path = this.#path(key);
+  /**
+   * Upload one object or many.
+   *
+   * - `upload(key, body, opts)` stores a single object and resolves to its
+   *   {@link UploadResult}. A failure **throws** a {@link FilesError}.
+   * - `upload(items)` stores many in one call — each item carries its own
+   *   `key`, `body`, and optional `contentType` / `cacheControl` / `metadata`
+   *   — and resolves to an {@link UploadManyResult}. It does **not** throw on
+   *   partial failure: successes land in `uploaded`, per-item failures
+   *   (including invalid keys) in `errors`, both in the order supplied. The
+   *   SDK fans out with bounded `concurrency` (default 8); `stopOnError`
+   *   short-circuits at the first failure.
+   *
+   * Both forms honor the client's `prefix`; the array form reports the keys
+   * the caller passed, not the internal prefixed paths.
+   */
+  upload(key: string, body: Body, opts?: UploadOptions): Promise<UploadResult>;
+  upload(
+    items: UploadManyItem[],
+    opts?: BulkOptions
+  ): Promise<UploadManyResult>;
+  upload(
+    keyOrItems: string | UploadManyItem[],
+    bodyOrOpts?: Body | BulkOptions,
+    opts?: UploadOptions
+  ): Promise<UploadResult | UploadManyResult> {
+    if (Array.isArray(keyOrItems)) {
+      return this.#uploadMany(
+        keyOrItems,
+        bodyOrOpts as BulkOptions | undefined
+      );
+    }
+    const body = bodyOrOpts as Body;
+    const path = this.#path(keyOrItems);
     return this.#run(
       opts,
       async (attemptOpts) =>
@@ -582,40 +689,170 @@ export class Files<A extends Adapter = Adapter> {
     );
   }
 
-  download(key: string, opts?: DownloadOptions): Promise<StoredFile> {
-    const path = this.#path(key);
-    return this.#run(opts, async (attemptOpts) =>
+  async #uploadMany(
+    items: UploadManyItem[],
+    opts?: BulkOptions
+  ): Promise<UploadManyResult> {
+    const { errors, results } = await mapMany(
+      items,
+      (item) => item.key,
+      async (item) =>
+        this.#uploadResult(
+          await this.#adapter.upload(this.#path(item.key), item.body, {
+            cacheControl: item.cacheControl,
+            contentType: item.contentType,
+            metadata: item.metadata,
+          })
+        ),
+      opts
+    );
+    return errors.length === 0
+      ? { uploaded: results }
+      : { errors, uploaded: results };
+  }
+
+  /**
+   * Download one object or many.
+   *
+   * - `download(key, opts)` resolves to a single {@link StoredFile}; a missing
+   *   key (or any failure) **throws** a {@link FilesError}.
+   * - `download(keys, opts)` resolves to a {@link DownloadManyResult} and does
+   *   **not** throw on partial failure: successes land in `downloaded`,
+   *   per-key failures (a missing key included) in `errors`, both in input
+   *   order. `as` applies to every download; the SDK fans out with bounded
+   *   `concurrency` (default 8) and `stopOnError` stops at the first failure.
+   *
+   * Both forms honor the client's `prefix` and report the caller's keys.
+   */
+  download(key: string, opts?: DownloadOptions): Promise<StoredFile>;
+  download(
+    keys: string[],
+    opts?: DownloadManyOptions
+  ): Promise<DownloadManyResult>;
+  download(
+    keyOrKeys: string | string[],
+    opts?: DownloadOptions | DownloadManyOptions
+  ): Promise<StoredFile | DownloadManyResult> {
+    if (Array.isArray(keyOrKeys)) {
+      return this.#downloadMany(
+        keyOrKeys,
+        opts as DownloadManyOptions | undefined
+      );
+    }
+    const path = this.#path(keyOrKeys);
+    return this.#run(opts as DownloadOptions | undefined, async (attemptOpts) =>
       this.#storedFile(await this.#adapter.download(path, attemptOpts))
     );
   }
 
+  async #downloadMany(
+    keys: string[],
+    opts?: DownloadManyOptions
+  ): Promise<DownloadManyResult> {
+    const as = opts?.as;
+    const { errors, results } = await mapMany(
+      keys,
+      (key) => key,
+      async (key) =>
+        this.#storedFile(
+          await this.#adapter.download(this.#path(key), as ? { as } : undefined)
+        ),
+      opts
+    );
+    return errors.length === 0
+      ? { downloaded: results }
+      : { downloaded: results, errors };
+  }
+
   /**
-   * Fetch metadata only — does not transfer the body.
+   * Fetch metadata only — does not transfer the body. Pass one key for a
+   * single {@link StoredFile} (throws on failure), or an array for a
+   * {@link HeadManyResult} (`files` + per-key `errors`, never throws on
+   * partial failure; honors `concurrency` / `stopOnError`).
    *
    * **Note:** the returned `StoredFile` still exposes `text()` /
    * `arrayBuffer()` / `blob()` / `stream()`, but those accessors lazily
    * issue a full GET on first use. If you only want metadata, don't call
    * the body accessors. They are not free.
    */
-  head(key: string, opts?: OperationOptions): Promise<StoredFile> {
-    const path = this.#path(key);
-    return this.#run(opts, async (attemptOpts) =>
-      this.#storedFile(await this.#adapter.head(path, attemptOpts))
+  head(key: string, opts?: OperationOptions): Promise<StoredFile>;
+  head(keys: string[], opts?: BulkOptions): Promise<HeadManyResult>;
+  head(
+    keyOrKeys: string | string[],
+    opts?: OperationOptions | BulkOptions
+  ): Promise<StoredFile | HeadManyResult> {
+    if (Array.isArray(keyOrKeys)) {
+      return this.#headMany(keyOrKeys, opts as BulkOptions | undefined);
+    }
+    const path = this.#path(keyOrKeys);
+    return this.#run(
+      opts as OperationOptions | undefined,
+      async (attemptOpts) =>
+        this.#storedFile(await this.#adapter.head(path, attemptOpts))
     );
   }
 
+  async #headMany(keys: string[], opts?: BulkOptions): Promise<HeadManyResult> {
+    const { errors, results } = await mapMany(
+      keys,
+      (key) => key,
+      async (key) =>
+        this.#storedFile(await this.#adapter.head(this.#path(key))),
+      opts
+    );
+    return errors.length === 0
+      ? { files: results }
+      : { errors, files: results };
+  }
+
   /**
-   * Check whether `key` exists without fetching its body.
+   * Check whether one key or many exist, without fetching bodies.
    *
-   * Returns `true` when the object exists and `false` when the adapter
-   * reports `NotFound`. Other failures still propagate so callers do not
-   * accidentally treat auth or transport errors as "missing file".
+   * - `exists(key)` resolves to `true` when the object exists and `false` when
+   *   the adapter reports `NotFound`. Other failures still propagate so
+   *   callers do not treat auth or transport errors as "missing file".
+   * - `exists(keys)` resolves to an {@link ExistsManyResult}: keys split into
+   *   `existing` / `missing` (both in input order), with hard errors (auth,
+   *   transport) collected in `errors` rather than thrown. The SDK fans out
+   *   with bounded `concurrency` (default 8); `stopOnError` stops at the first
+   *   hard error.
    */
-  exists(key: string, opts?: OperationOptions): Promise<boolean> {
-    const path = this.#path(key);
-    return this.#run(opts, (attemptOpts) =>
+  exists(key: string, opts?: OperationOptions): Promise<boolean>;
+  exists(keys: string[], opts?: BulkOptions): Promise<ExistsManyResult>;
+  exists(
+    keyOrKeys: string | string[],
+    opts?: OperationOptions | BulkOptions
+  ): Promise<boolean | ExistsManyResult> {
+    if (Array.isArray(keyOrKeys)) {
+      return this.#existsMany(keyOrKeys, opts as BulkOptions | undefined);
+    }
+    const path = this.#path(keyOrKeys);
+    return this.#run(opts as OperationOptions | undefined, (attemptOpts) =>
       this.#adapter.exists(path, attemptOpts)
     );
+  }
+
+  async #existsMany(
+    keys: string[],
+    opts?: BulkOptions
+  ): Promise<ExistsManyResult> {
+    const { errors, results } = await mapMany(
+      keys,
+      (key) => key,
+      async (key) => ({
+        exists: await this.#adapter.exists(this.#path(key)),
+        key,
+      }),
+      opts
+    );
+    const existing: string[] = [];
+    const missing: string[] = [];
+    for (const result of results) {
+      (result.exists ? existing : missing).push(result.key);
+    }
+    return errors.length === 0
+      ? { existing, missing }
+      : { errors, existing, missing };
   }
 
   /**

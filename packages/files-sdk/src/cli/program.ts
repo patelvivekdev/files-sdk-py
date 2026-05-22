@@ -312,22 +312,26 @@ export const buildProgram = (): Command => {
     );
 
   program
-    .command("head <key>")
-    .description("fetch object metadata (no body)")
+    .command("head <keys...>")
+    .description(
+      "fetch object metadata (no body); one key throws on failure, many returns a structured result and exits non-zero on any failure"
+    )
     .action(
       wrap(runHead as (opts: never) => Promise<void>, (args, common) => {
-        const [key] = args as [string];
-        return { ...common, key } as CommonRunOpts;
+        const [keys] = args as [string[]];
+        return { ...common, keys } as CommonRunOpts;
       })
     );
 
   program
-    .command("exists <key>")
-    .description("check whether <key> exists (exit 0 = exists, 1 = missing)")
+    .command("exists <keys...>")
+    .description(
+      "check whether keys exist (one key: exit 0 = exists, 1 = missing; many: exit 0 only if every key exists)"
+    )
     .action(
       wrap(runExists as (opts: never) => Promise<void>, (args, common) => {
-        const [key] = args as [string];
-        return { ...common, key } as CommonRunOpts;
+        const [keys] = args as [string[]];
+        return { ...common, keys } as CommonRunOpts;
       })
     );
 

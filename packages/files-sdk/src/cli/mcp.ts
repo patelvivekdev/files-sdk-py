@@ -163,12 +163,20 @@ export const startMcpServer = async (opts: McpServerOpts): Promise<void> => {
   server.registerTool(
     "head",
     {
-      description: "Fetch metadata for `key` without transferring its body.",
-      inputSchema: { key: z.string() },
-      title: "Get object metadata",
+      description:
+        "Fetch metadata for `key` without transferring its body. Pass an array of keys to fetch many in one call — that form returns a structured `{ files, errors? }` result instead of throwing on partial failure.",
+      inputSchema: { key: z.union([z.string(), z.array(z.string())]) },
+      title: "Get metadata for one or many keys",
     },
     async ({ key }) => {
       try {
+        if (Array.isArray(key)) {
+          const result = await files.head(key);
+          return ok({
+            ...result,
+            files: result.files.map(storedFileToJson),
+          });
+        }
         const file = await files.head(key);
         return ok(storedFileToJson(file));
       } catch (error) {
@@ -180,12 +188,16 @@ export const startMcpServer = async (opts: McpServerOpts): Promise<void> => {
   server.registerTool(
     "exists",
     {
-      description: "Returns { key, exists }.",
-      inputSchema: { key: z.string() },
-      title: "Check whether a key exists",
+      description:
+        "Returns { key, exists }. Pass an array of keys to check many in one call — that form returns `{ existing, missing, errors? }` instead.",
+      inputSchema: { key: z.union([z.string(), z.array(z.string())]) },
+      title: "Check whether one or many keys exist",
     },
     async ({ key }) => {
       try {
+        if (Array.isArray(key)) {
+          return ok(await files.exists(key));
+        }
         const exists = await files.exists(key);
         return ok({ exists, key });
       } catch (error) {

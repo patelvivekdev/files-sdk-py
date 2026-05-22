@@ -1,8 +1,11 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    // No `rootDir`: the build is produced by tsup (see tsup.config.ts), and
+    // this config is only used for `tsgo --noEmit` typechecking, which covers
+    // `test/**` and `tsup.config.ts` too. Setting `rootDir: "src"` made the
+    // typecheck fail every non-src file with TS6059 ("not under rootDir").
     "outDir": "dist",
-    "rootDir": "src",
     "types": ["bun", "@cloudflare/workers-types"],
     "strictNullChecks": true
   },
