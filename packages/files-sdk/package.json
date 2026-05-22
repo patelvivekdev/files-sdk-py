@@ -1,6 +1,6 @@
 {
   "name": "files-sdk",
-  "version": "1.5.0",
+  "version": "1.4.0",
   "description": "Unified storage SDK for object/blob backends.",
   "homepage": "https://github.com/haydenbleasel/files-sdk#readme",
   "bugs": {
@@ -17,7 +17,8 @@
     "files": "./dist/cli/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "docs"
   ],
   "type": "module",
   "sideEffects": false,
