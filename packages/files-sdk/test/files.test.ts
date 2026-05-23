@@ -7,6 +7,7 @@ import type {
   OperationOptions,
   UploadProgress,
 } from "../src/index.js";
+import { countingStream } from "../src/internal/core.js";
 import { fakeAdapter } from "./fake-adapter.js";
 
 const streamOf = (chunks: Uint8Array[]): ReadableStream<Uint8Array> =>
@@ -1223,6 +1224,53 @@ describe("upload progress", () => {
       { loaded: 10, total: 20 },
       { loaded: 20, total: 20 },
     ]);
+  });
+
+  test("buffered ArrayBuffer / Uint8Array / Blob bodies surface their byte length as total", async () => {
+    const files = new Files({ adapter: fakeAdapter() });
+    const seen: Record<string, UploadProgress[]> = { ab: [], blob: [], u8: [] };
+
+    await files.upload("ab", new ArrayBuffer(4), {
+      onProgress: (p) => seen.ab?.push(p),
+    });
+    await files.upload("u8", new Uint8Array([1, 2, 3]), {
+      onProgress: (p) => seen.u8?.push(p),
+    });
+    await files.upload("blob", new Blob(["hello"]), {
+      onProgress: (p) => seen.blob?.push(p),
+    });
+
+    expect(seen.ab).toEqual([
+      { loaded: 0, total: 4 },
+      { loaded: 4, total: 4 },
+    ]);
+    expect(seen.u8).toEqual([
+      { loaded: 0, total: 3 },
+      { loaded: 3, total: 3 },
+    ]);
+    expect(seen.blob).toEqual([
+      { loaded: 0, total: 5 },
+      { loaded: 5, total: 5 },
+    ]);
+  });
+
+  test("countingStream cancel propagates to the source reader", async () => {
+    let cancelledWith: unknown;
+    const source = new ReadableStream<Uint8Array>({
+      cancel(reason) {
+        cancelledWith = reason;
+      },
+      pull(controller) {
+        controller.enqueue(new Uint8Array([1]));
+      },
+    });
+    const counted = countingStream(source, () => {
+      // ignore progress
+    });
+    const reader = counted.getReader();
+    await reader.read();
+    await reader.cancel("stop");
+    expect(cancelledWith).toBe("stop");
   });
 
   test("bulk upload tags each item's progress with its key", async () => {
