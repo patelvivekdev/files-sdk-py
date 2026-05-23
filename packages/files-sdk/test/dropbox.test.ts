@@ -1194,4 +1194,68 @@ describe("dropbox adapter", () => {
     expect(filesUploadMock).toHaveBeenCalledTimes(1);
     expect(filesUploadSessionStartMock).not.toHaveBeenCalled();
   });
+
+  test("stream chunker splits a single oversized read into multiple session chunks", async () => {
+    // The stream emits one 12 MiB read, larger than the 4 MiB part size. The
+    // chunker must slice the remainder off the head of that read repeatedly
+    // (the `head.byteLength > need` branch) rather than only coalescing across
+    // separate reads, so the session sees clean 4 MiB pieces.
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    const MB = 1024 * 1024;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(12 * MB));
+        controller.close();
+      },
+    });
+    const r = await files.upload("oversized-read.bin", stream, {
+      multipart: { partSize: 4 * MB },
+    });
+
+    expect(r.size).toBe(12 * MB);
+    expect(filesUploadMock).not.toHaveBeenCalled();
+    expect(filesUploadSessionStartMock).toHaveBeenCalledTimes(1);
+    // start(0–4) → append(4–8) → finish(8–12): one append, one finish.
+    expect(filesUploadSessionAppendV2Mock).toHaveBeenCalledTimes(1);
+    const appendArg = filesUploadSessionAppendV2Mock.mock.calls[0]?.[0];
+    expect(appendArg?.cursor.offset).toBe(4 * MB);
+    expect(appendArg?.contents.byteLength).toBe(4 * MB);
+    const finishArg = filesUploadSessionFinishMock.mock.calls[0]?.[0];
+    expect(finishArg?.cursor.offset).toBe(8 * MB);
+    expect(finishArg?.contents.byteLength).toBe(4 * MB);
+  });
+
+  test("buffers a non-ReadableStream stream-like body via collectStream", async () => {
+    // `upload()` routes only true `ReadableStream` instances through the
+    // chunked session path. A stream-like body that exposes `getReader()` but
+    // isn't an instanceof ReadableStream falls through normalizeBody's type
+    // checks to collectStream, which drains it into a single buffer.
+    const adapter = dropbox(baseOpts);
+    const enc = new TextEncoder();
+    const reads = [
+      enc.encode("collect-"),
+      enc.encode("via-"),
+      enc.encode("reader"),
+    ];
+    let i = 0;
+    const streamLike = {
+      getReader() {
+        return {
+          read() {
+            if (i < reads.length) {
+              const value = reads[i];
+              i += 1;
+              return Promise.resolve({ done: false, value });
+            }
+            return Promise.resolve({ done: true, value: undefined });
+          },
+        };
+      },
+    };
+    const r = await adapter.upload("collected.bin", streamLike as never);
+    expect(r.size).toBe("collect-via-reader".length);
+    expect(r.contentType).toBe("application/octet-stream");
+    const f = await adapter.download("collected.bin");
+    expect(await f.text()).toBe("collect-via-reader");
+  });
 });

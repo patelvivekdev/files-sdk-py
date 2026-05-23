@@ -1,0 +1,39 @@
+import { describe, expect, test } from "bun:test";
+
+import { FilesError } from "../src/internal/errors.js";
+import { joinRemotePath, trimSlashes } from "../src/internal/remote-path.js";
+
+const NULL_BYTE = String.fromCodePoint(0);
+
+describe("trimSlashes", () => {
+  test("strips trailing slashes", () => {
+    expect(trimSlashes("uploads/")).toBe("uploads");
+    expect(trimSlashes("uploads///")).toBe("uploads");
+  });
+
+  test("strips leading and trailing slashes together", () => {
+    expect(trimSlashes("/uploads/")).toBe("uploads");
+    expect(trimSlashes("/")).toBe("");
+  });
+
+  test("leaves a clean string untouched", () => {
+    expect(trimSlashes("uploads")).toBe("uploads");
+  });
+});
+
+describe("joinRemotePath", () => {
+  test("preserves an absolute root with a trailing slash", () => {
+    expect(joinRemotePath("/uploads/", "a/b.txt")).toBe("/uploads/a/b.txt");
+  });
+
+  test("rejects a key containing a null byte", () => {
+    const key = `a${NULL_BYTE}b`;
+    expect(() => joinRemotePath("/uploads", key)).toThrow(FilesError);
+    try {
+      joinRemotePath("/uploads", key);
+    } catch (error) {
+      expect((error as FilesError).code).toBe("Provider");
+      expect((error as FilesError).message).toMatch(/null byte/u);
+    }
+  });
+});

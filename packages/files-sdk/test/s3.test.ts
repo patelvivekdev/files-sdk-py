@@ -889,4 +889,107 @@ describe("s3 adapter", () => {
       }
     }
   });
+
+  test("deleteMany with an empty key list resolves to an empty result without any request", async () => {
+    const adapter = s3({ bucket: "b", region: "us-east-1" });
+    const result = await adapter.deleteMany?.([]);
+    expect(result).toEqual({ deleted: [] });
+    expect(s3Mock.commandCalls(DeleteObjectsCommand)).toHaveLength(0);
+    expect(s3Mock.commandCalls(DeleteObjectCommand)).toHaveLength(0);
+  });
+
+  test("deleteMany with stopOnError returns all keys when every delete succeeds", async () => {
+    s3Mock.on(DeleteObjectCommand).resolves({});
+    const adapter = s3({ bucket: "b", region: "us-east-1" });
+    const result = await adapter.deleteMany?.(["a.txt", "b.txt", "c.txt"], {
+      stopOnError: true,
+    });
+    expect(result?.deleted).toEqual(["a.txt", "b.txt", "c.txt"]);
+    expect(result?.errors).toBeUndefined();
+    // stopOnError takes the per-key path, never the bulk DeleteObjects.
+    expect(s3Mock.commandCalls(DeleteObjectCommand)).toHaveLength(3);
+    expect(s3Mock.commandCalls(DeleteObjectsCommand)).toHaveLength(0);
+  });
+
+  test("deleteMany maps a whole-batch DeleteObjects failure onto every key in the batch", async () => {
+    s3Mock.on(DeleteObjectsCommand).rejects(
+      Object.assign(new Error("denied"), {
+        $metadata: { httpStatusCode: 403 },
+        name: "AccessDenied",
+      })
+    );
+    const adapter = s3({ bucket: "b", region: "us-east-1" });
+    const result = await adapter.deleteMany?.(["a.txt", "b.txt"]);
+    // S3 doesn't tell us which keys failed when the request itself fails, so
+    // the mapped error is attached to every key in the batch.
+    expect(result?.deleted).toEqual([]);
+    expect(result?.errors?.map((item) => item.key)).toEqual(["a.txt", "b.txt"]);
+    expect(
+      result?.errors?.every((item) => item.error.code === "Unauthorized")
+    ).toBe(true);
+    // The same mapped instance is reused across the batch's keys.
+    expect(result?.errors?.[0]?.error).toBe(result?.errors?.[1]?.error);
+  });
+
+  test("mapS3Error 2-arg form returns the same FilesError instance when given one", () => {
+    const original = new FilesError("NotFound", "gone");
+    const mapped = mapS3Error(original, {
+      Conflict: "Conflict",
+      NotFound: "Not found",
+      Provider: "R2 error",
+      Unauthorized: "Unauthorized",
+    });
+    expect(mapped).toBe(original);
+  });
+
+  test("mapS3Error 2-arg form re-derives the code and prefers the original error's message", () => {
+    const mapped = mapS3Error(
+      Object.assign(new Error("server said no"), {
+        $metadata: { httpStatusCode: 403 },
+        name: "AccessDenied",
+      }),
+      {
+        Conflict: "Conflict",
+        NotFound: "Not found",
+        Provider: "R2 error",
+        Unauthorized: "Unauthorized",
+      }
+    );
+    // Code is re-derived from the SDK error (403/AccessDenied -> Unauthorized).
+    expect(mapped.code).toBe("Unauthorized");
+    // The original message wins over the per-code fallback table.
+    expect(mapped.message).toBe("server said no");
+  });
+
+  test("mapS3Error 2-arg form falls back to the per-code message when the error has none", () => {
+    const mapped = mapS3Error(
+      { $metadata: { httpStatusCode: 500 } },
+      {
+        Conflict: "Conflict",
+        NotFound: "Not found",
+        Provider: "R2 error",
+        Unauthorized: "Unauthorized",
+      }
+    );
+    expect(mapped.code).toBe("Provider");
+    expect(mapped.message).toBe("R2 error");
+  });
+
+  test("aborting an in-flight lib-storage upload calls Upload.abort()", async () => {
+    const controller = new AbortController();
+    const adapter = s3({ bucket: "b", region: "us-east-1" });
+    const events: { loaded: number }[] = [];
+    // The abort listener is wired before Upload.done() runs, so aborting
+    // from inside the first progress callback deterministically triggers it.
+    await adapter.upload("big.bin", "hello", {
+      multipart: true,
+      onProgress: (p) => {
+        events.push(p);
+        controller.abort();
+      },
+      signal: controller.signal,
+    });
+    expect(events.length).toBeGreaterThan(0);
+    expect(FakeUpload.aborted).toBe(1);
+  });
 });

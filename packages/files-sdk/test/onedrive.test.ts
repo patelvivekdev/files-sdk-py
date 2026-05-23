@@ -683,6 +683,110 @@ describe("onedrive adapter", () => {
     }
   });
 
+  test("copy maps a failed monitor response to a provider error", async () => {
+    // The monitor poll's non-OK branch reads the body for context but guards
+    // it with `.catch(() => "")`; force `text()` to reject so that fallback
+    // arrow fires and the copy still surfaces a Provider error.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = ((_input: string | URL | Request) =>
+      Promise.resolve({
+        json: () => Promise.resolve({}),
+        ok: false,
+        status: 500,
+        statusText: "Server Error",
+        text: () => Promise.reject(new Error("monitor body errored")),
+      })) as unknown as typeof fetch;
+    try {
+      const files = new Files({ adapter: onedrive(baseOpts) });
+      await files.upload("from.txt", "hi");
+      const err = await files
+        .copy("from.txt", "to.txt")
+        .catch((error: unknown) => error);
+      expect(err).toBeInstanceOf(FilesError);
+      expect((err as FilesError).code).toBe("Provider");
+      expect((err as FilesError).message).toMatch(
+        /copy monitor failed \(500\)/u
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("copy tolerates an unreadable monitor JSON body while polling", async () => {
+    // When the monitor returns 202 but its JSON body can't be parsed, the
+    // `.catch(() => ({}))` fallback yields an empty status so polling keeps
+    // going until the (short) timeout fires.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = ((_input: string | URL | Request) =>
+      Promise.resolve({
+        json: () => Promise.reject(new Error("not json")),
+        ok: true,
+        status: 202,
+        statusText: "Accepted",
+        text: () => Promise.resolve(""),
+      })) as unknown as typeof fetch;
+    try {
+      const files = new Files({
+        adapter: onedrive({ ...baseOpts, copyTimeoutMs: 50 }),
+      });
+      await files.upload("from.txt", "hi");
+      await expect(files.copy("from.txt", "to.txt")).rejects.toThrow(
+        /timed out/iu
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("copy reports a failed copy operation from the monitor status", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = ((_input: string | URL | Request) =>
+      Promise.resolve(
+        Response.json(
+          { error: { message: "copy blew up" }, status: "failed" },
+          { headers: { "Content-Type": "application/json" }, status: 200 }
+        )
+      )) as typeof fetch;
+    try {
+      const files = new Files({ adapter: onedrive(baseOpts) });
+      await files.upload("from.txt", "hi");
+      const err = await files
+        .copy("from.txt", "to.txt")
+        .catch((error: unknown) => error);
+      expect(err).toBeInstanceOf(FilesError);
+      expect((err as FilesError).code).toBe("Provider");
+      expect((err as FilesError).message).toBe("copy blew up");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("upload session maps a failed chunk PUT to a provider error", async () => {
+    // Force the upload-session chunk PUT (plain fetch) to fail with a body
+    // whose `text()` rejects, exercising the `.catch(() => "")` fallback.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = ((_input: string | URL | Request) =>
+      Promise.resolve({
+        ok: false,
+        status: 507,
+        statusText: "Insufficient Storage",
+        text: () => Promise.reject(new Error("chunk body errored")),
+      })) as unknown as typeof fetch;
+    try {
+      const files = new Files({ adapter: onedrive(baseOpts) });
+      const err = await files
+        .upload("doc.bin", "hello", { multipart: true })
+        .catch((error: unknown) => error);
+      expect(err).toBeInstanceOf(FilesError);
+      expect((err as FilesError).code).toBe("Provider");
+      expect((err as FilesError).message).toMatch(
+        /upload session chunk failed \(507\)/u
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("url throws when publicByDefault is false", async () => {
     const files = new Files({ adapter: onedrive(baseOpts) });
     await files.upload("a.txt", "hi");

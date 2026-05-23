@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { Buffer } from "node:buffer";
 import { Readable } from "node:stream";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import type SftpClient from "ssh2-sftp-client";
 
@@ -401,6 +402,38 @@ describe("sftp connect-per-op (mocked ssh2-sftp-client)", () => {
     expect(typeof raw.connect).toBe("function");
     expect(await raw.connect()).toBeDefined();
   });
+
+  test("aborting an owned connection ends it once (idempotent release)", async () => {
+    // An owned (non-injected) connection releases via end(). Aborting mid-op
+    // fires the abort handler's release(); the operation then completes and the
+    // finally block releases again — end() must still only run once.
+    const files = new Files({
+      adapter: sftp({ host: "h", username: "u" }),
+    });
+    const controller = new AbortController();
+    let enqueue!: (chunk: Uint8Array) => void;
+    let close!: () => void;
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        enqueue = (chunk) => c.enqueue(chunk);
+        close = () => c.close();
+      },
+    });
+    const pending = files.upload("a.txt", stream, {
+      signal: controller.signal,
+    });
+    // Push one chunk and let the upload park in `put`'s stream collection,
+    // having already registered its abort listener.
+    enqueue(new TextEncoder().encode("partial"));
+    await sleep(0);
+    // Abort fires the handler's release() (end once); completing the stream
+    // then drives the finally block's release() (a no-op via the guard).
+    controller.abort();
+    close();
+    await expect(pending).rejects.toBeDefined();
+    await sleep(0);
+    expect(sftpEndCount).toBe(1);
+  });
 });
 
 describe("sftp edge cases (injected client)", () => {
@@ -457,6 +490,56 @@ describe("sftp edge cases (injected client)", () => {
     const result = await files.upload("s.bin", stream);
     expect(result.size).toBe(7);
   });
+
+  test("head on a directory throws NotFound", async () => {
+    // stat reporting a directory is not a file, so head rejects with NotFound.
+    const client = {
+      end() {
+        return Promise.resolve(true);
+      },
+      stat() {
+        return Promise.resolve({
+          isDirectory: true,
+          isFile: false,
+          modifyTime: STABLE_MTIME,
+          size: 0,
+        });
+      },
+    } as unknown as SftpClient;
+    const files = new Files({ adapter: sftp({ client }) });
+    await expect(files.head("a-dir")).rejects.toMatchObject({
+      code: "NotFound",
+    });
+  });
+
+  test("list of a missing root returns an empty page", async () => {
+    // A NotFound while walking the root is swallowed: the listing is empty.
+    const client = {
+      end() {
+        return Promise.resolve(true);
+      },
+      list() {
+        return Promise.reject(sftpError(2, "No such file"));
+      },
+    } as unknown as SftpClient;
+    const files = new Files({ adapter: sftp({ client }) });
+    const result = await files.list();
+    expect(result.items).toEqual([]);
+    expect(result.cursor).toBeUndefined();
+  });
+
+  test("list rethrows a non-NotFound walk error", async () => {
+    const client = {
+      end() {
+        return Promise.resolve(true);
+      },
+      list() {
+        return Promise.reject(sftpError(3, "permission denied"));
+      },
+    } as unknown as SftpClient;
+    const files = new Files({ adapter: sftp({ client }) });
+    await expect(files.list()).rejects.toMatchObject({ code: "Unauthorized" });
+  });
 });
 
 describe("mapSftpError", () => {
@@ -466,6 +549,10 @@ describe("mapSftpError", () => {
       "Unauthorized"
     );
     expect(mapSftpError({ code: "ENOENT" }).code).toBe("NotFound");
+    // A codeless error whose message reads like a missing file sniffs to NotFound.
+    expect(mapSftpError({ message: "No such file or directory" }).code).toBe(
+      "NotFound"
+    );
     expect(
       mapSftpError({
         message: "All configured authentication methods failed",

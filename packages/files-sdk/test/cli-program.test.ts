@@ -195,6 +195,41 @@ describe("cli/program parseAsync (fs end-to-end)", () => {
     }
   });
 
+  test("move <from> <to> renames the key through its action builder", async () => {
+    const local = path.join(root, "in.txt");
+    await fsp.writeFile(local, "moved body");
+    await run(
+      "--provider",
+      "fs",
+      "--root",
+      root,
+      "upload",
+      "src/from.txt",
+      "--file",
+      local
+    );
+    cap.stdout.length = 0;
+
+    await run(
+      "--provider",
+      "fs",
+      "--root",
+      root,
+      "move",
+      "src/from.txt",
+      "dst/to.txt"
+    );
+    expect(lastJson(cap.stdout)).toMatchObject({
+      from: "src/from.txt",
+      moved: true,
+      to: "dst/to.txt",
+    });
+    expect(await fsp.readFile(path.join(root, "dst/to.txt"), "utf-8")).toBe(
+      "moved body"
+    );
+    await expect(fsp.access(path.join(root, "src/from.txt"))).rejects.toThrow();
+  });
+
   test("sign-upload --expires-in (intArg) + --max-size + --min-size", async () => {
     await run(
       "--provider",

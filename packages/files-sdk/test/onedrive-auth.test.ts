@@ -248,6 +248,25 @@ describe("onedrive auth construction", () => {
     );
   });
 
+  test("oauth refresh-token exchange failure tolerates an unreadable error body", async () => {
+    // The non-OK branch reads the response body for context but guards it
+    // with `.catch(() => "")`; if reading the body itself throws, the error
+    // falls back to the status text rather than blowing up.
+    globalThis.fetch = (() =>
+      Promise.resolve({
+        ok: false,
+        status: 500,
+        statusText: "Server Error",
+        text: () => Promise.reject(new Error("stream broken")),
+      })) as unknown as typeof fetch;
+    onedrive({
+      oauth: { clientId: "c", clientSecret: "s", refreshToken: "r" },
+    });
+    await expect(capturedAuthProvider?.getAccessToken()).rejects.toThrow(
+      /refresh-token exchange failed \(500\): Server Error/iu
+    );
+  });
+
   test("oauth refresh-token throws when the response is missing access_token", async () => {
     globalThis.fetch = (() =>
       Promise.resolve(

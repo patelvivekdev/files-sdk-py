@@ -11,6 +11,7 @@ import type {
 import { convex } from "../src/convex/index.js";
 import type { ConvexAdapterOptions, ConvexCtx } from "../src/convex/index.js";
 import { Files } from "../src/index.js";
+import { FilesError } from "../src/internal/errors.js";
 
 // --- Type-level guarantee --------------------------------------------------
 //
@@ -403,6 +404,31 @@ describe("convex adapter", () => {
       expect(first.items[0]?.size).toBe(3);
       expect(first.items[0]?.etag).toBeDefined();
     });
+
+    test("a listed item's body is lazy and needs an action context to read", async () => {
+      const backend = makeBackend();
+      backend.put(new TextEncoder().encode("payload"), "text/plain");
+      // Listed from a query context (no ctx.storage.get), so reading the lazy
+      // body throws — exercising the list item's factory.
+      const queryAdapter = convex({ ctx: backend.queryCtx });
+      const fromQuery = await queryAdapter.list();
+      await expect(fromQuery.items[0]?.text()).rejects.toThrow(
+        /action context/u
+      );
+
+      // The same id, listed from a mutation context that also wires
+      // ctx.storage.get, resolves the lazy body to the stored bytes.
+      const actionable: ConvexCtx = {
+        db: backend.mutationCtx.db,
+        storage: {
+          ...backend.mutationCtx.storage,
+          get: backend.actionCtx.storage.get,
+        },
+      };
+      const actionableAdapter = convex({ ctx: actionable });
+      const fromActionable = await actionableAdapter.list();
+      expect(await fromActionable.items[0]?.text()).toBe("payload");
+    });
   });
 
   describe("Files integration", () => {
@@ -413,6 +439,304 @@ describe("convex adapter", () => {
       const downloaded = await files.download(key);
       expect(await downloaded.text()).toBe("via Files");
       expect(files.raw).toBe(actionCtx);
+    });
+  });
+
+  describe("error mapping", () => {
+    test("a thrown FilesError passes through unchanged (Provider stays Provider)", async () => {
+      const sentinel = new FilesError("Provider", "boom from getUrl");
+      const ctx: ConvexCtx = {
+        storage: {
+          getUrl: () => Promise.reject(sentinel),
+        },
+      };
+      const adapter = convex({ ctx });
+      // exists() routes the thrown error through mapConvexError; a FilesError
+      // is returned as-is, and a non-NotFound code re-throws.
+      await expect(adapter.exists("kg000000")).rejects.toBe(sentinel);
+    });
+
+    test("a not-found-phrased provider error becomes NotFound", async () => {
+      const ctx: ConvexCtx = {
+        storage: {
+          getUrl: () => Promise.reject(new Error("storage id does not exist")),
+        },
+      };
+      const adapter = convex({ ctx });
+      // exists() maps NotFound to false rather than throwing.
+      expect(await adapter.exists("kg000000")).toBe(false);
+    });
+
+    test("a generic provider error stays Provider", async () => {
+      const ctx: ConvexCtx = {
+        storage: {
+          getUrl: () => Promise.reject(new Error("network exploded")),
+        },
+      };
+      const adapter = convex({ ctx });
+      await expect(adapter.url("kg000000")).rejects.toMatchObject({
+        code: "Provider",
+        message: "network exploded",
+      });
+    });
+
+    test("exists rethrows a non-NotFound provider failure", async () => {
+      const ctx: ConvexCtx = {
+        storage: {
+          getUrl: () => Promise.reject(new Error("permission denied")),
+        },
+      };
+      const adapter = convex({ ctx });
+      await expect(adapter.exists("kg000000")).rejects.toMatchObject({
+        code: "Provider",
+        message: "permission denied",
+      });
+    });
+  });
+
+  describe("readMeta edge cases", () => {
+    test("readMeta returns undefined for a missing doc in a db context", async () => {
+      const { queryCtx } = makeBackend();
+      const adapter = convex({ ctx: queryCtx });
+      // No matching system row, but getUrl will also report missing -> NotFound.
+      await expect(adapter.head("kg999999")).rejects.toMatchObject({
+        code: "NotFound",
+      });
+    });
+
+    test("head falls back to getMetadata in an action context", async () => {
+      const backend = makeBackend();
+      const adapter = convex({ ctx: backend.actionCtx });
+      const id = backend.put(new TextEncoder().encode("meta"), "text/plain");
+      const file = await adapter.head(id);
+      // actionCtx has no ctx.db, so metadata comes from storage.getMetadata.
+      // That source carries no _creationTime, so lastModified is absent.
+      expect(file.size).toBe(4);
+      expect(file.type).toBe("text/plain");
+      expect(file.lastModified).toBeUndefined();
+    });
+
+    test("getMetadata returning null surfaces as NotFound via getUrl", async () => {
+      // No ctx.db and getMetadata yields null -> readMeta returns undefined,
+      // then head confirms absence through getUrl.
+      const ctx: ConvexCtx = {
+        storage: {
+          getMetadata: () => Promise.resolve(null),
+          getUrl: () => Promise.resolve(null),
+        },
+      };
+      const adapter = convex({ ctx });
+      await expect(adapter.head("kg000000")).rejects.toMatchObject({
+        code: "NotFound",
+      });
+    });
+  });
+
+  describe("head fallbacks", () => {
+    test("a metadata-less but present file heads with minimal info", async () => {
+      // getMetadata says no metadata, but getUrl confirms the file exists.
+      const ctx: ConvexCtx = {
+        storage: {
+          getMetadata: () => Promise.resolve(null),
+          getUrl: () =>
+            Promise.resolve("https://fake.convex.cloud/api/storage/kg000000"),
+        },
+      };
+      const adapter = convex({ ctx });
+      const file = await adapter.head("kg000000");
+      expect(file.size).toBe(0);
+      expect(file.type).toBe("application/octet-stream");
+      expect(file.etag).toBeUndefined();
+    });
+
+    test("head rethrows when readMeta itself fails", async () => {
+      const ctx: ConvexCtx = {
+        db: {
+          system: {
+            get: () => Promise.reject(new Error("db read failed")),
+            query: () => {
+              throw new Error("unused");
+            },
+          },
+        },
+        storage: {
+          getUrl: () => Promise.resolve(null),
+        },
+      };
+      const adapter = convex({ ctx });
+      await expect(adapter.head("kg000000")).rejects.toMatchObject({
+        code: "Provider",
+        message: "db read failed",
+      });
+    });
+
+    test("head rethrows when the existence getUrl probe fails", async () => {
+      // No metadata source, so head probes getUrl, which rejects.
+      const ctx: ConvexCtx = {
+        storage: {
+          getMetadata: () => Promise.resolve(null),
+          getUrl: () => Promise.reject(new Error("getUrl exploded")),
+        },
+      };
+      const adapter = convex({ ctx });
+      await expect(adapter.head("kg000000")).rejects.toMatchObject({
+        code: "Provider",
+        message: "getUrl exploded",
+      });
+    });
+  });
+
+  describe("lazy body factory errors", () => {
+    test("reading a head() body rethrows a get() failure", async () => {
+      const ctx: ConvexCtx = {
+        storage: {
+          get: () => Promise.reject(new Error("get blew up")),
+          getMetadata: () =>
+            Promise.resolve({
+              contentType: "text/plain",
+              sha256: "abc",
+              size: 3,
+            }),
+          getUrl: () =>
+            Promise.resolve("https://fake.convex.cloud/api/storage/kg000000"),
+        },
+      };
+      const adapter = convex({ ctx });
+      const file = await adapter.head("kg000000");
+      await expect(file.arrayBuffer()).rejects.toMatchObject({
+        code: "Provider",
+        message: "get blew up",
+      });
+    });
+
+    test("reading a head() body throws NotFound when get() yields null", async () => {
+      const ctx: ConvexCtx = {
+        storage: {
+          get: () => Promise.resolve(null),
+          getMetadata: () =>
+            Promise.resolve({
+              contentType: "text/plain",
+              sha256: "abc",
+              size: 3,
+            }),
+          getUrl: () =>
+            Promise.resolve("https://fake.convex.cloud/api/storage/kg000000"),
+        },
+      };
+      const adapter = convex({ ctx });
+      const file = await adapter.head("kg000000");
+      await expect(file.arrayBuffer()).rejects.toMatchObject({
+        code: "NotFound",
+      });
+    });
+  });
+
+  describe("delete gating + errors", () => {
+    test("delete throws in a query-only context", async () => {
+      const { queryCtx } = makeBackend();
+      const adapter = convex({ ctx: queryCtx });
+      await expect(adapter.delete("kg000000")).rejects.toThrow(
+        /delete\(\) requires a mutation or action/u
+      );
+    });
+
+    test("delete is idempotent when the provider reports not-found", async () => {
+      const ctx: ConvexCtx = {
+        storage: {
+          delete: () => Promise.reject(new Error("could not find file")),
+          getUrl: () => Promise.resolve(null),
+        },
+      };
+      const adapter = convex({ ctx });
+      await expect(adapter.delete("kg000000")).resolves.toBeUndefined();
+    });
+
+    test("delete rethrows a non-NotFound provider failure", async () => {
+      const ctx: ConvexCtx = {
+        storage: {
+          delete: () => Promise.reject(new Error("delete denied")),
+          getUrl: () => Promise.resolve(null),
+        },
+      };
+      const adapter = convex({ ctx });
+      await expect(adapter.delete("kg000000")).rejects.toMatchObject({
+        code: "Provider",
+        message: "delete denied",
+      });
+    });
+  });
+
+  describe("download errors", () => {
+    test("download rethrows a get() failure as a mapped error", async () => {
+      const ctx: ConvexCtx = {
+        storage: {
+          get: () => Promise.reject(new Error("download blew up")),
+          getUrl: () => Promise.resolve(null),
+        },
+      };
+      const adapter = convex({ ctx });
+      await expect(adapter.download("kg000000")).rejects.toMatchObject({
+        code: "Provider",
+        message: "download blew up",
+      });
+    });
+  });
+
+  describe("list errors", () => {
+    test("list rethrows a paginate failure as a mapped error", async () => {
+      const ctx: ConvexCtx = {
+        db: {
+          system: {
+            get: () => Promise.resolve(null),
+            query: () => ({
+              paginate: () => Promise.reject(new Error("paginate exploded")),
+            }),
+          },
+        },
+        storage: {
+          getUrl: () => Promise.resolve(null),
+        },
+      };
+      const adapter = convex({ ctx });
+      await expect(adapter.list()).rejects.toMatchObject({
+        code: "Provider",
+        message: "paginate exploded",
+      });
+    });
+  });
+
+  describe("signedUploadUrl errors", () => {
+    test("signedUploadUrl rethrows a generateUploadUrl failure", async () => {
+      const ctx: ConvexCtx = {
+        storage: {
+          generateUploadUrl: () =>
+            Promise.reject(new Error("upload url failed")),
+          getUrl: () => Promise.resolve(null),
+        },
+      };
+      const adapter = convex({ ctx });
+      await expect(
+        adapter.signedUploadUrl("k", { expiresIn: 60 })
+      ).rejects.toMatchObject({
+        code: "Provider",
+        message: "upload url failed",
+      });
+    });
+  });
+
+  describe("upload errors", () => {
+    test("upload rethrows a store() failure as a mapped error", async () => {
+      const ctx: ConvexCtx = {
+        storage: {
+          getUrl: () => Promise.resolve(null),
+          store: () => Promise.reject(new Error("store blew up")),
+        },
+      };
+      const adapter = convex({ ctx });
+      await expect(adapter.upload("k", "x")).rejects.toMatchObject({
+        code: "Provider",
+        message: "store blew up",
+      });
     });
   });
 });

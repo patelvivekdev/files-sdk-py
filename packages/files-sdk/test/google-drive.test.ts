@@ -431,6 +431,18 @@ describe("google-drive adapter", () => {
     await files.delete("ghost.txt");
   });
 
+  test("delete removes an existing file and evicts its cached fileId", async () => {
+    const files = new Files({ adapter: googleDrive(baseOpts) });
+    await files.upload("a.txt", "hi");
+    expect(filesDeleteMock).not.toHaveBeenCalled();
+    await files.delete("a.txt");
+    expect(filesDeleteMock).toHaveBeenCalledTimes(1);
+    // The file is gone — head() now re-resolves via files.list and 404s.
+    const err = await files.head("a.txt").catch((error: unknown) => error);
+    expect(err).toBeInstanceOf(FilesError);
+    expect((err as FilesError).code).toBe("NotFound");
+  });
+
   test("resolve fileId throws Conflict when two files share a virtual key", async () => {
     const files = new Files({ adapter: googleDrive(baseOpts) });
     await files.upload("dup.txt", "hi");
@@ -533,6 +545,40 @@ describe("google-drive adapter", () => {
     await expect(
       files.signedUploadUrl("a.txt", { expiresIn: 60 })
     ).rejects.toThrow(/escape hatch|client/iu);
+  });
+
+  test("signedUploadUrl maps a non-OK resumable initiation to a provider error", async () => {
+    // The non-OK branch reads the response body for context but guards it
+    // with `.catch(() => "")`; force `text()` to reject so that fallback
+    // arrow fires and the resulting error still classifies by status.
+    globalThis.fetch = (() =>
+      Promise.resolve({
+        headers: new Headers(),
+        ok: false,
+        status: 403,
+        statusText: "Forbidden",
+        text: () => Promise.reject(new Error("body stream errored")),
+      })) as unknown as typeof fetch;
+    const files = new Files({ adapter: googleDrive(baseOpts) });
+    const err = await files
+      .signedUploadUrl("a.txt", { expiresIn: 60 })
+      .catch((error: unknown) => error);
+    expect(err).toBeInstanceOf(FilesError);
+    expect((err as FilesError).code).toBe("Unauthorized");
+    expect((err as FilesError).message).toMatch(
+      /resumable session initiation/u
+    );
+  });
+
+  test("signedUploadUrl throws when the resumable response has no Location header", async () => {
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(null, { headers: {}, status: 200 })
+      )) as unknown as typeof fetch;
+    const files = new Files({ adapter: googleDrive(baseOpts) });
+    await expect(
+      files.signedUploadUrl("a.txt", { expiresIn: 60 })
+    ).rejects.toThrow(/missing Location header/u);
   });
 
   test("download propagates 404 as NotFound", async () => {

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { Buffer } from "node:buffer";
 import { once } from "node:events";
 import type { Readable, Writable } from "node:stream";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import type { Client } from "basic-ftp";
 
@@ -395,6 +396,36 @@ describe("ftp connect-per-op (mocked basic-ftp)", () => {
     expect(typeof raw.connect).toBe("function");
     expect(await raw.connect()).toBeDefined();
   });
+
+  test("aborting an owned connection closes it once (idempotent release)", async () => {
+    // An owned (non-injected) connection releases via close(). Aborting mid-op
+    // fires the abort handler's release(); the operation then completes and the
+    // finally block releases again — close() must still only run once.
+    const files = new Files({ adapter: ftp({ host: "h", user: "u" }) });
+    const controller = new AbortController();
+    let enqueue!: (chunk: Uint8Array) => void;
+    let close!: () => void;
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        enqueue = (chunk) => c.enqueue(chunk);
+        close = () => c.close();
+      },
+    });
+    const pending = files.upload("a.txt", stream, {
+      signal: controller.signal,
+    });
+    // Push one chunk and let the upload park in `uploadFrom`'s `for await`,
+    // having already registered its abort listener.
+    enqueue(new TextEncoder().encode("partial"));
+    await sleep(0);
+    // Abort fires the handler's release() (close once); completing the stream
+    // then drives the finally block's release() (a no-op via the guard).
+    controller.abort();
+    close();
+    await expect(pending).rejects.toBeDefined();
+    await sleep(0);
+    expect(ftpCloseCount).toBe(1);
+  });
 });
 
 describe("ftp edge cases (injected client)", () => {
@@ -474,6 +505,104 @@ describe("ftp edge cases (injected client)", () => {
     expect(got.size).toBe(8);
     // Aborting runs the registered handler (destroy + release).
     controller.abort();
+  });
+
+  test("an absolute root resolves root-level keys and walks the tree", async () => {
+    // root "/" exercises splitRemote's idx===0 branch (dir "/"), childListPath's
+    // "/" branch during the recursive walk, and remoteRoot's absolute branch.
+    const files = new Files({
+      adapter: ftp({ client: makeFakeClient(), root: "/" }),
+    });
+    const result = await files.upload("file.txt", "hi");
+    expect(result.size).toBe(2);
+    // Pre-seed a nested tree (stored at the resolved relative paths the walk
+    // lists) so the recursion descends through a "/"-rooted directory.
+    store.set("a.txt", Buffer.from("1"));
+    store.set("nested/b.txt", Buffer.from("2"));
+    const listed = await files.list();
+    expect(listed.items.map((i) => i.key)).toEqual([
+      "a.txt",
+      "file.txt",
+      "nested/b.txt",
+    ]);
+  });
+
+  test("head omits lastModified when the MDTM probe yields no date", async () => {
+    // lastMod resolving to undefined exercises lastModMs's early return, so the
+    // StoredFile carries size but no lastModified.
+    const client = {
+      close() {
+        // no-op
+      },
+      lastMod() {
+        return Promise.resolve();
+      },
+      size() {
+        return Promise.resolve(3);
+      },
+    } as unknown as Client;
+    const files = new Files({ adapter: ftp({ client }) });
+    const meta = await files.head("a.txt");
+    expect(meta.size).toBe(3);
+    expect(meta.lastModified).toBeUndefined();
+  });
+
+  test("stream download surfaces a transfer error on the returned stream", async () => {
+    // size() succeeds (so the StoredFile is built) but the background transfer
+    // rejects — the fire-and-forget .catch destroys the stream with that error.
+    const client = {
+      close() {
+        // no-op
+      },
+      downloadTo() {
+        // Reject after a tick so the consumer is reading when the transfer
+        // fails — the .catch then destroys the live stream with the error.
+        // oxlint-disable-next-line promise/avoid-new -- test needs a deferred rejection.
+        return new Promise((_resolve, reject) => {
+          setImmediate(() => reject(ftpError(550, "550 transfer aborted")));
+        });
+      },
+      lastMod() {
+        return Promise.resolve(STABLE_MTIME);
+      },
+      size() {
+        return Promise.resolve(10);
+      },
+    } as unknown as Client;
+    const files = new Files({ adapter: ftp({ client }) });
+    const got = await files.download("a.txt", { as: "stream" });
+    expect(got.size).toBe(10);
+    const reader = (got.stream() as ReadableStream<Uint8Array>).getReader();
+    await expect(reader.read()).rejects.toThrow(/transfer aborted/u);
+  });
+
+  test("list of a missing root returns an empty page", async () => {
+    // A NotFound while walking the root is swallowed: the listing is empty.
+    const client = {
+      close() {
+        // no-op
+      },
+      list() {
+        return Promise.reject(ftpError(550, "550 not found"));
+      },
+    } as unknown as Client;
+    const files = new Files({ adapter: ftp({ client }) });
+    const result = await files.list();
+    expect(result.items).toEqual([]);
+    expect(result.cursor).toBeUndefined();
+  });
+
+  test("list rethrows a non-NotFound walk error", async () => {
+    const client = {
+      close() {
+        // no-op
+      },
+      list() {
+        return Promise.reject(ftpError(530, "530 not logged in"));
+      },
+    } as unknown as Client;
+    const files = new Files({ adapter: ftp({ client }) });
+    await expect(files.list()).rejects.toMatchObject({ code: "Unauthorized" });
   });
 });
 

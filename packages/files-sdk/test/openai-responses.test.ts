@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 
 import { Files, FilesError } from "../src/index.js";
 import { createResponsesFileTools } from "../src/openai/index.js";
@@ -363,6 +363,25 @@ describe("createResponsesFileTools", () => {
       };
       expect(parsed.error).toBe("Argument validation failed");
       expect(Array.isArray(parsed.issues)).toBe(true);
+    }
+  });
+
+  test("dispatch's exhaustive guard throws if an unhandled name slips past the gate", async () => {
+    // The `includedSet.has` gate normally blocks any name outside the eight
+    // known tools, so dispatch's `default: never` branch is unreachable through
+    // the public surface. Force the gate open for a single execute() call to
+    // assert the guard actually throws rather than silently passing — the
+    // safety net that protects against a tool name being added without a
+    // matching dispatch case. `Set.prototype.has` is restored immediately so no
+    // other test sees the patch.
+    const ft = createResponsesFileTools({ files: newFiles() });
+    const hasSpy = spyOn(Set.prototype, "has").mockReturnValue(true);
+    try {
+      await expect(ft.execute(call("ghostTool", {}))).rejects.toThrow(
+        /Unhandled tool: ghostTool/u
+      );
+    } finally {
+      hasSpy.mockRestore();
     }
   });
 

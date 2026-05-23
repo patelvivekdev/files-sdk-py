@@ -911,4 +911,28 @@ describe("r2 adapter — Workers binding path", () => {
       expect((error as FilesError).message).toBe("forbidden");
     }
   });
+
+  test("binding download of a body-less object yields empty bytes via the default fallback", async () => {
+    // R2ObjectBody normally carries a `body`, but the mapper defends against
+    // a get() result that lacks one. With no body and no explicit
+    // fallbackBody (download passes none), the StoredFile resolves to empty
+    // bytes rather than throwing or hanging.
+    const { bucket } = fakeBinding();
+    const files = new Files({ adapter: r2({ binding: bucket as never }) });
+    bucket.get = (() =>
+      Promise.resolve({
+        customMetadata: undefined,
+        etag: "etag-x",
+        httpMetadata: { contentType: "text/plain" },
+        key: "a.txt",
+        size: 4,
+        uploaded: new Date(0),
+      })) as never;
+    const got = await files.download("a.txt");
+    expect(got.key).toBe("a.txt");
+    expect(got.size).toBe(4);
+    expect(await got.text()).toBe("");
+    const buffer = await got.arrayBuffer();
+    expect(buffer.byteLength).toBe(0);
+  });
 });
