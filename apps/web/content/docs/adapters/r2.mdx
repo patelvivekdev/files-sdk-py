@@ -15,7 +15,7 @@ peerDeps:
 files-sdk @aws-sdk/client-s3 @aws-sdk/s3-presigned-post @aws-sdk/s3-request-presigner
 ```
 
-Over the HTTP API, `upload` reports true byte-level [progress](/docs/api#progress-tracking) via `onProgress` when the optional `@aws-sdk/lib-storage` package is installed (it's loaded only when `onProgress` is used). The Workers `R2Bucket` binding reports start/finish instead.
+Over the HTTP API, `upload` reports true byte-level [progress](/api/upload#progress-tracking) via `onProgress` when the optional `@aws-sdk/lib-storage` package is installed (it's loaded only when `onProgress` is used). The Workers `R2Bucket` binding reports start/finish instead.
 
 ## Usage
 
