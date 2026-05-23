@@ -13,7 +13,8 @@ The surface is small: a `Files` instance with nine methods, plus `files.file(key
 - [`exists`](/api/exists) - check whether a key exists.
 - [`delete`](/api/delete) - remove one object or many.
 - [`copy`](/api/copy) - server-side copy with a read + write fallback.
-- [`list`](/api/list) - cursor-paginated listing with a prefix filter.
+- [`move`](/api/move) - rename a key, native where the provider supports it.
+- [`list`](/api/list) - cursor-paginated listing, or `listAll` to walk every page.
 - [`url`](/api/url) - a direct or signed URL to fetch a key.
 - [`signedUploadUrl`](/api/signed-upload-url) - a presigned PUT/POST contract for direct browser uploads.
 - [`file`](/api/file) - a `FileHandle` bound to one key.

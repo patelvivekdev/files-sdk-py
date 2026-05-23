@@ -283,6 +283,7 @@ describe("Files hooks", () => {
 
     await files.upload("docs/a.txt", "a");
     await files.copy("docs/a.txt", "docs/b.txt");
+    await files.move("docs/b.txt", "docs/d.txt");
     await files.list({ limit: 10, prefix: "docs/" });
     const url = await files.url("docs/a.txt", { expiresIn: 30 });
     const signed = await files.signedUploadUrl("docs/c.txt", {
@@ -298,6 +299,12 @@ describe("Files hooks", () => {
       status: "success",
       to: "docs/b.txt",
       type: "copy",
+    });
+    expect(find("move")).toMatchObject({
+      from: "docs/b.txt",
+      status: "success",
+      to: "docs/d.txt",
+      type: "move",
     });
     expect(find("list")).toMatchObject({ status: "success", type: "list" });
     expect(find("url")).toMatchObject({

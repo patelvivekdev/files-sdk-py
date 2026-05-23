@@ -447,6 +447,14 @@ export interface Adapter<Raw = unknown> {
     opts?: DeleteManyOptions
   ): Promise<DeleteManyResult>;
   copy(from: string, to: string, opts?: OperationOptions): Promise<void>;
+  /**
+   * Move (rename) `from` to `to`. Optional: when an adapter omits it, the SDK
+   * falls back to `copy()` then `delete()`. Adapters should implement it when
+   * the provider has a native rename that's atomic or avoids re-transferring
+   * the body (the local filesystem, FTP, SFTP) — the copy+delete fallback on
+   * those round-trips the bytes.
+   */
+  move?(from: string, to: string, opts?: OperationOptions): Promise<void>;
   list(opts?: ListOptions): Promise<ListResult>;
   /**
    * Return a URL the caller can use to fetch `key`.
@@ -485,6 +493,7 @@ export type FilesActionType =
   | "exists"
   | "delete"
   | "copy"
+  | "move"
   | "list"
   | "url"
   | "signedUploadUrl";
@@ -494,8 +503,8 @@ export type FilesActionType =
  * settles — on success and on failure. The array form of an operation reports
  * the caller's `keys` and emits a single event carrying the aggregated
  * `result` (any per-item failures live in that result's `errors`); the single
- * form reports `key`, or `from` / `to` for `copy`. Keys are always the ones
- * the caller passed, never the internal prefixed path.
+ * form reports `key`, or `from` / `to` for `copy` and `move`. Keys are always
+ * the ones the caller passed, never the internal prefixed path.
  */
 export interface FilesActionEvent {
   type: FilesActionType;
@@ -583,6 +592,10 @@ export interface FileHandle {
   signedUploadUrl(opts: SignUploadOptions): Promise<SignedUpload>;
   copyTo(destinationKey: string, opts?: OperationOptions): Promise<void>;
   copyFrom(sourceKey: string, opts?: OperationOptions): Promise<void>;
+  /** Move this key to `destinationKey`. See {@link Files.move}. */
+  moveTo(destinationKey: string, opts?: OperationOptions): Promise<void>;
+  /** Move `sourceKey` onto this key. See {@link Files.move}. */
+  moveFrom(sourceKey: string, opts?: OperationOptions): Promise<void>;
 }
 
 const DEFAULT_RETRY_BACKOFF_MS = 100;
@@ -892,6 +905,8 @@ export class Files<A extends Adapter = Adapter> {
       exists: (opts) => this.exists(key, opts),
       head: (opts) => this.head(key, opts),
       key,
+      moveFrom: (sourceKey, opts) => this.move(sourceKey, key, opts),
+      moveTo: (destinationKey, opts) => this.move(key, destinationKey, opts),
       signedUploadUrl: (opts) => this.signedUploadUrl(key, opts),
       upload: (body, opts) => this.upload(key, body, opts),
       url: (opts) => this.url(key, opts),
@@ -1322,6 +1337,53 @@ export class Files<A extends Adapter = Adapter> {
     });
   }
 
+  /**
+   * Move (rename) `from` to `to`, resolving to `void`. A failure (e.g. a
+   * missing source) **throws** a {@link FilesError}.
+   *
+   * Uses the adapter's native rename when it has one (the local filesystem,
+   * FTP, SFTP) and otherwise falls back to `copy()` then `delete()` — the same
+   * two-step every object store does, since none offer an atomic move. The
+   * fallback is therefore **not atomic**: a crash between the copy and the
+   * delete can leave the object at both keys.
+   *
+   * Moving a key onto itself (`from === to`, after the client `prefix` is
+   * applied) is a no-op — the fallback would otherwise copy the object onto
+   * itself and then delete it, destroying it.
+   *
+   * Honors the client's `prefix`; the action hook reports the keys the caller
+   * passed, not the internal prefixed paths.
+   */
+  move(from: string, to: string, opts?: OperationOptions): Promise<void> {
+    const ctx: ActionContext = { from, to, type: "move" };
+    return this.#action(ctx, () => {
+      const fromPath = this.#path(from, "move source");
+      const toPath = this.#path(to, "move destination");
+      return this.#run(
+        opts,
+        (attemptOpts) => this.#move(fromPath, toPath, attemptOpts),
+        true,
+        ctx
+      );
+    });
+  }
+
+  async #move(
+    fromPath: string,
+    toPath: string,
+    opts?: OperationOptions
+  ): Promise<void> {
+    if (fromPath === toPath) {
+      return;
+    }
+    if (this.#adapter.move) {
+      await this.#adapter.move(fromPath, toPath, opts);
+      return;
+    }
+    await this.#adapter.copy(fromPath, toPath, opts);
+    await this.#adapter.delete(fromPath, opts);
+  }
+
   list(opts?: ListOptions): Promise<ListResult> {
     const ctx: ActionContext = { type: "list" };
     return this.#action(ctx, () => {
@@ -1349,6 +1411,37 @@ export class Files<A extends Adapter = Adapter> {
         ctx
       );
     });
+  }
+
+  /**
+   * Iterate every object, transparently following the cursor across pages.
+   *
+   * `list()` returns one page plus a `cursor`; most callers actually want
+   * "walk everything under this prefix", which means a manual cursor loop.
+   * This is that loop as an async iterable:
+   *
+   * ```ts
+   * for await (const file of files.listAll({ prefix: "avatars/" })) {
+   *   console.log(file.key, file.size);
+   * }
+   * ```
+   *
+   * `prefix` scopes the walk and `limit` sets the page size (how many keys
+   * each underlying `list()` fetches), not a total cap — pass a `cursor` to
+   * resume from a prior position. Each page is a real `list()` call, so it
+   * honors the client `prefix`, retries/timeouts, and fires one `onAction`
+   * `list` hook per page. Stop early by `break`ing out of the loop; no further
+   * pages are fetched.
+   *
+   * @yields each stored object, one page at a time, following the cursor.
+   */
+  async *listAll(opts?: ListOptions): AsyncGenerator<StoredFile, void> {
+    let cursor = opts?.cursor;
+    do {
+      const page = await this.list(cursor ? { ...opts, cursor } : opts);
+      yield* page.items;
+      ({ cursor } = page);
+    } while (cursor);
   }
 
   /**

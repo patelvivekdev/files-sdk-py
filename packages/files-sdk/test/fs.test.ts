@@ -333,6 +333,57 @@ describe("fs adapter", () => {
     });
   });
 
+  describe("move", () => {
+    test("relocates body and sidecar, removing the source", async () => {
+      const root = await makeRoot();
+      const files = new Files({ adapter: fsAdapter({ root }) });
+      await files.upload("src.txt", "data", {
+        contentType: "text/plain",
+        metadata: { v: "1" },
+      });
+      await files.move("src.txt", "dst.txt");
+
+      expect(await files.exists("src.txt")).toBe(false);
+      const got = await files.download("dst.txt");
+      expect(await got.text()).toBe("data");
+      expect(got.type).toBe("text/plain");
+      expect(got.metadata).toEqual({ v: "1" });
+    });
+
+    test("throws NotFound when source is missing", async () => {
+      const root = await makeRoot();
+      const files = new Files({ adapter: fsAdapter({ root }) });
+      await expect(files.move("nope", "dst")).rejects.toMatchObject({
+        code: "NotFound",
+      });
+    });
+
+    test("creates intermediate directories at destination", async () => {
+      const root = await makeRoot();
+      const files = new Files({ adapter: fsAdapter({ root }) });
+      await files.upload("a.txt", "ok");
+      await files.move("a.txt", "deep/nest/dest.txt");
+      expect(await files.exists("a.txt")).toBe(false);
+      const got = await files.download("deep/nest/dest.txt");
+      expect(await got.text()).toBe("ok");
+    });
+
+    test("clears a stale destination sidecar when source has none", async () => {
+      const root = await makeRoot();
+      const adapter = fsAdapter({ root });
+      const files = new Files({ adapter });
+      // Destination previously held metadata; the source body is written
+      // straight to disk with no sidecar.
+      await files.upload("dst.txt", "old", { metadata: { stale: "yes" } });
+      await fsp.writeFile(path.join(root, "src.txt"), "fresh");
+
+      await files.move("src.txt", "dst.txt");
+      const got = await files.download("dst.txt");
+      expect(await got.text()).toBe("fresh");
+      expect(got.metadata).toBeUndefined();
+    });
+  });
+
   describe("list", () => {
     test("returns all uploads under root, sorted", async () => {
       const root = await makeRoot();

@@ -417,6 +417,21 @@ export const cloudinaryAdapter = (
         throw mapCloudinaryError(error);
       }
     },
+    async move(from, to) {
+      try {
+        // Cloudinary's `rename` is a native, server-side move — no byte
+        // round-trip, unlike copy()'s re-upload-by-URL. It keeps the same
+        // asset_id, so this is a true rename rather than a fresh ingest.
+        await sdk.uploader.rename(from, to, {
+          invalidate: true,
+          overwrite: true,
+          resource_type: resourceType,
+          type,
+        });
+      } catch (error) {
+        throw mapCloudinaryError(error);
+      }
+    },
     name: "cloudinary",
     raw: sdk,
     resourceType,

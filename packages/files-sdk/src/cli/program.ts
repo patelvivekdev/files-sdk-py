@@ -9,6 +9,7 @@ import {
   runExists,
   runHead,
   runList,
+  runMove,
   runSignUpload,
   runUpload,
   runUrl,
@@ -352,6 +353,18 @@ export const buildProgram = (): Command => {
     .description("server-side copy from one key to another")
     .action(
       wrap(runCopy as (opts: never) => Promise<void>, (args, common) => {
+        const [from, to] = args as [string, string];
+        return { ...common, from, to } as CommonRunOpts;
+      })
+    );
+
+  program
+    .command("move <from> <to>")
+    .description(
+      "move (rename) a key — native rename where supported, else copy + delete"
+    )
+    .action(
+      wrap(runMove as (opts: never) => Promise<void>, (args, common) => {
         const [from, to] = args as [string, string];
         return { ...common, from, to } as CommonRunOpts;
       })

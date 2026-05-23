@@ -245,6 +245,24 @@ export const startMcpServer = async (opts: McpServerOpts): Promise<void> => {
   );
 
   server.registerTool(
+    "move",
+    {
+      description:
+        "Move (rename) `from` to `to` within the same store. Native rename where supported, else copy + delete.",
+      inputSchema: { from: z.string(), to: z.string() },
+      title: "Move object",
+    },
+    async ({ from, to }) => {
+      try {
+        await files.move(from, to);
+        return ok({ from, moved: true, to });
+      } catch (error) {
+        return errorPayload(error);
+      }
+    }
+  );
+
+  server.registerTool(
     "list",
     {
       description:

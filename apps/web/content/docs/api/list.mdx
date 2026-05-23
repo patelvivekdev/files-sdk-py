@@ -18,7 +18,26 @@ if (cursor) {
 }
 ```
 
+## Walking every page with `listAll`
+
+`list` returns one page plus a `cursor`; most callers actually want "walk everything under this prefix", which is a manual cursor loop. `files.listAll(options?)` is that loop as an async iterable:
+
+```ts lineNumbers
+for await (const file of files.listAll({ prefix: "avatars/" })) {
+  console.log(file.key, file.size);
+}
+```
+
+Each item is the same [`StoredFile`](/api#the-storedfile-type) `list` yields. `prefix` scopes the walk; `limit` sets the **page size** each underlying `list` fetches (not a total cap), and a `cursor` resumes from a prior position. Every page is a real `list` call, so it honors the client `prefix`, [retries and timeouts](/features/retries), and fires one [`onAction`](/features/onaction) `list` event per page. `break` out of the loop to stop early — no further pages are fetched.
+
+`listAll` runs on every adapter, since it's built on `list`. Two `list` caveats carry over to the walk:
+
+- **[Netlify Blobs](/adapters/netlify-blobs) exposes no pagination cursor.** Call `listAll()` with **no `limit`** and it returns everything in a single page (correct); pass a `limit` and there is no next page to follow, so the walk stops at that many. On Netlify, omit `limit` when you mean "walk everything."
+- **Non-recursive adapters** ([Box](/adapters/box), [OneDrive](/adapters/onedrive), [SharePoint](/adapters/sharepoint)) list only the immediate children of the root folder. `listAll` walks every page, but it can't descend into subfolders the underlying `list` never returns.
+
 ## Options
+
+Both `list` and `listAll` take the same options:
 
 <AutoTypeTable
   path="../../packages/files-sdk/src/index.ts"

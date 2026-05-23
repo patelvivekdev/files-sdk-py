@@ -3,7 +3,7 @@ title: MCP server
 description: Boot a built-in MCP server on stdio that exposes every CLI command as a tool, with provider and credentials bound at startup.
 ---
 
-`files ... mcp` boots an [MCP server](https://modelcontextprotocol.io) on stdio that exposes every CLI command as a tool — `upload`, `download`, `head`, `exists`, `delete`, `copy`, `list`, `url`, `sign-upload`. The provider and credentials are bound at server startup; the agent only passes operation arguments, never secrets.
+`files ... mcp` boots an [MCP server](https://modelcontextprotocol.io) on stdio that exposes every CLI command as a tool — `upload`, `download`, `head`, `exists`, `delete`, `copy`, `move`, `list`, `url`, `sign-upload`. The provider and credentials are bound at server startup; the agent only passes operation arguments, never secrets.
 
 ```bash lineNumbers
 # Start the MCP server on stdio

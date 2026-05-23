@@ -1,6 +1,6 @@
 ---
 title: Commands
-description: Each CLI command maps 1:1 to an Adapter method - upload, download, head, exists, delete, copy, list, url, and sign-upload.
+description: Each CLI command maps 1:1 to an Adapter method - upload, download, head, exists, delete, copy, move, list, url, and sign-upload.
 ---
 
 Each command maps 1:1 to an `Adapter` method. Same semantics, same `FilesError` codes, same `StoredFile` shape on the way out.
@@ -22,8 +22,9 @@ files --provider s3 --bucket uploads head reports/2026-q1.pdf
 files --provider s3 --bucket uploads exists reports/2026-q1.pdf   # exit 0 = exists, 1 = missing
 files --provider s3 --bucket uploads list --prefix reports/ --limit 50
 
-# Server-side copy + delete
+# Copy, move (rename), delete
 files --provider s3 --bucket uploads copy reports/2026-q1.pdf reports/archive/q1.pdf
+files --provider s3 --bucket uploads move uploads/tmp-q1.pdf reports/2026-q1.pdf
 files --provider s3 --bucket uploads delete reports/archive/q1.pdf
 
 # URLs (presigned on signing adapters, public for CDN-backed providers)

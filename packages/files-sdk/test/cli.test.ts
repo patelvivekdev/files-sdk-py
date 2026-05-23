@@ -89,6 +89,7 @@ describe("cli/program", () => {
       "head",
       "list",
       "mcp",
+      "move",
       "sign-upload",
       "upload",
       "url",

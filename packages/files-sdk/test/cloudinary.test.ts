@@ -51,6 +51,10 @@ const destroyMock = mock((_id: string, _opts: unknown) =>
   Promise.resolve({ result: "ok" })
 );
 
+const renameMock = mock((_from: string, _to: string, _opts: unknown) =>
+  Promise.resolve({ public_id: "destination", resource_type: "raw" })
+);
+
 const resourceMock = mock((_id: string, _opts: unknown) =>
   Promise.resolve({
     bytes: 5,
@@ -112,6 +116,7 @@ mock.module("cloudinary", () => ({
     config: configMock,
     uploader: {
       destroy: destroyMock,
+      rename: renameMock,
       upload: uploadMock,
       upload_stream: uploadStreamMock,
     },
@@ -131,6 +136,7 @@ describe("cloudinary adapter", () => {
     uploadStreamMock.mockClear();
     uploadMock.mockClear();
     destroyMock.mockClear();
+    renameMock.mockClear();
     resourceMock.mockClear();
     resourcesMock.mockClear();
     urlMock.mockClear();
@@ -361,6 +367,21 @@ describe("cloudinary adapter", () => {
         type: "upload",
       })
     );
+  });
+
+  test("move > delegates to native uploader.rename, not copy+delete", async () => {
+    const files = new Files({
+      adapter: cloudinary({ cloudName: CLOUD_NAME }),
+    });
+    await files.move("source", "destination");
+    expect(renameMock).toHaveBeenCalledWith(
+      "source",
+      "destination",
+      expect.objectContaining({ resource_type: "raw", type: "upload" })
+    );
+    // Native rename — no byte round-trip, no separate delete.
+    expect(uploadMock).not.toHaveBeenCalled();
+    expect(destroyMock).not.toHaveBeenCalled();
   });
 
   test("list > forwards prefix and cursor; clamps limit", async () => {

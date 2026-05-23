@@ -207,6 +207,20 @@ export const runCopy = async (opts: CopyCmdOpts): Promise<void> => {
   emit({ copied: true, from: opts.from, to: opts.to }, opts);
 };
 
+export interface MoveCmdOpts extends CommonRunOpts {
+  from: string;
+  to: string;
+}
+
+export const runMove = async (opts: MoveCmdOpts): Promise<void> => {
+  if (opts.dryRun) {
+    return dryRun("move", { from: opts.from, to: opts.to }, opts);
+  }
+  const { files } = await loadFiles(opts.global);
+  await files.move(opts.from, opts.to);
+  emit({ from: opts.from, moved: true, to: opts.to }, opts);
+};
+
 export interface ListCmdOpts extends CommonRunOpts {
   prefix?: string;
   cursor?: string;

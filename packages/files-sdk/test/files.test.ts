@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 
 import { Files, FilesError } from "../src/index.js";
 import type {
@@ -553,6 +553,105 @@ describe("Files class", () => {
     expect(await mirrored.text()).toBe("payload");
   });
 
+  test("move relocates an object via copy+delete fallback", async () => {
+    const adapter = fakeAdapter();
+    const files = new Files({ adapter });
+    await files.upload("from.txt", "payload");
+
+    await files.move("from.txt", "to.txt");
+
+    expect(adapter.has("from.txt")).toBe(false);
+    const got = await files.download("to.txt");
+    expect(await got.text()).toBe("payload");
+  });
+
+  test("move is a no-op when source and destination are the same key", async () => {
+    const adapter = fakeAdapter();
+    // A naive copy+delete would copy the object onto itself, then delete it —
+    // destroying it. The same-key guard must prevent that.
+    const copy = mock(adapter.copy);
+    const del = mock(adapter.delete);
+    const files = new Files({ adapter: { ...adapter, copy, delete: del } });
+    await files.upload("same.txt", "keep");
+
+    await files.move("same.txt", "same.txt");
+
+    expect(copy).not.toHaveBeenCalled();
+    expect(del).not.toHaveBeenCalled();
+    const got = await files.download("same.txt");
+    expect(await got.text()).toBe("keep");
+  });
+
+  test("move prefers the adapter's native move when present", async () => {
+    const base = fakeAdapter();
+    const native = mock((from: string, to: string) => base.copy(from, to));
+    const copy = mock(base.copy);
+    const del = mock(base.delete);
+    const adapter = { ...base, copy, delete: del, move: native };
+    const files = new Files({ adapter });
+    await files.upload("from.txt", "payload");
+
+    await files.move("from.txt", "to.txt");
+
+    expect(native).toHaveBeenCalledWith("from.txt", "to.txt", undefined);
+    // Native move owns the relocation — the copy+delete fallback must not run.
+    expect(copy).not.toHaveBeenCalled();
+    expect(del).not.toHaveBeenCalled();
+  });
+
+  test("file handle supports move helpers", async () => {
+    const files = new Files({ adapter: fakeAdapter() });
+    const source = files.file("source.txt");
+    await source.upload("payload");
+
+    await source.moveTo("moved.txt");
+    expect(await source.exists()).toBe(false);
+    const moved = await files.download("moved.txt");
+    expect(await moved.text()).toBe("payload");
+
+    const target = files.file("final.txt");
+    await target.moveFrom("moved.txt");
+    expect(await files.exists("moved.txt")).toBe(false);
+    const final = await target.download();
+    expect(await final.text()).toBe("payload");
+  });
+
+  test("listAll iterates every object across pages", async () => {
+    const files = new Files({ adapter: fakeAdapter() });
+    for (let i = 0; i < 5; i += 1) {
+      await files.upload(`f${i}.txt`, String(i));
+    }
+
+    const keys: string[] = [];
+    // A page size below the total forces listAll to follow the cursor.
+    for await (const file of files.listAll({ limit: 2 })) {
+      keys.push(file.key);
+    }
+
+    expect(keys.toSorted()).toEqual([
+      "f0.txt",
+      "f1.txt",
+      "f2.txt",
+      "f3.txt",
+      "f4.txt",
+    ]);
+  });
+
+  test("listAll honors prefix and the constructor prefix strips keys", async () => {
+    const adapter = fakeAdapter();
+    const files = new Files({ adapter, prefix: "users" });
+    await files.upload("avatars/1.png", "one");
+    await files.upload("avatars/2.png", "two");
+    await files.upload("docs/1.txt", "doc");
+
+    const keys: string[] = [];
+    for await (const file of files.listAll({ limit: 1, prefix: "avatars/" })) {
+      keys.push(file.key);
+    }
+
+    expect(keys.toSorted()).toEqual(["avatars/1.png", "avatars/2.png"]);
+  });
+
   test("list returns items filtered by prefix", async () => {
     const files = new Files({ adapter: fakeAdapter() });
     await files.upload("a/1.txt", "1");
@@ -1031,6 +1130,10 @@ describe("Files class", () => {
     await mirror.copyFrom("456");
     const mirrored = await mirror.download();
     expect(await mirrored.text()).toBe("avatar");
+
+    await files.move("456", "654");
+    expect(adapter.has("users/456")).toBe(false);
+    expect(adapter.has("users/654")).toBe(true);
 
     const signed = await files.signedUploadUrl("999", { expiresIn: 60 });
     expect(signed.url).toContain(encodeURIComponent("users/999"));

@@ -10,6 +10,7 @@ import {
   runExists,
   runHead,
   runList,
+  runMove,
   runSignUpload,
   runUpload,
   runUrl,
@@ -166,6 +167,19 @@ describe("cli/commands dry-run", () => {
     });
     expect(lastJson(cap.stdout)).toMatchObject({
       action: "copy",
+      from: "a",
+      to: "b",
+    });
+  });
+
+  test("move dry-run echoes from/to", async () => {
+    await runMove({
+      ...baseOpts({ dryRun: true }),
+      from: "a",
+      to: "b",
+    });
+    expect(lastJson(cap.stdout)).toMatchObject({
+      action: "move",
       from: "a",
       to: "b",
     });
@@ -368,6 +382,21 @@ describe("cli/commands real (fs adapter)", () => {
     });
     const contents = await fsp.readFile(path.join(root, "dst.txt"), "utf-8");
     expect(contents).toBe("data");
+  });
+
+  test("move renames the object, removing the source", async () => {
+    const local = path.join(root, "in.txt");
+    await uploadFile("from.txt", "payload", local);
+    cap.stdout.length = 0;
+    await runMove({ ...baseOpts(), from: "from.txt", to: "to.txt" });
+    expect(lastJson(cap.stdout)).toEqual({
+      from: "from.txt",
+      moved: true,
+      to: "to.txt",
+    });
+    const contents = await fsp.readFile(path.join(root, "to.txt"), "utf-8");
+    expect(contents).toBe("payload");
+    await expect(fsp.access(path.join(root, "from.txt"))).rejects.toThrow();
   });
 
   test("list returns sorted items under a prefix", async () => {

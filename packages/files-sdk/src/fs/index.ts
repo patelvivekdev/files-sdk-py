@@ -520,6 +520,29 @@ export const fs = (opts: FsAdapterOptions): FsAdapter => {
         ...(more && lastKey && { cursor: lastKey }),
       };
     },
+    async move(from, to) {
+      const fromPath = resolveKeyPath(root, from);
+      const toPath = resolveKeyPath(root, to);
+      try {
+        await ensureDirFor(toPath);
+        // Atomic per-file rename — no byte round-trip, unlike copy()+delete().
+        await fsp.rename(fromPath, toPath);
+        // Move the sidecar alongside the body. If the source had none, mirror
+        // that by clearing any stale destination sidecar from a prior upload
+        // at the same key (same stance as copy()).
+        try {
+          await fsp.rename(sidecarPathOf(fromPath), sidecarPathOf(toPath));
+        } catch (error) {
+          if (errorCode(error) === "ENOENT") {
+            await bestEffortRm(sidecarPathOf(toPath));
+          } else {
+            throw error;
+          }
+        }
+      } catch (error) {
+        throw mapFsError(error);
+      }
+    },
     name: "fs",
     raw: { root },
     get root() {
