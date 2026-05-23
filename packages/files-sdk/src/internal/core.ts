@@ -13,6 +13,7 @@ import type {
   DeleteManyError,
   DeleteManyOptions,
   DeleteManyResult,
+  MultipartOptions,
 } from "../index.js";
 import { FilesError } from "./errors.js";
 import type { FilesErrorCode } from "./errors.js";
@@ -362,6 +363,36 @@ export const countingStream = (
       }
     },
   });
+};
+
+/**
+ * Whether an upload caller opted into multipart — a truthy boolean or a
+ * {@link MultipartOptions} object. Shared by the adapters that branch on it.
+ */
+export const isMultipartRequested = (
+  multipart: boolean | MultipartOptions | undefined
+): boolean => multipart !== undefined && multipart !== false;
+
+const GCS_RESUMABLE_CHUNK_MULTIPLE = 256 * 1024;
+
+/**
+ * Round a multipart `partSize` to a chunk size valid for `@google-cloud/storage`
+ * resumable uploads — a multiple of 256 KiB, never below one unit. Shared by the
+ * GCS and Firebase Storage adapters. Returns `undefined` when no `partSize` was
+ * supplied (or `multipart` was a bare boolean) so the SDK default applies.
+ */
+export const resumableChunkSize = (
+  multipart: boolean | MultipartOptions | undefined
+): number | undefined => {
+  const partSize =
+    typeof multipart === "object" ? multipart.partSize : undefined;
+  if (partSize === undefined) {
+    return;
+  }
+  const rounded =
+    Math.floor(partSize / GCS_RESUMABLE_CHUNK_MULTIPLE) *
+    GCS_RESUMABLE_CHUNK_MULTIPLE;
+  return Math.max(rounded, GCS_RESUMABLE_CHUNK_MULTIPLE);
 };
 
 export const deleteManyWithFallback = async (

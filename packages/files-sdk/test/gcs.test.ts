@@ -265,6 +265,31 @@ describe("gcs adapter", () => {
     expect(events).toEqual([{ loaded: 5, total: 5 }]);
   });
 
+  test("multipart: true uploads via a resumable createWriteStream", async () => {
+    const files = new Files({ adapter: gcs({ bucket: "uploads" }) });
+    const result = await files.upload("a.txt", "hello", { multipart: true });
+    expect(createWriteStreamMock).toHaveBeenCalledTimes(1);
+    expect(saveMock).not.toHaveBeenCalled();
+    const opts = (createWriteStreamMock.mock.calls as unknown[][])[0]?.[0] as
+      | { resumable: boolean; chunkSize?: number }
+      | undefined;
+    expect(opts?.resumable).toBe(true);
+    expect(opts?.chunkSize).toBeUndefined();
+    expect(result.size).toBe(5);
+  });
+
+  test("multipart partSize sets a 256 KiB-aligned chunkSize", async () => {
+    const adapter = gcs({ bucket: "uploads" });
+    await adapter.upload("a.txt", "hello", {
+      multipart: { partSize: 1024 * 1024 },
+    });
+    const opts = (createWriteStreamMock.mock.calls as unknown[][])[0]?.[0] as
+      | { resumable: boolean; chunkSize?: number }
+      | undefined;
+    expect(opts?.resumable).toBe(true);
+    expect(opts?.chunkSize).toBe(1024 * 1024);
+  });
+
   test("download returns a buffered StoredFile whose text matches the body", async () => {
     const files = new Files({ adapter: gcs({ bucket: "uploads" }) });
     const got = await files.download("a.txt");

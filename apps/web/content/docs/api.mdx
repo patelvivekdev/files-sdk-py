@@ -49,7 +49,28 @@ Every adapter calls `onProgress`. How fine-grained it is depends on the body and
 
 `onProgress` fires only while the upload is in flight and on success; a failed upload emits no final event, and a retry restarts progress. In the array form, each report also carries the item's `key`.
 
-**Many items** — pass an array of `{ key, body, ...options }` to upload many in one call. Each item carries its own `contentType` / `cacheControl` / `metadata`. The call returns a structured result instead of throwing on partial failure: successes land in `uploaded`, per-item failures (including invalid keys) in `errors`, both in the order supplied. It honors the client's `prefix` and fans out with bounded `concurrency` (default 8); `stopOnError: true` stops at the first failure.
+#### Multipart uploads
+
+Pass `multipart` to upload a large body in parallel parts instead of a single request — the robust path for objects beyond the single-request limit (5 GB on S3) and for `ReadableStream` bodies of unknown length:
+
+```ts lineNumbers
+// Defaults: 5 MiB parts, 4 in flight.
+await files.upload("backups/db.tar", stream, { multipart: true });
+
+// Or tune it:
+await files.upload("backups/db.tar", stream, {
+  multipart: { partSize: 16 * 1024 * 1024, concurrency: 8 },
+});
+```
+
+- **S3 and the S3-compatible adapters** (incl. R2 over HTTP) run multipart through the optional [`@aws-sdk/lib-storage`](https://www.npmjs.com/package/@aws-sdk/lib-storage) package, falling back to a single `PutObject` when the body fits in one part. Unknown-length streams use multipart **automatically**, even without the flag.
+- **OneDrive** uploads above 250 MB (and any `multipart` request) go through a chunked upload session — large files that previously failed now just work.
+- **GCS** and **Firebase Storage** switch to a resumable upload; `partSize` maps to the chunk size.
+- **Azure Blob** already splits large bodies into parallel blocks; `multipart` only tunes the block size and concurrency.
+- **Dropbox** streams `ReadableStream` bodies through its upload session chunk-by-chunk, so a large stream is never buffered whole; `partSize` (rounded to a 4 MiB multiple) tunes the chunk size.
+- Other adapters already stream natively or only accept a fully-buffered body, so they ignore the option.
+
+**Many items** — pass an array of `{ key, body, ...options }` to upload many in one call. Each item carries its own `contentType` / `cacheControl` / `metadata` / `multipart`. The call returns a structured result instead of throwing on partial failure: successes land in `uploaded`, per-item failures (including invalid keys) in `errors`, both in the order supplied. It honors the client's `prefix` and fans out with bounded `concurrency` (default 8); `stopOnError: true` stops at the first failure.
 
 ```ts lineNumbers
 const result = await files.upload(

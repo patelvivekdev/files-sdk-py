@@ -78,6 +78,25 @@ export interface UploadProgress {
   total?: number;
 }
 
+/**
+ * Tuning for multipart uploads. Pass `multipart: true` for sensible defaults,
+ * or an object to override them. See {@link UploadOptions.multipart}.
+ */
+export interface MultipartOptions {
+  /**
+   * Size of each uploaded part, in bytes. Defaults to 5 MiB
+   * (`5 * 1024 * 1024`) — also the S3-enforced minimum for every part except
+   * the last. Adapters that chunk natively round this to their own valid
+   * granularity (OneDrive to a 320-KiB multiple, GCS/Firebase to 256 KiB).
+   */
+  partSize?: number;
+  /**
+   * How many parts upload in parallel. Defaults to `4`. Higher values trade
+   * memory (up to `partSize * concurrency` buffered at once) for throughput.
+   */
+  concurrency?: number;
+}
+
 export interface UploadOptions extends OperationOptions {
   /**
    * MIME type stored alongside the object and returned to readers in the
@@ -119,6 +138,20 @@ export interface UploadOptions extends OperationOptions {
    * does not emit a final event. On retry, progress restarts.
    */
   onProgress?: (progress: UploadProgress) => void;
+  /**
+   * Upload the body in parallel parts instead of a single request. Pass `true`
+   * for sensible defaults (5 MiB parts, 4 in flight), or an object to tune
+   * `partSize` / `concurrency`. Multipart is the robust path for large objects
+   * and for `ReadableStream` bodies of unknown length: a single PUT must buffer
+   * or know the length up front, while multipart streams part-by-part.
+   *
+   * On S3-family adapters this routes through `@aws-sdk/lib-storage` (an
+   * optional peer dependency) and is **auto-engaged for unknown-length
+   * streams** even when this flag is unset. OneDrive, GCS, Firebase, and Azure
+   * map it to their native chunking; other adapters already stream or chunk
+   * transparently and ignore it.
+   */
+  multipart?: boolean | MultipartOptions;
 }
 
 export interface UploadResult {
@@ -233,6 +266,8 @@ export interface UploadManyItem {
   cacheControl?: string;
   /** Per-item user metadata. See {@link UploadOptions.metadata}. */
   metadata?: Record<string, string>;
+  /** Per-item multipart toggle/tuning. See {@link UploadOptions.multipart}. */
+  multipart?: boolean | MultipartOptions;
 }
 
 export interface UploadManyResult {
@@ -813,6 +848,7 @@ export class Files<A extends Adapter = Adapter> {
           cacheControl: item.cacheControl,
           contentType: item.contentType,
           metadata: item.metadata,
+          ...(item.multipart !== undefined && { multipart: item.multipart }),
           ...(onProgress && {
             onProgress: (progress: UploadProgress) =>
               onProgress({ ...progress, key: item.key }),

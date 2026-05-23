@@ -326,6 +326,31 @@ describe("Files class", () => {
     expect(adapter.has("uploads/b.txt")).toBe(true);
   });
 
+  test("upload (array) forwards per-item multipart to the adapter", async () => {
+    const base = fakeAdapter();
+    const seen: { key: string; multipart: unknown }[] = [];
+    const adapter: Adapter = {
+      ...base,
+      upload(key, body, opts) {
+        seen.push({ key, multipart: opts?.multipart });
+        return base.upload(key, body, opts);
+      },
+    };
+    const files = new Files({ adapter });
+
+    await files.upload([
+      { body: "a", key: "a.txt", multipart: true },
+      { body: "b", key: "b.txt", multipart: { partSize: 8 * 1024 * 1024 } },
+      { body: "c", key: "c.txt" },
+    ]);
+
+    expect(seen).toEqual([
+      { key: "a.txt", multipart: true },
+      { key: "b.txt", multipart: { partSize: 8 * 1024 * 1024 } },
+      { key: "c.txt", multipart: undefined },
+    ]);
+  });
+
   test("upload (array) stops on the first error when stopOnError is true", async () => {
     const base = fakeAdapter();
     const attempted: string[] = [];
