@@ -157,25 +157,3 @@ When you suspect the problem is wiring rather than the provider, swap to `files-
 import { fs } from "files-sdk/fs";
 const files = new Files({ adapter: fs({ root: "/tmp/store" }) });
 ```
-
-## FAQ
-
-### "Cannot find module '@aws-sdk/client-s3'"
-
-Provider SDKs are peer dependencies - install only the ones for adapters you use. The per-adapter docs list the exact packages.
-
-### Why is `contentType` `application/octet-stream`?
-
-When `upload` can't infer the type from the input (raw `ArrayBuffer`, `ReadableStream`, or a string with no extension hint), it defaults to `application/octet-stream`. Pass `contentType` explicitly.
-
-### Why does the body come back empty from `head` / `list`?
-
-Body accessors on `head` and `list` results are lazy - they fetch on call. If you serialize a `StoredFile` without invoking the accessor, you get the metadata only. That's the intent; call `.arrayBuffer()` / `.text()` / `.blob()` / `.stream()` to materialize.
-
-### Does `delete` throw on a missing key?
-
-Depends on the provider. S3, R2, and Vercel Blob treat delete as idempotent and resolve successfully. Strict providers throw `FilesError` with `code: "NotFound"`. If you need consistent behavior, gate on `await files.exists(key)` first.
-
-### Can I use Files SDK in the browser?
-
-The core class and `StoredFile` type are isomorphic, but most adapters wrap server SDKs that aren't browser-safe. Use `signedUploadUrl()` from the server, hand the contract to the browser, and have the browser `fetch` directly to the provider. The CLI's [Wiring agents](/cli#wiring-agents) section shows the same pattern from a shell.

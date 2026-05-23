@@ -1,0 +1,25 @@
+---
+title: JSON output
+description: JSON-by-default output on stdout, a stable error envelope on stderr, and meaningful exit codes for scripting.
+---
+
+Every command emits one JSON line on success. Errors go to `stderr` with a stable `{ error: { code, message } }` envelope, never mixed with the success channel — so a JSON parser downstream sees either a clean record or nothing.
+
+```bash lineNumbers
+# JSON output is the default — pipe straight to jq.
+$ files --provider fs --root /tmp/store head reports/q1.pdf
+{"key":"reports/q1.pdf","name":"q1.pdf","size":48213,"type":"application/pdf","lastModified":1778881504647,"etag":"\"9feb94ca37e5d155\""}
+
+# Errors go to stderr with a stable error code. Exit codes:
+#   0  ok
+#   1  NotFound (or exists → false)
+#   2  Provider / unknown error
+#   3  Unauthorized
+#   4  Conflict
+$ files --provider fs --root /tmp/store head nope.txt
+{"error":{"code":"NotFound","message":"ENOENT: no such file or directory, stat '/tmp/store/nope.txt'"}}
+$ echo $?
+1
+```
+
+Use `--pretty` for indented JSON when reading manually, or `--no-json` for plain-text output (still suitable for `grep`, just not for parsing).

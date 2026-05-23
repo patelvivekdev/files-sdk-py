@@ -1,0 +1,12 @@
+{
+  "root": true,
+  "title": "Adapters",
+  "pages": [
+    "---System Adapters---",
+    "fs",
+    "ftp",
+    "sftp",
+    "---Vendor Adapters---",
+    "..."
+  ]
+}

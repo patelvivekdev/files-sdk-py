@@ -1,17 +1,12 @@
 {
   "pages": [
+    "---Getting Started---",
     "overview",
-    "api",
-    "cli",
-    "providers",
-    "troubleshooting",
-    "---AI Tools---",
-    "...ai",
-    "---System Adapters---",
-    "adapters/fs",
-    "adapters/ftp",
-    "adapters/sftp",
-    "---Vendor Adapters---",
-    "...adapters"
+    "installation",
+    "usage",
+    "...",
+    "---Help---",
+    "faq",
+    "troubleshooting"
   ]
 }

@@ -1,0 +1,29 @@
+---
+title: MCP server
+description: Boot a built-in MCP server on stdio that exposes every CLI command as a tool, with provider and credentials bound at startup.
+---
+
+`files ... mcp` boots an [MCP server](https://modelcontextprotocol.io) on stdio that exposes every CLI command as a tool — `upload`, `download`, `head`, `exists`, `delete`, `copy`, `list`, `url`, `sign-upload`. The provider and credentials are bound at server startup; the agent only passes operation arguments, never secrets.
+
+```bash lineNumbers
+# Start the MCP server on stdio
+files --provider s3 --bucket uploads mcp
+```
+
+```jsonc lineNumbers
+// Wire it into Claude Code (~/.claude.json or .claude/mcp.json)
+{
+  "mcpServers": {
+    "files-sdk": {
+      "command": "files",
+      "args": ["--provider", "s3", "--bucket", "uploads", "mcp"],
+      "env": {
+        "AWS_ACCESS_KEY_ID": "...",
+        "AWS_SECRET_ACCESS_KEY": "...",
+      },
+    },
+  },
+}
+```
+
+Binary payloads are roundtripped as base64 over MCP, so binary downloads (`download`) and uploads (`upload` with a `base64` body) survive intact.

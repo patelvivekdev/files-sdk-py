@@ -1,0 +1,35 @@
+---
+title: Commands
+description: Each CLI command maps 1:1 to an Adapter method - upload, download, head, exists, delete, copy, list, url, and sign-upload.
+---
+
+Each command maps 1:1 to an `Adapter` method. Same semantics, same `FilesError` codes, same `StoredFile` shape on the way out.
+
+```bash lineNumbers
+# Upload from a file (or pipe stdin)
+files --provider s3 --bucket uploads \
+  upload reports/2026-q1.pdf --file ./report.pdf --content-type application/pdf
+
+cat report.pdf | files --provider s3 --bucket uploads \
+  upload reports/2026-q1.pdf --stdin --content-type application/pdf
+
+# Download to disk or stream to stdout
+files --provider s3 --bucket uploads download reports/2026-q1.pdf --out ./report.pdf
+files --provider s3 --bucket uploads download reports/2026-q1.pdf --stdout > report.pdf
+
+# Metadata, existence, listing
+files --provider s3 --bucket uploads head reports/2026-q1.pdf
+files --provider s3 --bucket uploads exists reports/2026-q1.pdf   # exit 0 = exists, 1 = missing
+files --provider s3 --bucket uploads list --prefix reports/ --limit 50
+
+# Server-side copy + delete
+files --provider s3 --bucket uploads copy reports/2026-q1.pdf reports/archive/q1.pdf
+files --provider s3 --bucket uploads delete reports/archive/q1.pdf
+
+# URLs (presigned on signing adapters, public for CDN-backed providers)
+files --provider s3 --bucket uploads url reports/2026-q1.pdf --expires-in 600
+
+# Browser uploads via presigned POST policy (enforces size server-side)
+files --provider s3 --bucket uploads sign-upload uploads/avatar.png \
+  --expires-in 600 --max-size 5242880 --content-type image/png
+```

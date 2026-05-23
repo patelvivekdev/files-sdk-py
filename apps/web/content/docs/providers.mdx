@@ -52,20 +52,30 @@ const ok = azure.env.credentialModes?.some((mode) =>
 
 ## Types
 
+The catalog is fully typed, and the shapes are exported from both `files-sdk/providers` and the package root so you can build against them. They nest top-down: a `Provider` holds a `ProviderEnvSpec` in its `env` field, that spec groups credentials into `EnvGroup`s, and each group lists individual `EnvVar`s.
+
+A **`Provider`** is one catalog entry - its display name, description, peer dependencies, import slug, and env spec.
+
 <AutoTypeTable
   path="../../packages/files-sdk/src/providers/index.ts"
   name="Provider"
 />
+
+A **`ProviderEnvSpec`** is the `env` field of a provider: what it reads from the environment, split by role - always-`required` variables, mutually exclusive `credentialModes`, `optional` tuning - plus non-env `config` options the adapter still needs.
 
 <AutoTypeTable
   path="../../packages/files-sdk/src/providers/index.ts"
   name="ProviderEnvSpec"
 />
 
+An **`EnvGroup`** is a single credential mode inside `credentialModes` - one self-contained way to authenticate (a connection string, an account key, a SAS token). The caller satisfies exactly one group.
+
 <AutoTypeTable
   path="../../packages/files-sdk/src/providers/index.ts"
   name="EnvGroup"
 />
+
+An **`EnvVar`** is a single variable, tagged with any `aliases`, whether it is a `secret` to mask, and who reads it (`files-sdk` directly, or the provider SDK's own credential chain via `sdk-chain`).
 
 <AutoTypeTable
   path="../../packages/files-sdk/src/providers/index.ts"

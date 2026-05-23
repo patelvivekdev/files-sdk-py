@@ -1,15 +1,5 @@
 {
-  "title": "API Reference",
-  "pages": [
-    "upload",
-    "download",
-    "head",
-    "exists",
-    "delete",
-    "copy",
-    "list",
-    "url",
-    "signed-upload-url",
-    "file"
-  ]
+  "root": true,
+  "title": "API",
+  "pages": ["index", "errors", "compatibility", "---Methods---", "..."]
 }

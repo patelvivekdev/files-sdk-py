@@ -1,0 +1,65 @@
+---
+title: Overview
+description: Agent-friendly CLI for files-sdk. One binary, every provider, JSON-by-default output, stdin/stdout streaming, and a built-in MCP server.
+---
+
+The CLI wraps the same adapters as the SDK behind a single `files` binary - JSON-by-default output, stdin/stdout streaming, and a built-in MCP server. Install it, point it at a provider, and every SDK method is available as a command.
+
+## Install
+
+The CLI ships with the `files-sdk` package — install it globally to get a `files` binary on your `PATH`, or invoke it via `npx` / `bunx` for one-off commands.
+
+```package-install
+npm install -g files-sdk
+```
+
+One-shot, no install:
+
+```package-install
+npx -p files-sdk files --provider fs --root ./uploads list
+```
+
+Adapter SDKs (AWS, GCP, Azure, Dropbox, etc.) are loaded lazily on first use, so cold-start cost matches whichever single provider you select — not the union of all of them. Those SDKs are optional peer dependencies of `files-sdk`, so install the one for the provider you intend to use alongside the CLI — for example `npm install -g files-sdk @aws-sdk/client-s3 @aws-sdk/s3-presigned-post @aws-sdk/s3-request-presigner` for S3. See the per-adapter docs for the exact package list.
+
+## Pick a provider
+
+Pass `--provider <name>` on every call, or set `FILES_SDK_PROVIDER` once. Provider-specific credentials come from the adapter's standard env vars (`AWS_ACCESS_KEY_ID`, `BLOB_READ_WRITE_TOKEN`, `GOOGLE_APPLICATION_CREDENTIALS`, etc.), so the same environment that works with the SDK works with the CLI.
+
+<div className="rounded-lg border border-dotted p-4 text-sm flex flex-wrap gap-x-3 gap-y-1.5 font-mono text-muted-foreground">
+  <span>s3</span>
+  <span>r2</span>
+  <span>gcs</span>
+  <span>azure</span>
+  <span>vercel-blob</span>
+  <span>netlify-blobs</span>
+  <span>supabase</span>
+  <span>minio</span>
+  <span>digitalocean-spaces</span>
+  <span>backblaze-b2</span>
+  <span>wasabi</span>
+  <span>scaleway</span>
+  <span>ovhcloud</span>
+  <span>hetzner</span>
+  <span>tigris</span>
+  <span>storj</span>
+  <span>filebase</span>
+  <span>akamai</span>
+  <span>idrive-e2</span>
+  <span>vultr</span>
+  <span>ibm-cos</span>
+  <span>oracle-cloud</span>
+  <span>exoscale</span>
+  <span>uploadthing</span>
+  <span>dropbox</span>
+  <span>box</span>
+  <span>google-drive</span>
+  <span>onedrive</span>
+  <span>sharepoint</span>
+  <span>appwrite</span>
+  <span>cloudinary</span>
+  <span>fs</span>
+  <span>ftp</span>
+  <span>sftp</span>
+</div>
+
+Common short flags cover the obvious fields (`--bucket`, `--region`, `--endpoint`, `--root`, `--container`, `--token`, etc.). For the long tail, `--config-json '{...}'` accepts the raw adapter options blob — anything the SDK factory accepts, the CLI can pass through.

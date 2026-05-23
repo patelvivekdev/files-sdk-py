@@ -10,6 +10,7 @@ const Layout = ({ children }: { children: ReactNode }) => (
       className: "sm:bg-transparent! border-r! xl:border-r-0!",
       collapsible: false,
     }}
+    tabMode="navbar"
     tree={source.pageTree}
     {...baseOptions}
     nav={{
