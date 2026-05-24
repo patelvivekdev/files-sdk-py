@@ -1051,7 +1051,12 @@ export class Files<A extends Adapter = Adapter> {
 
     if (isStream) {
       const tracked = countingStream(body, (loaded) =>
-        onProgress(total === undefined ? { loaded } : { loaded, total })
+        // `onProgress` is fire-and-forget: route it through `emitHook` so a
+        // throwing reporter can't error the stream and fail the upload.
+        emitHook(
+          onProgress,
+          total === undefined ? { loaded } : { loaded, total }
+        )
       );
       return this.#run(
         rest,
@@ -1064,7 +1069,14 @@ export class Files<A extends Adapter = Adapter> {
       );
     }
 
-    onProgress(total === undefined ? { loaded: 0 } : { loaded: 0, total });
+    // `emitHook` swallows a throw from `onProgress` — a buffered upload's final
+    // report runs inside the retryable attempt below, so an unguarded throw
+    // there would be caught by `#run` and wrongly retried as a provider error,
+    // re-uploading the body. See the fire-and-forget contract on `FilesHooks`.
+    emitHook(
+      onProgress,
+      total === undefined ? { loaded: 0 } : { loaded: 0, total }
+    );
     return this.#run(
       rest,
       async (attemptOpts) => {
@@ -1072,7 +1084,7 @@ export class Files<A extends Adapter = Adapter> {
           await this.#adapter.upload(path, body, attemptOpts)
         );
         const done = total ?? result.size;
-        onProgress({ loaded: done, total: done });
+        emitHook(onProgress, { loaded: done, total: done });
         return result;
       },
       true,
