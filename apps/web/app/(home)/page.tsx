@@ -27,7 +27,7 @@ const Home = () => {
               <h2 className="mt-3 max-w-[30ch] text-4xl font-medium tracking-tight text-balance text-foreground sm:text-5xl">
                 The exact same code. Any backend.
               </h2>
-              <p className="mt-5 max-w-[60ch] text-lg leading-relaxed text-pretty text-muted-foreground">
+              <p className="mt-5 max-w-[60ch] text-base leading-relaxed text-pretty text-muted-foreground sm:text-lg">
                 Switch the adapter, keep every call site. Here's the same
                 upload, download, head, list, and delete sequence across five
                 providers.

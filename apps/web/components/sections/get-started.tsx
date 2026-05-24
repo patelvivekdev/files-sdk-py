@@ -31,13 +31,13 @@ export const GetStarted = () => (
         <h2 className="mt-3 max-w-[30ch] text-4xl font-medium tracking-tight text-balance text-foreground sm:text-5xl">
           Your first upload in under a minute.
         </h2>
-        <p className="mt-5 max-w-[48ch] text-lg leading-relaxed text-pretty text-muted-foreground">
+        <p className="mt-5 max-w-[48ch] text-base leading-relaxed text-pretty text-muted-foreground sm:text-lg">
           Install files-sdk and your provider's native client, then construct
           one Files instance and start calling it.
         </p>
       </div>
       <div className="mt-14 grid gap-12 lg:grid-cols-2">
-        <div className="flex flex-col gap-3">
+        <div className="flex min-w-0 flex-col gap-3">
           <h3 className="font-mono text-xs text-muted-foreground">
             1. Install
           </h3>
@@ -60,7 +60,7 @@ export const GetStarted = () => (
             only the ones you actually use.
           </p>
         </div>
-        <div className="flex flex-col gap-3">
+        <div className="flex min-w-0 flex-col gap-3">
           <h3 className="font-mono text-xs text-muted-foreground">
             2. Make your first call
           </h3>

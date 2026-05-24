@@ -46,7 +46,7 @@ export const Hero = ({ adapterCount, latestVersion }: HeroProps) => (
       </motion.div>
 
       <motion.h1
-        className="mt-8 max-w-[18ch] text-5xl font-medium tracking-tight text-balance text-foreground sm:text-7xl lg:text-8xl"
+        className="mt-8 max-w-[18ch] text-[2.5rem]/[1.05] font-medium tracking-tight text-balance text-foreground sm:text-7xl lg:text-8xl"
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.08, duration: 0.7, ease: EASE }}
@@ -55,7 +55,7 @@ export const Hero = ({ adapterCount, latestVersion }: HeroProps) => (
       </motion.h1>
 
       <motion.p
-        className="mt-7 max-w-[56ch] text-lg leading-relaxed text-pretty text-muted-foreground sm:text-xl"
+        className="mt-7 max-w-[56ch] text-base leading-relaxed text-pretty text-muted-foreground sm:text-xl"
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.18, duration: 0.6, ease: EASE }}
@@ -88,11 +88,11 @@ export const Hero = ({ adapterCount, latestVersion }: HeroProps) => (
       transition={{ delay: 0.4, duration: 0.7, ease: EASE }}
     >
       <div className="overflow-x-clip py-2 [-webkit-mask-image:linear-gradient(to_right,transparent,#000_10%,#000_90%,transparent)] [mask-image:linear-gradient(to_right,transparent,#000_10%,#000_90%,transparent)]">
-        <div className="flex w-max animate-[marquee_40s_linear_infinite] items-center gap-10">
+        <div className="flex w-max animate-[marquee_40s_linear_infinite] items-center gap-7 sm:gap-10">
           {marqueeList.map(([name, Icon], i) => (
             <Icon
               key={`${name}-${i}`}
-              className="size-14 shrink-0 rounded transition-transform duration-200 hover:-translate-y-1"
+              className="size-10 shrink-0 rounded transition-transform duration-200 hover:-translate-y-1 sm:size-14"
             />
           ))}
         </div>

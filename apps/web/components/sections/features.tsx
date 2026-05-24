@@ -35,7 +35,7 @@ export const Features = () => (
         <h2 className="mt-3 max-w-[30ch] text-4xl font-medium tracking-tight text-balance text-foreground sm:text-5xl">
           The slice that's the same everywhere.
         </h2>
-        <p className="mt-5 max-w-[60ch] text-lg leading-relaxed text-pretty text-muted-foreground">
+        <p className="mt-5 max-w-[60ch] text-base leading-relaxed text-pretty text-muted-foreground sm:text-lg">
           Object storage SDKs are all subtly different. files-sdk exposes the
           common slice behind a single class, and gets out of the way for
           anything provider-specific.
