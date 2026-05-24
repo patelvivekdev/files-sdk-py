@@ -831,6 +831,18 @@ export const PROVIDERS = {
     peerDeps: AWS_S3_PEERS,
     slug: "idrive-e2",
   },
+  memory: {
+    description:
+      "In-memory store backed by a Map - the test/reference adapter. Zero dependencies, isomorphic (no node:fs), and non-persistent: everything is lost when the process exits. Ideal for unit tests; not for production.",
+    env: {
+      config: ["initial (optional seed of key -> body)"],
+      notes:
+        "No credentials and no configuration required — `memory()` constructs an empty store. Pass `initial` to pre-populate fixtures.",
+    },
+    name: "In-Memory",
+    peerDeps: [],
+    slug: "memory",
+  },
   minio: {
     description:
       "MinIO and other self-hosted S3-compatible servers. Path-style addressing on by default; region defaulted; errors relabelled.",

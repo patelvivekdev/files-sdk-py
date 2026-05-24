@@ -146,6 +146,10 @@
       "types": "./dist/supabase/index.d.ts",
       "import": "./dist/supabase/index.js"
     },
+    "./memory": {
+      "types": "./dist/memory/index.d.ts",
+      "import": "./dist/memory/index.js"
+    },
     "./fs": {
       "types": "./dist/fs/index.d.ts",
       "import": "./dist/fs/index.js"

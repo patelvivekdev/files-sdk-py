@@ -1,0 +1,481 @@
+import { describe, expect, test } from "bun:test";
+
+import { Files, FilesError } from "../src/index.js";
+import { memory } from "../src/memory/index.js";
+
+type Adapter = ReturnType<typeof memory>;
+
+const drainStream = async (
+  stream: ReadableStream<Uint8Array>
+): Promise<Uint8Array> => {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    if (value) {
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    out.set(c, offset);
+    offset += c.byteLength;
+  }
+  return out;
+};
+
+const streamOf = (bytes: Uint8Array): ReadableStream<Uint8Array> =>
+  new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+
+// Helpers that break the download+accessor chain into two statements, so we
+// never access a member directly off an `await` expression.
+const textOf = async (adapter: Adapter, key: string): Promise<string> => {
+  const file = await adapter.download(key);
+  return file.text();
+};
+
+const bytesOf = async (adapter: Adapter, key: string): Promise<Uint8Array> => {
+  const file = await adapter.download(key);
+  return new Uint8Array(await file.arrayBuffer());
+};
+
+const seedKeys = async (adapter: Adapter, keys: string[]): Promise<void> => {
+  for (const key of keys) {
+    await adapter.upload(key, key);
+  }
+};
+
+describe("memory adapter", () => {
+  describe("construction", () => {
+    test("exposes name and the backing Map as raw", () => {
+      const adapter = memory();
+      expect(adapter.name).toBe("memory");
+      expect(adapter.raw).toBeInstanceOf(Map);
+      expect(adapter.raw.size).toBe(0);
+    });
+
+    test("starts empty with no options", async () => {
+      const adapter = memory();
+      const { items } = await adapter.list();
+      expect(items).toEqual([]);
+    });
+
+    describe("initial seed", () => {
+      test("seeds string and byte bodies", async () => {
+        const adapter = memory({
+          initial: {
+            "bytes.bin": new Uint8Array([1, 2, 3]),
+            "text.txt": "hi",
+          },
+        });
+        expect(adapter.raw.size).toBe(2);
+        const text = await adapter.download("text.txt");
+        expect(await text.text()).toBe("hi");
+        expect(text.type).toBe("text/plain; charset=utf-8");
+        const bin = await adapter.download("bytes.bin");
+        expect(await bytesOf(adapter, "bytes.bin")).toEqual(
+          new Uint8Array([1, 2, 3])
+        );
+        expect(bin.type).toBe("application/octet-stream");
+      });
+
+      test("seeds ArrayBuffer and ArrayBufferView bodies", async () => {
+        // A view that is not a Uint8Array exercises the else-branch.
+        const { buffer } = new Uint8Array([9, 8, 7]);
+        const view = new Int8Array([1, 2]);
+        const adapter = memory({
+          initial: { "buf.bin": buffer, "view.bin": view },
+        });
+        expect(await bytesOf(adapter, "buf.bin")).toEqual(
+          new Uint8Array([9, 8, 7])
+        );
+        expect(await bytesOf(adapter, "view.bin")).toEqual(
+          new Uint8Array([1, 2])
+        );
+      });
+
+      test("seeds the object form with contentType / metadata / cacheControl", async () => {
+        const adapter = memory({
+          initial: {
+            "report.csv": {
+              body: "a,b\n1,2",
+              cacheControl: "max-age=60",
+              contentType: "text/csv",
+              metadata: { owner: "alice" },
+            },
+          },
+        });
+        const head = await adapter.head("report.csv");
+        expect(head.type).toBe("text/csv");
+        expect(head.metadata).toEqual({ owner: "alice" });
+        expect(adapter.raw.get("report.csv")?.cacheControl).toBe("max-age=60");
+      });
+
+      test("copies seed bytes in (later mutation does not leak)", async () => {
+        const bytes = new Uint8Array([1, 2, 3]);
+        const adapter = memory({ initial: { "k.bin": bytes } });
+        bytes[0] = 99;
+        expect(await bytesOf(adapter, "k.bin")).toEqual(
+          new Uint8Array([1, 2, 3])
+        );
+      });
+    });
+  });
+
+  describe("upload", () => {
+    test("string body infers text/plain and round-trips", async () => {
+      const adapter = memory();
+      const res = await adapter.upload("a.txt", "hello");
+      expect(res.key).toBe("a.txt");
+      expect(res.size).toBe(5);
+      expect(res.contentType).toBe("text/plain; charset=utf-8");
+      expect(res.etag).toMatch(/^"[0-9a-f]{8}"$/u);
+      expect(await textOf(adapter, "a.txt")).toBe("hello");
+    });
+
+    test("explicit contentType wins over inference", async () => {
+      const adapter = memory();
+      const res = await adapter.upload("a.json", "{}", {
+        contentType: "application/json",
+      });
+      expect(res.contentType).toBe("application/json");
+    });
+
+    test("Uint8Array body falls back to octet-stream", async () => {
+      const adapter = memory();
+      const res = await adapter.upload("a.bin", new Uint8Array([1, 2, 3, 4]));
+      expect(res.size).toBe(4);
+      expect(res.contentType).toBe("application/octet-stream");
+    });
+
+    test("ArrayBuffer body", async () => {
+      const adapter = memory();
+      const { buffer } = new Uint8Array([5, 6]);
+      await adapter.upload("a.bin", buffer);
+      expect(await bytesOf(adapter, "a.bin")).toEqual(new Uint8Array([5, 6]));
+    });
+
+    test("ArrayBufferView (non-Uint8Array) body", async () => {
+      const adapter = memory();
+      await adapter.upload("a.bin", new Int16Array([1, 2]));
+      const stored = await bytesOf(adapter, "a.bin");
+      expect(new Int16Array(stored.buffer)).toEqual(new Int16Array([1, 2]));
+    });
+
+    test("Blob body infers its type", async () => {
+      const adapter = memory();
+      await adapter.upload("a.txt", new Blob(["hey"], { type: "text/x-test" }));
+      const head = await adapter.head("a.txt");
+      expect(head.type).toBe("text/x-test");
+      expect(head.size).toBe(3);
+    });
+
+    test("typeless Blob falls back to octet-stream", async () => {
+      const adapter = memory();
+      await adapter.upload("a.bin", new Blob(["x"]));
+      const head = await adapter.head("a.bin");
+      expect(head.type).toBe("application/octet-stream");
+    });
+
+    test("ReadableStream body is drained", async () => {
+      const adapter = memory();
+      await adapter.upload("a.bin", streamOf(new Uint8Array([1, 2, 3])));
+      expect(await bytesOf(adapter, "a.bin")).toEqual(
+        new Uint8Array([1, 2, 3])
+      );
+    });
+
+    test("stores metadata and cacheControl", async () => {
+      const adapter = memory();
+      await adapter.upload("a.txt", "x", {
+        cacheControl: "no-cache",
+        metadata: { k: "v" },
+      });
+      const head = await adapter.head("a.txt");
+      expect(head.metadata).toEqual({ k: "v" });
+      expect(adapter.raw.get("a.txt")?.cacheControl).toBe("no-cache");
+    });
+
+    test("copies the body in (later mutation does not leak)", async () => {
+      const adapter = memory();
+      const bytes = new Uint8Array([1, 2, 3]);
+      await adapter.upload("a.bin", bytes);
+      bytes[0] = 42;
+      expect(await bytesOf(adapter, "a.bin")).toEqual(
+        new Uint8Array([1, 2, 3])
+      );
+    });
+
+    test("overwrites an existing key", async () => {
+      const adapter = memory();
+      await adapter.upload("a.txt", "one");
+      await adapter.upload("a.txt", "two");
+      expect(await textOf(adapter, "a.txt")).toBe("two");
+      expect(adapter.raw.size).toBe(1);
+    });
+  });
+
+  describe("etag", () => {
+    test("identical content yields the same etag", async () => {
+      const adapter = memory();
+      const a = await adapter.upload("a", "same");
+      const b = await adapter.upload("b", "same");
+      expect(a.etag).toBe(b.etag);
+    });
+
+    test("different content yields a different etag", async () => {
+      const adapter = memory();
+      const a = await adapter.upload("a", "one");
+      const b = await adapter.upload("b", "two");
+      expect(a.etag).not.toBe(b.etag);
+    });
+  });
+
+  describe("download", () => {
+    test("missing key throws NotFound", async () => {
+      const adapter = memory();
+      await expect(adapter.download("nope")).rejects.toMatchObject({
+        code: "NotFound",
+      });
+    });
+
+    test("as: stream still works (buffer-backed)", async () => {
+      const adapter = memory();
+      await adapter.upload("a.bin", new Uint8Array([7, 8, 9]));
+      const file = await adapter.download("a.bin", { as: "stream" });
+      expect(await drainStream(file.stream())).toEqual(
+        new Uint8Array([7, 8, 9])
+      );
+    });
+
+    test("exposes blob()", async () => {
+      const adapter = memory();
+      await adapter.upload("a.txt", "blobby", { contentType: "text/plain" });
+      const file = await adapter.download("a.txt");
+      const blob = await file.blob();
+      expect(await blob.text()).toBe("blobby");
+      expect(blob.type).toContain("text/plain");
+    });
+  });
+
+  describe("head", () => {
+    test("returns metadata without consuming the body", async () => {
+      const adapter = memory();
+      await adapter.upload("a.txt", "hello");
+      const head = await adapter.head("a.txt");
+      expect(head.key).toBe("a.txt");
+      expect(head.size).toBe(5);
+      expect(head.etag).toMatch(/^"[0-9a-f]{8}"$/u);
+    });
+
+    test("missing key throws NotFound", async () => {
+      const adapter = memory();
+      await expect(adapter.head("nope")).rejects.toMatchObject({
+        code: "NotFound",
+      });
+    });
+  });
+
+  describe("exists", () => {
+    test("true when present, false when absent", async () => {
+      const adapter = memory();
+      await adapter.upload("a.txt", "x");
+      expect(await adapter.exists("a.txt")).toBe(true);
+      expect(await adapter.exists("nope")).toBe(false);
+    });
+  });
+
+  describe("delete", () => {
+    test("removes a key", async () => {
+      const adapter = memory();
+      await adapter.upload("a.txt", "x");
+      await adapter.delete("a.txt");
+      expect(await adapter.exists("a.txt")).toBe(false);
+    });
+
+    test("is idempotent for a missing key", async () => {
+      const adapter = memory();
+      await expect(adapter.delete("nope")).resolves.toBeUndefined();
+    });
+  });
+
+  describe("copy", () => {
+    test("duplicates content, contentType, and metadata", async () => {
+      const adapter = memory();
+      await adapter.upload("a.txt", "hello", {
+        contentType: "text/plain",
+        metadata: { k: "v" },
+      });
+      await adapter.copy("a.txt", "b.txt");
+      const copy = await adapter.head("b.txt");
+      expect(await textOf(adapter, "b.txt")).toBe("hello");
+      expect(copy.type).toBe("text/plain");
+      expect(copy.metadata).toEqual({ k: "v" });
+      // Source still present.
+      expect(await adapter.exists("a.txt")).toBe(true);
+    });
+
+    test("content-derived etag matches the source", async () => {
+      const adapter = memory();
+      const src = await adapter.upload("a.txt", "hello");
+      await adapter.copy("a.txt", "b.txt");
+      const copy = await adapter.head("b.txt");
+      expect(copy.etag).toBe(src.etag);
+    });
+
+    test("missing source throws NotFound", async () => {
+      const adapter = memory();
+      await expect(adapter.copy("nope", "b.txt")).rejects.toMatchObject({
+        code: "NotFound",
+      });
+    });
+  });
+
+  describe("move", () => {
+    test("re-keys, removing the source and preserving lastModified", async () => {
+      const adapter = memory();
+      await adapter.upload("a.txt", "hello");
+      const before = adapter.raw.get("a.txt")?.lastModified;
+      await adapter.move("a.txt", "b.txt");
+      expect(await adapter.exists("a.txt")).toBe(false);
+      expect(await textOf(adapter, "b.txt")).toBe("hello");
+      expect(adapter.raw.get("b.txt")?.lastModified).toBe(before);
+    });
+
+    test("missing source throws NotFound", async () => {
+      const adapter = memory();
+      await expect(adapter.move("nope", "b.txt")).rejects.toMatchObject({
+        code: "NotFound",
+      });
+    });
+  });
+
+  describe("list", () => {
+    test("returns all keys sorted, no cursor when complete", async () => {
+      const adapter = memory();
+      await seedKeys(adapter, ["a", "b", "c", "d", "e"]);
+      const { items, cursor } = await adapter.list();
+      expect(items.map((i) => i.key)).toEqual(["a", "b", "c", "d", "e"]);
+      expect(cursor).toBeUndefined();
+    });
+
+    test("filters by prefix", async () => {
+      const adapter = memory();
+      await adapter.upload("docs/1", "1");
+      await adapter.upload("docs/2", "2");
+      await adapter.upload("img/1", "x");
+      const { items } = await adapter.list({ prefix: "docs/" });
+      expect(items.map((i) => i.key)).toEqual(["docs/1", "docs/2"]);
+    });
+
+    test("paginates with limit and cursor", async () => {
+      const adapter = memory();
+      await seedKeys(adapter, ["a", "b", "c", "d", "e"]);
+      const page1 = await adapter.list({ limit: 2 });
+      expect(page1.items.map((i) => i.key)).toEqual(["a", "b"]);
+      expect(page1.cursor).toBe("b");
+      const page2 = await adapter.list({ cursor: page1.cursor, limit: 2 });
+      expect(page2.items.map((i) => i.key)).toEqual(["c", "d"]);
+      expect(page2.cursor).toBe("d");
+      const page3 = await adapter.list({ cursor: page2.cursor, limit: 2 });
+      expect(page3.items.map((i) => i.key)).toEqual(["e"]);
+      expect(page3.cursor).toBeUndefined();
+    });
+
+    test("a cursor past the last key returns nothing", async () => {
+      const adapter = memory();
+      await seedKeys(adapter, ["a", "b", "c", "d", "e"]);
+      const { items, cursor } = await adapter.list({ cursor: "z" });
+      expect(items).toEqual([]);
+      expect(cursor).toBeUndefined();
+    });
+  });
+
+  describe("url", () => {
+    test("returns an opaque memory:// URL for an existing key", async () => {
+      const adapter = memory();
+      await adapter.upload("a.txt", "x");
+      expect(await adapter.url("a.txt")).toBe("memory://a.txt");
+    });
+
+    test("missing key throws NotFound", async () => {
+      const adapter = memory();
+      await expect(adapter.url("nope")).rejects.toMatchObject({
+        code: "NotFound",
+      });
+    });
+
+    test("reflects expiresIn and responseContentDisposition when passed", async () => {
+      const adapter = memory();
+      await adapter.upload("a.txt", "x");
+      expect(await adapter.url("a.txt", { expiresIn: 60 })).toBe(
+        "memory://a.txt?expires=60"
+      );
+      const withDisposition = await adapter.url("a.txt", {
+        responseContentDisposition: "attachment",
+      });
+      expect(withDisposition).toBe(
+        "memory://a.txt?response-content-disposition=attachment"
+      );
+    });
+  });
+
+  describe("signedUploadUrl", () => {
+    test("returns a placeholder PUT target with the requested expiry", async () => {
+      const adapter = memory();
+      const signed = await adapter.signedUploadUrl("a.txt", { expiresIn: 120 });
+      expect(signed).toEqual({
+        headers: {},
+        method: "PUT",
+        url: "memory://a.txt?expires=120",
+      });
+    });
+
+    test("binds Content-Type when provided", async () => {
+      const adapter = memory();
+      const signed = await adapter.signedUploadUrl("a.txt", {
+        contentType: "text/plain",
+        expiresIn: 60,
+      });
+      expect(signed.method).toBe("PUT");
+      if (signed.method === "PUT") {
+        expect(signed.headers).toEqual({ "Content-Type": "text/plain" });
+      }
+    });
+
+    test("does not require the key to exist", async () => {
+      const adapter = memory();
+      await expect(
+        adapter.signedUploadUrl("not-yet.txt", { expiresIn: 60 })
+      ).resolves.toMatchObject({ method: "PUT" });
+    });
+  });
+
+  describe("through the Files wrapper", () => {
+    test("round-trips with a prefix", async () => {
+      const adapter = memory();
+      const files = new Files({ adapter, prefix: "tenant-1" });
+      await files.upload("a.txt", "hello");
+      const file = await files.download("a.txt");
+      expect(await file.text()).toBe("hello");
+      // The prefix is applied to the underlying key.
+      expect(adapter.raw.has("tenant-1/a.txt")).toBe(true);
+    });
+
+    test("FilesError from a missing key propagates", async () => {
+      const files = new Files({ adapter: memory() });
+      await expect(files.download("nope")).rejects.toBeInstanceOf(FilesError);
+    });
+  });
+});

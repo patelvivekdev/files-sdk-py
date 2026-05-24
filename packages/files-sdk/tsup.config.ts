@@ -35,6 +35,7 @@ export default defineConfig({
     "src/google-drive/index.ts",
     "src/azure/index.ts",
     "src/supabase/index.ts",
+    "src/memory/index.ts",
     "src/fs/index.ts",
     "src/ftp/index.ts",
     "src/sftp/index.ts",

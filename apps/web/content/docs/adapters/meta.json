@@ -3,6 +3,7 @@
   "title": "Adapters",
   "pages": [
     "---System Adapters---",
+    "memory",
     "fs",
     "ftp",
     "sftp",

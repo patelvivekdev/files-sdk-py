@@ -560,9 +560,12 @@ export const PROVIDERS: Record<string, ProviderRegistration> = {
  * `Bun.S3Client` doesn't exist — Node users reach for the `s3` provider
  * instead. `convex` is constructed from a live in-function context
  * (`ctx.storage`) that only exists inside a running Convex function, so it
- * can't be built from CLI config/env. The `providers.test.ts` drift guard
- * treats these as the only allowed gaps between the catalog and this registry.
+ * can't be built from CLI config/env. `memory` is process-local and
+ * non-persistent — each `files` invocation is a fresh process with an empty
+ * store, so a CLI command could only ever see what it just wrote in the same
+ * run, which is useless. The `providers.test.ts` drift guard treats these as
+ * the only allowed gaps between the catalog and this registry.
  */
-export const CLI_EXCLUDED_PROVIDERS = new Set(["bun-s3", "convex"]);
+export const CLI_EXCLUDED_PROVIDERS = new Set(["bun-s3", "convex", "memory"]);
 
 export const PROVIDER_NAMES = Object.keys(PROVIDERS).toSorted();
