@@ -363,6 +363,53 @@ describe("memory adapter", () => {
     });
   });
 
+  describe("metadata isolation", () => {
+    test("upload copies the caller's metadata object in", async () => {
+      const adapter = memory();
+      const meta = { k: "v" };
+      await adapter.upload("a.txt", "hello", { metadata: meta });
+      // Mutating the object the caller handed us must not reach the store.
+      meta.k = "mutated";
+      const head = await adapter.head("a.txt");
+      expect(head.metadata).toEqual({ k: "v" });
+    });
+
+    test("head returns a metadata copy that cannot mutate the store", async () => {
+      const adapter = memory();
+      await adapter.upload("a.txt", "hello", { metadata: { k: "v" } });
+      const head = await adapter.head("a.txt");
+      if (head.metadata) {
+        head.metadata.k = "mutated";
+      }
+      const again = await adapter.head("a.txt");
+      expect(again.metadata).toEqual({ k: "v" });
+    });
+
+    test("copy gives the destination an independent metadata object", async () => {
+      const adapter = memory();
+      await adapter.upload("a.txt", "hello", { metadata: { k: "v" } });
+      await adapter.copy("a.txt", "b.txt");
+      const source = adapter.raw.get("a.txt");
+      const dest = adapter.raw.get("b.txt");
+      // Distinct objects with equal contents — mutating one can't reach the other.
+      expect(dest?.metadata).not.toBe(source?.metadata);
+      if (dest?.metadata) {
+        dest.metadata.k = "changed";
+      }
+      expect(source?.metadata).toEqual({ k: "v" });
+    });
+
+    test("initial seed copies the metadata object in", async () => {
+      const meta = { owner: "alice" };
+      const adapter = memory({
+        initial: { "a.txt": { body: "hi", metadata: meta } },
+      });
+      meta.owner = "bob";
+      const head = await adapter.head("a.txt");
+      expect(head.metadata).toEqual({ owner: "alice" });
+    });
+  });
+
   describe("move", () => {
     test("re-keys, removing the source and preserving lastModified", async () => {
       const adapter = memory();

@@ -169,10 +169,12 @@ const defer = <T>(fn: () => T): Promise<T> => {
 export const memory = (opts?: MemoryAdapterOptions): MemoryAdapter => {
   const store = new Map<string, MemoryEntry>();
 
-  // Copy the body in so a later mutation of the caller's buffer can't reach
-  // into the store (and vice-versa on read) — value semantics, like a real
-  // backend that owns its own bytes. `new Uint8Array(src)` clones into a fresh
-  // buffer regardless of the source's shape.
+  // Copy the body and metadata in so a later mutation of the caller's buffer or
+  // metadata object can't reach into the store (and vice-versa on read) — value
+  // semantics, like a real backend that owns its own bytes. `new Uint8Array(src)`
+  // clones the buffer; metadata is shallow-cloned (its values are strings, so a
+  // shallow copy is enough). Without the clone, `copy()` would alias the source's
+  // metadata onto the destination.
   const put = (
     key: string,
     bytes: Uint8Array,
@@ -185,7 +187,7 @@ export const memory = (opts?: MemoryAdapterOptions): MemoryAdapter => {
       contentType,
       etag: contentEtag(copy),
       lastModified: Date.now(),
-      ...(meta?.metadata && { metadata: meta.metadata }),
+      ...(meta?.metadata && { metadata: { ...meta.metadata } }),
       ...(meta?.cacheControl && { cacheControl: meta.cacheControl }),
     };
     store.set(key, entry);
@@ -211,7 +213,9 @@ export const memory = (opts?: MemoryAdapterOptions): MemoryAdapter => {
         etag: entry.etag,
         key,
         lastModified: entry.lastModified,
-        ...(entry.metadata && { metadata: entry.metadata }),
+        // Clone on the way out too, so a caller mutating the returned
+        // StoredFile's metadata can't reach back into the stored entry.
+        ...(entry.metadata && { metadata: { ...entry.metadata } }),
         size: entry.bytes.byteLength,
         type: entry.contentType,
       },
@@ -261,7 +265,8 @@ export const memory = (opts?: MemoryAdapterOptions): MemoryAdapter => {
             etag: entry.etag,
             key,
             lastModified: entry.lastModified,
-            ...(entry.metadata && { metadata: entry.metadata }),
+            // Cloned out, same as toStored — see the note there.
+            ...(entry.metadata && { metadata: { ...entry.metadata } }),
             size: sliced.byteLength,
             type: entry.contentType,
           },
