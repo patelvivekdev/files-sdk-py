@@ -65,6 +65,9 @@ const ADAPTERS = [
   { key: "ut", label: "UploadThing", parent: "UploadThing" },
   { key: "cloudinary", label: "Cloudinary", parent: "Cloudinary" },
   { key: "fs", label: "Filesystem", parent: "Filesystem" },
+  { key: "memory", label: "In-Memory", parent: "In-Memory" },
+  { key: "ftp", label: "FTP", parent: "FTP" },
+  { key: "sftp", label: "SFTP", parent: "SFTP" },
   { key: "appwrite", label: "Appwrite", parent: "Appwrite" },
   {
     key: "firebase-storage",
@@ -120,11 +123,15 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       filebase: ok,
       "firebase-storage": ok,
       fs: ok,
+      ftp: warn(
+        "User `metadata` and `cacheControl` throw - FTP files have no arbitrary-metadata or cache-header field. `contentType` is accepted for the return value but not stored (it's inferred from the key's extension on read). Stream bodies upload directly. Node-only (raw sockets)."
+      ),
       gcs: ok,
       "google-drive": ok,
       hetzner: ok,
       "ibm-cos": ok,
       "idrive-e2": ok,
+      memory: ok,
       minio: ok,
       nb: warn(
         "Stream bodies are buffered up-front - Netlify's `set()` has no streaming form, so streaming uploads can't avoid materializing the body in memory."
@@ -142,6 +149,9 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       "r2-hybrid": ok,
       s3: ok,
       scaleway: ok,
+      sftp: warn(
+        "User `metadata` and `cacheControl` throw - SFTP files have no arbitrary-metadata or cache-header field. `contentType` is accepted for the return value but not stored (it's inferred from the key's extension on read). Stream bodies upload directly. Node-only (raw sockets)."
+      ),
       sharepoint: warn(
         "Delegates to `onedrive` after site/library resolution: single-PUT simple upload capped at OneDrive's 250 MB simple-upload limit. Bodies above the cap throw - use `signedUploadUrl()` for chunked. User `metadata` and `cacheControl` throw - Graph drive items have no native arbitrary-metadata field; use `raw` to set Open Extensions if you need them."
       ),
@@ -184,11 +194,13 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       filebase: ok,
       "firebase-storage": ok,
       fs: ok,
+      ftp: ok,
       gcs: ok,
       "google-drive": ok,
       hetzner: ok,
       "ibm-cos": ok,
       "idrive-e2": ok,
+      memory: ok,
       minio: ok,
       nb: ok,
       onedrive: ok,
@@ -202,6 +214,7 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       "r2-hybrid": ok,
       s3: ok,
       scaleway: ok,
+      sftp: ok,
       sharepoint: ok,
       spaces: ok,
       storj: ok,
@@ -236,11 +249,13 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       filebase: ok,
       "firebase-storage": ok,
       fs: ok,
+      ftp: ok,
       gcs: ok,
       "google-drive": ok,
       hetzner: ok,
       "ibm-cos": ok,
       "idrive-e2": ok,
+      memory: ok,
       minio: ok,
       nb: ok,
       onedrive: ok,
@@ -252,6 +267,7 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       "r2-hybrid": ok,
       s3: ok,
       scaleway: ok,
+      sftp: ok,
       sharepoint: ok,
       spaces: ok,
       storj: ok,
@@ -294,6 +310,9 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       filebase: ok,
       "firebase-storage": ok,
       fs: ok,
+      ftp: warn(
+        "Walks the directory tree recursively on every call - FTP has no native prefix scan or pagination - and skips symlinks. `prefix`/`limit`/`cursor` are applied client-side over the full walk, so they're accurate but a large tree means a full traversal per call. Content type is inferred from each key's extension; `lastModified` comes from the listing."
+      ),
       gcs: ok,
       "google-drive": warn(
         "Drive has no native key field. The adapter scopes by parent folder and filters client-side to files carrying its `fsdkKey` appProperty - files written into the same folder out-of-band are excluded. `prefix` is filtered page-local and can under-return when the prefix isn't satisfied within a single page."
@@ -301,6 +320,7 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       hetzner: ok,
       "ibm-cos": ok,
       "idrive-e2": ok,
+      memory: ok,
       minio: ok,
       nb: warn(
         "Netlify's list response only carries key + etag - size, content type, and last-modified come from a follow-up `head()` per item, so list entries return `size: 0` and `type: 'application/octet-stream'` by default. The unified `cursor` is not honoured because Netlify's pagination cursor is internal to the SDK; the adapter iterates the SDK's paginated form and stops once `limit` is satisfied, so `limit` does bound server-side I/O."
@@ -318,6 +338,9 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       "r2-hybrid": ok,
       s3: ok,
       scaleway: ok,
+      sftp: warn(
+        "Walks the directory tree recursively on every call - SFTP has no native prefix scan or pagination - and skips symlinks. `prefix`/`limit`/`cursor` are applied client-side over the full walk, so they're accurate but a large tree means a full traversal per call. Content type is inferred from each key's extension; `size`/`lastModified` come from the listing."
+      ),
       sharepoint: warn(
         "Delegates to `onedrive`: returns immediate-children files only at `rootFolderPath` - no recursion, and subfolders are filtered out. `prefix` is filename-prefix only (matched client-side within the page). Pagination uses Graph's `@odata.nextLink` as the opaque cursor."
       ),
@@ -362,11 +385,15 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       filebase: ok,
       "firebase-storage": ok,
       fs: ok,
+      ftp: warn(
+        "FTP stores no content type, etag, or user metadata - `head()` infers the type from the key's extension (or `application/octet-stream`) and returns no etag. `size` comes from `SIZE`; `lastModified` is an `MDTM` probe that many servers don't support, so it can be absent."
+      ),
       gcs: ok,
       "google-drive": ok,
       hetzner: ok,
       "ibm-cos": ok,
       "idrive-e2": ok,
+      memory: ok,
       minio: ok,
       nb: warn(
         "Netlify Blobs has no native size, content-type, or last-modified - the adapter packs them into Netlify's metadata at upload time and reads them back via `getMetadata`. Blobs written outside the SDK come back with `size: 0` and `type: 'application/octet-stream'` because the embedded fields are absent."
@@ -382,6 +409,9 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       "r2-hybrid": ok,
       s3: ok,
       scaleway: ok,
+      sftp: warn(
+        "SFTP stores no content type, etag, or user metadata - `head()` infers the type from the key's extension (or `application/octet-stream`) and returns no etag. `size` and `lastModified` come from `stat`."
+      ),
       sharepoint: ok,
       spaces: ok,
       storj: ok,
@@ -418,6 +448,7 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       filebase: ok,
       "firebase-storage": ok,
       fs: ok,
+      ftp: ok,
       gcs: ok,
       "google-drive": warn(
         "Drive has no native key field. The adapter resolves by parent folder + `fsdkKey` appProperty, so files written into the same folder out-of-band return `false` even if a file with that name exists."
@@ -425,6 +456,7 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       hetzner: ok,
       "ibm-cos": ok,
       "idrive-e2": ok,
+      memory: ok,
       minio: ok,
       nb: ok,
       onedrive: ok,
@@ -436,6 +468,7 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       "r2-hybrid": ok,
       s3: ok,
       scaleway: ok,
+      sftp: ok,
       sharepoint: ok,
       spaces: ok,
       storj: ok,
@@ -482,11 +515,15 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       filebase: ok,
       "firebase-storage": ok,
       fs: ok,
+      ftp: warn(
+        "Read-then-write - FTP has no server-side copy, so the source is downloaded and re-uploaded over one connection. The whole object is buffered in memory; not atomic."
+      ),
       gcs: ok,
       "google-drive": ok,
       hetzner: ok,
       "ibm-cos": ok,
       "idrive-e2": ok,
+      memory: ok,
       minio: ok,
       nb: warn(
         "Read-then-write - Netlify Blobs has no server-side copy primitive, so the source is fetched and re-uploaded. Not server-side atomic; concurrent writes to the source between the get and put are not detected."
@@ -508,6 +545,9 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       ),
       s3: ok,
       scaleway: ok,
+      sftp: warn(
+        "Read-then-write - base SFTP has no portable server-side copy, so the source is downloaded and re-uploaded over one connection. The whole object is buffered in memory; not atomic."
+      ),
       sharepoint: warn(
         "Delegates to `onedrive`: async copy on Graph (`POST /items/{id}/copy` returns 202 + monitor URL). The adapter polls the monitor every 500 ms until status is `completed`/`failed`, capped by `copyTimeoutMs` (default 60_000). On timeout the call throws `Provider`; tune `copyTimeoutMs` for large files."
       ),
@@ -560,6 +600,9 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       fs: warn(
         "Returns a `file://` URL by default - fine for CLIs and tests, not browsers. With `urlBaseUrl` set, returns `<urlBaseUrl>/<key>` so a dev server (Next.js `/public` mount, `serve-static`, etc.) can deliver the body. `responseContentDisposition` requires `urlBaseUrl` - `file://` has no signature mechanism in which to bind the override."
       ),
+      ftp: no(
+        "Throws unless `publicBaseUrl` is set (an HTTP server fronting the same tree), in which case it returns `<publicBaseUrl>/<key>`. FTP serves no HTTP and has no signing primitive. `responseContentDisposition` also requires `publicBaseUrl`."
+      ),
       gcs: ok,
       "google-drive": warn(
         "Throws by default - Drive has no signed URL primitive. With `publicByDefault: true` at construction, `upload()` grants `anyone, reader` and `url()` returns the permanent Drive download URL (`expiresIn` ignored). `responseContentDisposition` always throws - Drive's download URL has no Content-Disposition override."
@@ -567,6 +610,9 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       hetzner: ok,
       "ibm-cos": ok,
       "idrive-e2": ok,
+      memory: warn(
+        "Returns an opaque, non-fetchable `memory://{key}` URL - there's no server backing the store. Throws `NotFound` for a missing key (the way a real fetch would 404). `expiresIn` and `responseContentDisposition` round-trip as query params so URL-building call sites stay testable, but nothing resolves the URL. For working dev URLs use the `fs` adapter with `urlBaseUrl`, or a real cloud adapter."
+      ),
       minio: ok,
       nb: no(
         "No URL primitive - Netlify Blobs has no public URL or signing endpoint; reads always go through the SDK with the token. Use `download()` instead, or proxy the body through your application."
@@ -586,6 +632,9 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       "r2-hybrid": ok,
       s3: ok,
       scaleway: ok,
+      sftp: no(
+        "Throws unless `publicBaseUrl` is set (an HTTP server fronting the same tree), in which case it returns `<publicBaseUrl>/<key>`. SFTP serves no HTTP and has no signing primitive. `responseContentDisposition` also requires `publicBaseUrl`."
+      ),
       sharepoint: warn(
         "Delegates to `onedrive`: throws by default - Graph has no signed URL primitive. With `publicByDefault: true` at construction, `upload()` calls `createLink` (anonymous-view scope) and `url()` returns the share link's `webUrl`. The link is permanent (`expiresIn` ignored) and `responseContentDisposition` always throws. Anonymous links are blocked on tenants where admins disable them."
       ),
@@ -646,6 +695,9 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       fs: warn(
         "Throws without `urlBaseUrl` - the fs adapter has no built-in upload server, so there's nothing to sign against. With `urlBaseUrl` set, returns a PUT URL with `?expires=`, `?content-type=`, and `?max-size=` query params for a dev upload-handler to validate. The fs adapter does not enforce the params itself."
       ),
+      ftp: no(
+        "Throws - FTP has no presigned-upload concept. Use `upload()`, or inject a pre-connected `client` for batch transfers."
+      ),
       gcs: ok,
       "google-drive": warn(
         "Initiates a Drive resumable session via `POST /upload/drive/v3/files?uploadType=resumable` and returns the session URL as a one-shot PUT. `maxSize` is forwarded as `X-Upload-Content-Length` but Drive does not enforce a server-side size cap - it's advisory. `minSize` is ignored. Throws when the adapter was constructed via the pre-built `client` escape hatch (no auth handle to mint access tokens)."
@@ -653,6 +705,9 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       hetzner: ok,
       "ibm-cos": ok,
       "idrive-e2": ok,
+      memory: warn(
+        "Returns an inert `memory://{key}` placeholder PUT target - there's no real upload endpoint, so a client can't actually PUT to it. `expiresIn` round-trips into the URL and `contentType` into the returned headers so the signing flow stays testable; `maxSize` and `minSize` are ignored. Use `upload()` to write bytes."
+      ),
       minio: ok,
       nb: no(
         "No presigned upload primitive - Netlify Blobs writes go through the SDK with the token. Upload server-side via the SDK or proxy uploads through your application."
@@ -672,6 +727,9 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       "r2-hybrid": ok,
       s3: ok,
       scaleway: ok,
+      sftp: no(
+        "Throws - SFTP has no presigned-upload concept. Use `upload()`, or inject a pre-connected `client` for batch transfers."
+      ),
       sharepoint: warn(
         "Delegates to `onedrive`: initiates a Graph upload session via `POST /createUploadSession` and returns the session URL as a one-shot PUT (the session URL is pre-authenticated by Graph itself). `maxSize` and `minSize` are advisory - Graph does not enforce a server-side `content-length-range` policy on upload sessions; clients can still chunk via `Content-Range` to the same URL."
       ),
