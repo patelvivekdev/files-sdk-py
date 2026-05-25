@@ -273,6 +273,16 @@ const wrap =
     }
   };
 
+const bulkBuilder = (args: unknown[], common: CommonRunOpts): CommonRunOpts => {
+  const [keys, opts] = args as [string[], Record<string, unknown>];
+  return {
+    ...common,
+    concurrency: opts.concurrency as number | undefined,
+    keys,
+    stopOnError: opts.stopOnError as boolean | undefined,
+  } as CommonRunOpts;
+};
+
 export const buildProgram = (): Command => {
   const program = new Command();
   program
@@ -393,19 +403,6 @@ export const buildProgram = (): Command => {
         } as CommonRunOpts;
       })
     );
-
-  const bulkBuilder = (
-    args: unknown[],
-    common: CommonRunOpts
-  ): CommonRunOpts => {
-    const [keys, opts] = args as [string[], Record<string, unknown>];
-    return {
-      ...common,
-      concurrency: opts.concurrency as number | undefined,
-      keys,
-      stopOnError: opts.stopOnError as boolean | undefined,
-    } as CommonRunOpts;
-  };
 
   program
     .command("head <keys...>")

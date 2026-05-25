@@ -106,6 +106,21 @@ mock.module("@vercel/blob", () => ({
 
 const { vercelBlob } = await import("../src/vercel-blob/index.js");
 
+interface AuthOpts {
+  token?: string;
+  oidcToken?: string;
+  storeId?: string;
+}
+
+const assertOidc = (opts: AuthOpts | undefined) => {
+  if (!opts) {
+    throw new Error("expected options to be passed");
+  }
+  expect(opts.token).toBeUndefined();
+  expect(opts.oidcToken).toBe("oidc-token");
+  expect(opts.storeId).toBe("abc123store");
+};
+
 const originalFetch = globalThis.fetch;
 
 beforeEach(() => {
@@ -902,12 +917,6 @@ describe("vercel-blob adapter", () => {
   });
 
   describe("OIDC mode", () => {
-    interface AuthOpts {
-      token?: string;
-      oidcToken?: string;
-      storeId?: string;
-    }
-
     test("constructs successfully with OIDC env vars and no read-write token", () => {
       delete process.env.BLOB_READ_WRITE_TOKEN;
       process.env.VERCEL_OIDC_TOKEN = "oidc-token";
@@ -1010,14 +1019,6 @@ describe("vercel-blob adapter", () => {
       await files.copy("a.txt", "b.txt");
       await files.list();
       await files.head("a.txt");
-      const assertOidc = (opts: AuthOpts | undefined) => {
-        if (!opts) {
-          throw new Error("expected options to be passed");
-        }
-        expect(opts.token).toBeUndefined();
-        expect(opts.oidcToken).toBe("oidc-token");
-        expect(opts.storeId).toBe("abc123store");
-      };
       assertOidc(delMock.mock.calls.at(-1)?.[1] as AuthOpts | undefined);
       assertOidc(copyMock.mock.calls.at(-1)?.[2] as AuthOpts | undefined);
       assertOidc(listMock.mock.calls.at(-1)?.[0] as AuthOpts | undefined);

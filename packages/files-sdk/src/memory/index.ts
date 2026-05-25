@@ -166,6 +166,21 @@ const defer = <T>(fn: () => T): Promise<T> => {
   }
 };
 
+const toStored = (key: string, entry: MemoryEntry): StoredFile =>
+  createStoredFile(
+    {
+      etag: entry.etag,
+      key,
+      lastModified: entry.lastModified,
+      // Clone on the way out too, so a caller mutating the returned
+      // StoredFile's metadata can't reach back into the stored entry.
+      ...(entry.metadata && { metadata: { ...entry.metadata } }),
+      size: entry.bytes.byteLength,
+      type: entry.contentType,
+    },
+    { data: entry.bytes, kind: "buffer" }
+  );
+
 export const memory = (opts?: MemoryAdapterOptions): MemoryAdapter => {
   const store = new Map<string, MemoryEntry>();
 
@@ -206,21 +221,6 @@ export const memory = (opts?: MemoryAdapterOptions): MemoryAdapter => {
       put(key, seedBytes(seed), inferContentType(seed));
     }
   }
-
-  const toStored = (key: string, entry: MemoryEntry): StoredFile =>
-    createStoredFile(
-      {
-        etag: entry.etag,
-        key,
-        lastModified: entry.lastModified,
-        // Clone on the way out too, so a caller mutating the returned
-        // StoredFile's metadata can't reach back into the stored entry.
-        ...(entry.metadata && { metadata: { ...entry.metadata } }),
-        size: entry.bytes.byteLength,
-        type: entry.contentType,
-      },
-      { data: entry.bytes, kind: "buffer" }
-    );
 
   const getOrThrow = (key: string): MemoryEntry => {
     const entry = store.get(key);

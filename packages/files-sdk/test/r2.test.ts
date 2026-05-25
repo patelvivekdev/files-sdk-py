@@ -15,6 +15,17 @@ import { mockClient } from "aws-sdk-client-mock";
 import { Files, FilesError } from "../src/index.js";
 import { r2 } from "../src/r2/index.js";
 
+const makeAdapter = () =>
+  r2({
+    accessKeyId: "K",
+    accountId: "ACCT",
+    bucket: "uploads",
+    secretAccessKey: "S",
+  });
+
+const streamBody = (text: string) =>
+  sdkStreamMixin(Readable.from(Buffer.from(text)));
+
 describe("r2 adapter — HTTP path", () => {
   test("uses S3-compatible endpoint with auto region and path-style", async () => {
     const adapter = r2({
@@ -126,17 +137,6 @@ describe("r2 adapter — HTTP path", () => {
     const s3Mock = mockClient(S3Client);
     beforeEach(() => s3Mock.reset());
     afterEach(() => s3Mock.reset());
-
-    const makeAdapter = () =>
-      r2({
-        accessKeyId: "K",
-        accountId: "ACCT",
-        bucket: "uploads",
-        secretAccessKey: "S",
-      });
-
-    const streamBody = (text: string) =>
-      sdkStreamMixin(Readable.from(Buffer.from(text)));
 
     test("copy issues a CopyObjectCommand against the inner s3 client", async () => {
       s3Mock.on(CopyObjectCommand).resolves({});

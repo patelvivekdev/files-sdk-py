@@ -66,7 +66,7 @@ export const Footer = () => (
             <p className="font-mono text-xs uppercase tracking-wide text-muted-foreground">
               Project
             </p>
-            <ul className="flex flex-col gap-2" role="list">
+            <ul className="flex flex-col gap-2">
               {PROJECT_LINKS.map(({ href, label }) => (
                 <li key={href}>
                   <FooterLink href={href}>{label}</FooterLink>
@@ -78,7 +78,7 @@ export const Footer = () => (
             <p className="font-mono text-xs uppercase tracking-wide text-muted-foreground">
               Resources
             </p>
-            <ul className="flex flex-col gap-2" role="list">
+            <ul className="flex flex-col gap-2">
               {RESOURCE_LINKS.map(({ external, href, label }) => (
                 <li key={href}>
                   <FooterLink external={external} href={href}>
