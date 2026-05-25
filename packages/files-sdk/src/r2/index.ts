@@ -237,6 +237,22 @@ const mapR2Error = (err: unknown): FilesError => {
   return new FilesError("Provider", message, err);
 };
 
+// R2 does not implement the S3 `POST Object` API, so it has no
+// `content-length-range` policy. The inner s3 adapter routes `maxSize`
+// through `createPresignedPost`, which yields a multipart/form-data POST
+// that R2 rejects with `501 Not Implemented`. Reject it up front with the
+// same honest-API stance Azure and Supabase take rather than hand back a
+// URL that fails at upload time. See
+// https://developers.cloudflare.com/r2/api/s3/api/ (no `POST Object`).
+const assertNoMaxSize = (signOpts: SignUploadOptions): void => {
+  if (signOpts.maxSize !== undefined) {
+    throw new FilesError(
+      "Provider",
+      "r2: `maxSize` is not supported. Cloudflare R2 does not implement the S3 POST Object API, so it has no server-enforced upload size limit equivalent to S3's content-length-range policy. Enforce the limit at your application gateway before issuing the URL, or omit `maxSize` and accept the unbounded presigned PUT."
+    );
+  }
+};
+
 const r2FromBinding = (opts: R2BindingOptions): R2Adapter => {
   const bucket = opts.binding;
   const { publicBaseUrl } = opts;
@@ -409,7 +425,10 @@ const r2FromBinding = (opts: R2BindingOptions): R2Adapter => {
       key,
       signOpts: SignUploadOptions
     ): Promise<SignedUpload> {
+      // getSigner() first: a binding without HTTP creds can't sign at all,
+      // which is the more fundamental thing to fix than `maxSize`.
       const signer = await getSigner();
+      assertNoMaxSize(signOpts);
       return signer.signedUploadUrl(key, signOpts);
     },
     supportsRange: true,
@@ -565,6 +584,9 @@ const r2FromHttp = (opts: R2HttpOptions): R2Adapter => {
     // byte-level progress via @aws-sdk/lib-storage when onProgress is set.
     reportsUploadProgress: true,
     async signedUploadUrl(key, signOpts) {
+      // Reject before loading the inner s3 adapter — `maxSize` is
+      // unsupported on R2 regardless of whether the import has resolved.
+      assertNoMaxSize(signOpts);
       const adapter = await ensure();
       return adapter.signedUploadUrl(key, signOpts);
     },

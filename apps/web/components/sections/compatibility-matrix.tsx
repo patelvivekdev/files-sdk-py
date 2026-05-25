@@ -723,8 +723,12 @@ const ROWS: { method: string; cells: Record<AdapterKey, Cell> }[] = [
       "r2-binding": no(
         "Workers bindings can't sign uploads - the secret access key is not available to the runtime. Use hybrid mode (binding + HTTP credentials) to issue presigned upload URLs."
       ),
-      "r2-http": ok,
-      "r2-hybrid": ok,
+      "r2-http": warn(
+        "PUT URL only - Cloudflare R2 doesn't implement the S3 POST Object API, so `maxSize` throws (no `content-length-range` policy; a presigned POST would 501 at upload time). Enforce upload caps at your application gateway instead."
+      ),
+      "r2-hybrid": warn(
+        "PUT URL only - signing routes through the HTTP signer. R2 doesn't implement the S3 POST Object API, so `maxSize` throws (no `content-length-range` policy; a presigned POST would 501 at upload time). Enforce upload caps at your application gateway instead."
+      ),
       s3: ok,
       scaleway: ok,
       sftp: no(

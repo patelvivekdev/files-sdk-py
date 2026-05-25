@@ -252,6 +252,20 @@ describe("r2 adapter — HTTP path", () => {
       }
     });
 
+    test("signedUploadUrl with maxSize throws — R2 has no POST policy", async () => {
+      // R2 doesn't implement the S3 POST Object API, so the inner s3
+      // adapter's content-length-range POST form would 501 at upload time.
+      // We reject up front instead. See issue #49.
+      const files = new Files({ adapter: makeAdapter() });
+      await expect(
+        files.signedUploadUrl("a.txt", {
+          contentType: "image/png",
+          expiresIn: 60,
+          maxSize: 5_000_000,
+        })
+      ).rejects.toThrow(/maxSize.*not supported/u);
+    });
+
     test("raw is undefined before any method runs and resolves to the inner S3Client after", async () => {
       const adapter = makeAdapter();
       // The inner s3 adapter is only built on first method call.
@@ -650,6 +664,22 @@ describe("r2 adapter — Workers binding path", () => {
     if (out.method === "PUT") {
       expect(out.url).toContain("X-Amz-Signature=");
     }
+  });
+
+  test("hybrid: signedUploadUrl with maxSize throws — R2 has no POST policy", async () => {
+    const { bucket } = fakeBinding();
+    const files = new Files({
+      adapter: r2({
+        accessKeyId: "K",
+        accountId: "ACCT",
+        binding: bucket as never,
+        bucket: "uploads",
+        secretAccessKey: "S",
+      }),
+    });
+    await expect(
+      files.signedUploadUrl("a.txt", { expiresIn: 60, maxSize: 5_000_000 })
+    ).rejects.toThrow(/maxSize.*not supported/u);
   });
 
   test("hybrid: url() falls back to HTTP signing when no publicBaseUrl is set", async () => {
