@@ -42,10 +42,6 @@ const files = new Files({
   name="PocketBaseAdapterOptions"
 />
 
-## Limitations
-
-`signedUploadUrl()` throws - PocketBase has no presigned upload primitive; writes always go through the authenticated API. `copy()` is read-then-write (no server-side copy) - costs an egress + an ingest and isn't atomic. `list()` uses PocketBase's offset/limit API; the adapter encodes the page number as a numeric cursor string so the unified API works unchanged. `UploadOptions` `cacheControl` and `metadata` throw - PocketBase has no per-file HTTP cache headers and no arbitrary-metadata field on the file; add extra typed columns to the collection and write to them via `raw` if you need them. `responseContentDisposition` on `url()` throws - PocketBase has no per-URL Content-Disposition override; reach for `raw` and the `?download=true` query string instead.
-
 ## Compatibility
 
 | Method            | Status | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |

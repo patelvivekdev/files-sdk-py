@@ -57,20 +57,7 @@ export const listFiles = query({
 
 ## Storage layout
 
-Files live in Convex storage, tracked by the built-in `_storage` system table. Each file's `key` is its `Id<"_storage">`. Metadata maps from that table: `size` → `size`, `contentType` → `type`, `sha256` → `etag`, `_creationTime` → `lastModified`. Convex has no user-metadata field, so `metadata` is always `undefined`.
-
-## Limitations
-
-The available operations depend on the context Convex gives you, and the adapter throws a descriptive error when a primitive is missing:
-
-- **`upload()` / `download()` require an action** — `ctx.storage.store` / `ctx.storage.get` don't exist in queries or mutations.
-- **`list()` requires a query or mutation** — it reads the `_storage` system table via `ctx.db`, which actions don't have. `prefix` filters by literal id prefix and is rarely meaningful for opaque ids.
-- **`delete()` / `signedUploadUrl()` require a writer** (mutation or action). `delete()` is idempotent.
-- **The key is the Convex storage id.** The key passed to `upload()` is ignored; `UploadResult.key` is the assigned id. Don't set `prefix` on `Files` with this adapter — it would corrupt the id.
-- **`copy()` is not supported** — Convex assigns immutable ids and can't copy to a chosen key. `download()` then `upload()` and track the new id.
-- **`metadata` and `cacheControl` are not supported** — the `_storage` table has no fields for them. Store extra data in your own table keyed by the storage id.
-- **`url()` returns a permanent serving URL** (it stays valid while the file exists), so `expiresIn` is ignored. `responseContentDisposition` throws — serve untrusted content through your own HTTP action.
-- **`signedUploadUrl()` returns a raw-body `POST` target** (`{ method: "POST", url, fields: {} }`). The browser POSTs the file as the request body (not multipart form data); the response JSON `{ storageId }` is the file's key. Convex controls the ~1-hour expiry, so `expiresIn` / `maxSize` / `minSize` / `contentType` are ignored.
+Files live in Convex storage, tracked by the built-in `_storage` system table. Each file's `key` is its `Id<"_storage">`. Metadata maps from that table: `size` → `size`, `contentType` → `type`, `sha256` → `etag`, `_creationTime` → `lastModified`. Convex has no user-metadata field, so `metadata` is always `undefined`. Don't set a `prefix` on the `Files` instance with this adapter - it would be prepended to the storage id and corrupt it.
 
 ## Compatibility
 

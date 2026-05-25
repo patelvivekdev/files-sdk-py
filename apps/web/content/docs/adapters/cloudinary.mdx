@@ -44,7 +44,7 @@ const files = new Files({
 
 ## Limitations
 
-Cloudinary's SDK keeps configuration as module-level global state, so mounting multiple `cloudinary()` adapters in the same process with different credentials will see only the last config win - use the `client` escape hatch with separately configured SDK instances if you need that. `signedUploadUrl()` returns a Cloudinary form-POST shape (`method: "POST"` with `fields`), not a single presigned URL. `expiresIn` on signed-upload URLs is informational - Cloudinary signatures are fixed at 1h. `maxSize` and `minSize` are not enforced server-side; use an upload preset with `max_file_size` if you need that. `UploadOptions` `cacheControl` and `metadata` throw - Cloudinary doesn't expose HTTP cache headers per-asset and has no arbitrary-metadata field on the upload call (use `raw` for `context`). `responseContentDisposition` on `url()` throws - Cloudinary has no per-request Content-Disposition override. `copy()` re-uploads from the source delivery URL - copies produce new `asset_id`/`etag`, not byte-identical references. `list({ limit })` is clamped to 500 (Cloudinary Admin API ceiling).
+Cloudinary's SDK keeps configuration as module-level global state, so mounting multiple `cloudinary()` adapters in the same process with different credentials will see only the last config win - use the `client` escape hatch with separately configured SDK instances if you need that.
 
 ## Compatibility
 

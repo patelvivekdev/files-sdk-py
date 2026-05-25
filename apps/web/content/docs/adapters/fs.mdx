@@ -42,11 +42,7 @@ const files = new Files({
 
 ## Storage layout
 
-Body at `` `${root}/${key}` ``; sidecar at `` `${root}/${key}.meta.json` ``. Sidecars survive `cp -r` / `git mv` / partial-tree deletion. `list()` hides them. ETag is a SHA-1-derived stable hash computed at upload time.
-
-## Limitations
-
-`signedUploadUrl()` throws without `urlBaseUrl` - there's no upload server to sign against. `url()` throws on `responseContentDisposition` without `urlBaseUrl`: `file://` has no signature in which to bind the override. Files written by hand into `root` without a sidecar are still readable - `contentType` falls back to `application/octet-stream` and `etag` is absent.
+Body at `` `${root}/${key}` ``; sidecar at `` `${root}/${key}.meta.json` ``. Sidecars survive `cp -r` / `git mv` / partial-tree deletion. `list()` hides them. ETag is a SHA-1-derived stable hash computed at upload time. Files written into `root` by hand without a sidecar are still readable - `contentType` falls back to `application/octet-stream` and `etag` is absent.
 
 ## Compatibility
 

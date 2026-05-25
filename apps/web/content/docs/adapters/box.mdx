@@ -53,7 +53,7 @@ const files = new Files({
 
 ## Limitations
 
-`signedUploadUrl()` throws - Box uploads require a multipart POST with both an `attributes` JSON part and the file bytes part, which fits neither the SDK's PUT-with-headers nor POST-with-form-fields shape. Use `upload()` server-side, or Box's UI Elements / Content Uploader for browser flows. Direct `upload()` handles up to Box's 50 MB single-call limit; larger bodies switch to `chunkedUploads.uploadBigFile`. Stream bodies are buffered up-front because the SDK's upload manager takes a Node `Readable` rather than a Web stream. `list()` returns immediate-children files only at `rootFolderId` - no recursion, subfolders are filtered out, and `prefix` is matched client-side within the page; for deep enumeration drop to `raw.folders.getFolderItems` and recurse manually. `responseContentDisposition` always throws - Box's `getDownloadFileUrl` and shared-link URLs have no Content-Disposition override. User `metadata` and `cacheControl` on `upload()` throw - Box exposes file metadata via classifications and metadata templates; drop to `raw.fileMetadata.*` if you need it. Box doesn't store user-supplied content types on file content, so `head()` and `list()` return a type inferred from the filename extension.
+`list()` is not recursive - it returns immediate-children files only at `rootFolderId`. For deep enumeration, drop to `raw.folders.getFolderItems` and recurse manually.
 
 ## Compatibility
 

@@ -44,10 +44,6 @@ const files = new Files({
   name="DropboxAdapterOptions"
 />
 
-## Limitations
-
-`signedUploadUrl()` throws - Dropbox's `filesGetTemporaryUploadLink` returns a URL that expects POST with a raw body, which fits neither the SDK's PUT-with-headers nor POST-with-form-fields shape. Use `upload()` or drop to `raw.filesGetTemporaryUploadLink(...)` for client-side uploads. Direct `upload()` handles up to Dropbox's 150 MB single-call limit; larger bodies switch to `filesUploadSession*` (chunked, up to 350 GB). `url()` is capped at Dropbox's 4-hour temporary-link maximum - `expiresIn` above 14400 throws; use `publicByDefault: true` for permanent shared links. `responseContentDisposition` always throws - Dropbox temporary and shared links have no Content-Disposition override. User `metadata` and `cacheControl` on `upload()` throw - Dropbox files have no native arbitrary-metadata field; use `raw` with `property_groups` (requires a registered template) if you need it. Stream-mode `download()` fetches the temporary link rather than streaming through the SDK, since `filesDownload` buffers the full body.
-
 ## Compatibility
 
 | Method            | Status | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                            |

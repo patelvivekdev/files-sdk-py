@@ -50,7 +50,7 @@ Auth falls back to `FTP_HOST`, `FTP_USERNAME` (alias `FTP_USER`), `FTP_PASSWORD`
 
 ## Limitations
 
-`url()` requires `publicBaseUrl` — FTP serves no HTTP and has no signing primitive, so without an HTTP server fronting the same tree there is no URL to return (it throws; use `download()` instead). `signedUploadUrl()` throws for the same reason. `responseContentDisposition` requires `publicBaseUrl`. User `metadata` and `cacheControl` on `upload()` throw — FTP has no metadata or cache-header fields; content type is inferred from the key's extension on read, and `lastModified` depends on the server supporting `MDTM`. `copy()` round-trips the bytes through the client (download then re-upload) since FTP has no server-side copy — large objects are buffered in memory. `list()` walks the tree recursively and skips symlinks. Connect-per-operation means a high call rate becomes a high connection rate; FTP servers commonly cap connections per IP, so reach for an injected `client` for batch jobs.
+Connect-per-operation means a high call rate becomes a high connection rate, and FTP servers commonly cap connections per IP - inject a pre-connected `client` for batch jobs.
 
 ## Compatibility
 

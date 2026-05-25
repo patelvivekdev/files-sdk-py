@@ -43,7 +43,7 @@ const files = new Files({
 
 ## Limitations
 
-`signedUploadUrl()` issues PUT-only - Azure SAS has no POST-policy equivalent. `maxSize` throws because Azure can't enforce upload caps at the URL level; enforce them at your application gateway. `copy()` uses `syncCopyFromURL`, which caps at 256 MB source size; larger blobs need `beginCopyFromURL` via `adapter.raw`. Azure AD / Managed Identity is supported via the `credential` option (install `@azure/identity`); it authenticates SDK calls and mints User Delegation SAS URLs for `url()`, `signedUploadUrl()`, and `copy()`. The principal needs blob data access plus permission to call `generateUserDelegationKey`.
+Azure AD / Managed Identity is supported via the `credential` option (install `@azure/identity`); it authenticates SDK calls and mints User Delegation SAS URLs for `url()`, `signedUploadUrl()`, and `copy()`. The principal needs blob data access plus permission to call `generateUserDelegationKey`.
 
 ## Compatibility
 

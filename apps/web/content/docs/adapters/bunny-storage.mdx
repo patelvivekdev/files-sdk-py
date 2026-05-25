@@ -38,10 +38,6 @@ const files = new Files({
   name="BunnyStorageAdapterOptions"
 />
 
-## Limitations
-
-`copy()` is a read-then-write because Bunny Storage has no server-side copy primitive in the TypeScript SDK; it is not atomic. `signedUploadUrl()` throws because Bunny Storage has no presigned upload primitive. `url()` requires `publicBaseUrl` and returns a permanent CDN URL; `expiresIn` is ignored and `responseContentDisposition` throws because there is no signature where that override can be bound. Custom `metadata` and `cacheControl` on upload are not supported by the Storage SDK.
-
 ## Compatibility
 
 | Method            | Status | Notes                                                                                                                                                                                                                                                                                                                |

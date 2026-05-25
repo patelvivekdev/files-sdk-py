@@ -62,7 +62,7 @@ await client.end();
 
 ## Limitations
 
-`url()` requires `publicBaseUrl` — SFTP serves no HTTP and has no signing primitive, so without an HTTP server fronting the same tree there is no URL to return (it throws; use `download()` instead). `signedUploadUrl()` throws for the same reason. `responseContentDisposition` requires `publicBaseUrl`. User `metadata` and `cacheControl` on `upload()` throw — SFTP files have no metadata or cache-header fields; content type is inferred from the key's extension on read. `copy()` round-trips the bytes through the client (download then re-upload) since base SFTP has no portable server-side copy — large objects are buffered in memory. `list()` walks the tree recursively and skips symlinks. Connect-per-operation means a high call rate becomes a high connection rate; SSH servers commonly cap sessions per IP, so reach for an injected `client` (above) for batch jobs.
+Connect-per-operation means a high call rate becomes a high connection rate, and SSH servers commonly cap sessions per IP - inject a pre-connected `client` (shown above) for batch jobs.
 
 ## Compatibility
 
