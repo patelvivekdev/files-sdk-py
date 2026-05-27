@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { setTimeout as delay } from "node:timers/promises";
 
-import { Files, FilesError } from "../src/index.js";
+import { Files, FilesError, UploadControl } from "../src/index.js";
+import type { ResumableUploadSession } from "../src/index.js";
 import { memory } from "../src/memory/index.js";
 
 type Adapter = ReturnType<typeof memory>;
@@ -545,5 +547,89 @@ describe("memory adapter", () => {
       const files = new Files({ adapter: memory() });
       await expect(files.download("nope")).rejects.toBeInstanceOf(FilesError);
     });
+  });
+});
+
+describe("memory resumable uploads (in-process)", () => {
+  test("fresh upload completes and stores the bytes", async () => {
+    const files = new Files({ adapter: memory() });
+    const control = new UploadControl();
+    const result = await files.upload("doc.txt", "abcdefghijkl", {
+      control,
+      multipart: { partSize: 4 },
+    });
+    expect(result.size).toBe(12);
+    expect(control.status).toBe("completed");
+    const got = await files.download("doc.txt");
+    expect(await got.text()).toBe("abcdefghijkl");
+    expect(control.session?.provider).toBe("memory");
+  });
+
+  test("pause holds the upload, resume finishes it", async () => {
+    const files = new Files({ adapter: memory() });
+    const control = new UploadControl();
+    let paused = false;
+    const promise = files.upload("p.bin", new Uint8Array(12).fill(7), {
+      control,
+      multipart: { concurrency: 1, partSize: 4 },
+      onProgress: ({ loaded }) => {
+        if (loaded === 4 && !paused) {
+          paused = true;
+          control.pause();
+        }
+      },
+    });
+    await delay(0);
+    await delay(0);
+    expect(control.status).toBe("paused");
+    control.resume();
+    const result = await promise;
+    expect(result.size).toBe(12);
+  });
+
+  test("abort discards the pending upload", async () => {
+    const adapter = memory();
+    const files = new Files({ adapter });
+    const control = new UploadControl();
+    let aborting: Promise<void> | undefined;
+    const promise = files.upload("a.bin", new Uint8Array(12).fill(9), {
+      control,
+      multipart: { concurrency: 1, partSize: 4 },
+      onProgress: ({ loaded }) => {
+        if (loaded === 4 && !aborting) {
+          aborting = control.abort();
+        }
+      },
+    });
+    await expect(promise).rejects.toMatchObject({ aborted: true });
+    await aborting;
+    expect(control.status).toBe("aborted");
+    expect(await files.exists("a.bin")).toBe(false);
+  });
+
+  test("a token can't be resumed in a different instance (in-process only)", async () => {
+    const files = new Files({ adapter: memory() });
+    const token: ResumableUploadSession = {
+      contentType: "text/plain",
+      key: "x.bin",
+      provider: "memory",
+      uploadId: "mem-1",
+    };
+    await expect(
+      files.upload("x.bin", "data", { control: UploadControl.from(token) })
+    ).rejects.toThrow(/in-process only/u);
+  });
+
+  test("resuming a non-memory token throws", async () => {
+    const files = new Files({ adapter: memory() });
+    const token = {
+      bucket: "b",
+      key: "x.bin",
+      provider: "gcs",
+      uri: "u",
+    } as ResumableUploadSession;
+    await expect(
+      files.upload("x.bin", "data", { control: UploadControl.from(token) })
+    ).rejects.toThrow(/Cannot resume a gcs/u);
   });
 });

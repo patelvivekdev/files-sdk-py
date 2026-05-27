@@ -9,6 +9,8 @@ import type {
   Adapter,
   Body,
   DownloadOptions,
+  PartsResumableDriver,
+  ResumableUploadSession,
   SignUploadOptions,
   SignedUpload,
   StoredFile,
@@ -583,6 +585,65 @@ const r2FromHttp = (opts: R2HttpOptions): R2Adapter => {
     // `upload` delegates to the underlying S3 adapter, which reports
     // byte-level progress via @aws-sdk/lib-storage when onProgress is set.
     reportsUploadProgress: true,
+    // Resumable uploads delegate to the inner S3 driver. The driver must be
+    // returned synchronously, but the S3 adapter loads lazily — so wrap it:
+    // each async method awaits the (memoized) inner driver, and the sync
+    // `adopt` just stashes the token for the first async call to apply.
+    resumableUpload(key, resumableOpts): PartsResumableDriver {
+      let inner: PartsResumableDriver | undefined;
+      let stored: ResumableUploadSession | undefined;
+      let partSize = 5 * 1024 * 1024;
+      const build = async (): Promise<PartsResumableDriver> => {
+        if (!inner) {
+          const adapter = await ensure();
+          // The inner S3 adapter always defines `resumableUpload`.
+          inner = (
+            adapter.resumableUpload as NonNullable<
+              typeof adapter.resumableUpload
+            >
+          )(key, resumableOpts) as PartsResumableDriver;
+          if (stored) {
+            inner.adopt(stored);
+          }
+          ({ partSize } = inner);
+        }
+        return inner;
+      };
+      return {
+        adopt(session) {
+          stored = session;
+          if (session.provider === "s3") {
+            ({ partSize } = session);
+          }
+        },
+        begin: async (meta) => {
+          const driver = await build();
+          return driver.begin(meta);
+        },
+        complete: async (parts) => {
+          const driver = await build();
+          return driver.complete(parts);
+        },
+        discard: async () => {
+          if (inner || stored) {
+            const driver = await build();
+            await driver.discard();
+          }
+        },
+        mode: "parts",
+        get partSize() {
+          return inner?.partSize ?? partSize;
+        },
+        probe: async () => {
+          const driver = await build();
+          return driver.probe();
+        },
+        uploadPart: async (part) => {
+          const driver = await build();
+          return driver.uploadPart(part);
+        },
+      };
+    },
     async signedUploadUrl(key, signOpts) {
       // Reject before loading the inner s3 adapter — `maxSize` is
       // unsupported on R2 regardless of whether the import has resolved.

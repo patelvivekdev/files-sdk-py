@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
-import { Files, FilesError } from "../src/index.js";
+import { Files, FilesError, UploadControl } from "../src/index.js";
+import type { ResumableUploadSession } from "../src/index.js";
 
 // Mock @vercel/blob before the adapter imports it.
 const putMock = mock((pathname: string, _body: unknown, _opts?: unknown) =>
@@ -95,13 +96,36 @@ const getMock = mock(
     })
 );
 
+const createMultipartUploadMock = mock((pathname: string, _opts?: unknown) =>
+  Promise.resolve({ key: pathname, uploadId: "mpu-1" })
+);
+const uploadPartMock = mock(
+  (_pathname: string, _body: unknown, opts: { partNumber: number }) =>
+    Promise.resolve({
+      etag: `etag-${opts.partNumber}`,
+      partNumber: opts.partNumber,
+    })
+);
+const completeMultipartUploadMock = mock(
+  (pathname: string, _parts: unknown, _opts?: unknown) =>
+    Promise.resolve({
+      contentType: "application/octet-stream",
+      etag: "mpu-final",
+      pathname,
+      url: `https://blob.example.com/${pathname}`,
+    })
+);
+
 mock.module("@vercel/blob", () => ({
+  completeMultipartUpload: completeMultipartUploadMock,
   copy: copyMock,
+  createMultipartUpload: createMultipartUploadMock,
   del: delMock,
   get: getMock,
   head: headMock,
   list: listMock,
   put: putMock,
+  uploadPart: uploadPartMock,
 }));
 
 const { vercelBlob } = await import("../src/vercel-blob/index.js");
@@ -135,6 +159,9 @@ beforeEach(() => {
   delMock.mockClear();
   copyMock.mockClear();
   listMock.mockClear();
+  createMultipartUploadMock.mockClear();
+  uploadPartMock.mockClear();
+  completeMultipartUploadMock.mockClear();
   getMock.mockClear();
   globalThis.fetch = ((url: string | URL | Request) => {
     const u = typeof url === "string" ? url : url.toString();
@@ -1092,5 +1119,140 @@ describe("vercel-blob adapter", () => {
       );
       expect(headMock).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("vercel-blob resumable uploads", () => {
+  const FIVE_MIB = 5 * 1024 * 1024;
+
+  test("fresh multipart upload creates, uploads parts, and completes", async () => {
+    const files = new Files({ adapter: vercelBlob() });
+    const control = new UploadControl();
+    const result = await files.upload(
+      "big.bin",
+      new Uint8Array(FIVE_MIB + 10),
+      {
+        control,
+        multipart: { partSize: FIVE_MIB },
+      }
+    );
+    expect(result.etag).toBe("mpu-final");
+    expect(result.size).toBe(FIVE_MIB + 10);
+    expect(control.status).toBe("completed");
+    expect(createMultipartUploadMock).toHaveBeenCalledTimes(1);
+    expect(uploadPartMock).toHaveBeenCalledTimes(2);
+    expect(completeMultipartUploadMock).toHaveBeenCalledTimes(1);
+    // The session token carries the completed parts (no server list-parts).
+    const { session } = control;
+    expect(session?.provider).toBe("vercel-blob");
+    if (session?.provider === "vercel-blob") {
+      expect(session.parts).toHaveLength(2);
+    }
+  });
+
+  test("resume re-attaches the token's parts and uploads only the rest", async () => {
+    const files = new Files({ adapter: vercelBlob() });
+    const token: ResumableUploadSession = {
+      contentType: "application/octet-stream",
+      key: "big.bin",
+      partSize: FIVE_MIB,
+      parts: [{ etag: "etag-1", partNumber: 1, size: FIVE_MIB }],
+      provider: "vercel-blob",
+      storageKey: "big.bin",
+      uploadId: "mpu-1",
+    };
+    const result = await files.upload(
+      "big.bin",
+      new Uint8Array(FIVE_MIB + 10),
+      { control: UploadControl.from(token), multipart: { partSize: FIVE_MIB } }
+    );
+    expect(result.size).toBe(FIVE_MIB + 10);
+    expect(createMultipartUploadMock).not.toHaveBeenCalled();
+    // Part 1 was already in the token → only part 2 is uploaded.
+    expect(uploadPartMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("a createMultipartUpload failure is wrapped", async () => {
+    createMultipartUploadMock.mockImplementationOnce(() =>
+      Promise.reject(new Error("mpu boom"))
+    );
+    const files = new Files({ adapter: vercelBlob() });
+    await expect(
+      files.upload("big.bin", "data", { control: new UploadControl() })
+    ).rejects.toBeInstanceOf(FilesError);
+  });
+
+  test("an uploadPart failure rejects when retries are exhausted", async () => {
+    uploadPartMock.mockImplementationOnce(() =>
+      Promise.reject(new Error("part boom"))
+    );
+    const files = new Files({ adapter: vercelBlob() });
+    await expect(
+      files.upload("big.bin", new Uint8Array(FIVE_MIB + 10), {
+        control: new UploadControl(),
+        multipart: { concurrency: 1, partSize: FIVE_MIB },
+        retries: 0,
+      })
+    ).rejects.toBeInstanceOf(FilesError);
+  });
+
+  test("abort stops the upload (discard is a no-op)", async () => {
+    const files = new Files({ adapter: vercelBlob() });
+    const control = new UploadControl();
+    let aborting: Promise<void> | undefined;
+    const promise = files.upload("ab.bin", new Uint8Array(FIVE_MIB + 10), {
+      control,
+      multipart: { concurrency: 1, partSize: FIVE_MIB },
+      onProgress: ({ loaded }) => {
+        if (loaded >= FIVE_MIB && !aborting) {
+          aborting = control.abort();
+        }
+      },
+    });
+    await expect(promise).rejects.toMatchObject({ aborted: true });
+    await aborting;
+    expect(control.status).toBe("aborted");
+  });
+
+  test("a completeMultipartUpload failure is wrapped", async () => {
+    completeMultipartUploadMock.mockImplementationOnce(() =>
+      Promise.reject(new Error("complete boom"))
+    );
+    const files = new Files({ adapter: vercelBlob() });
+    await expect(
+      files.upload("big.bin", new Uint8Array(FIVE_MIB + 10), {
+        control: new UploadControl(),
+        multipart: { partSize: FIVE_MIB },
+      })
+    ).rejects.toBeInstanceOf(FilesError);
+  });
+
+  test("resuming a token for a different key throws", async () => {
+    const files = new Files({ adapter: vercelBlob() });
+    const token: ResumableUploadSession = {
+      contentType: "application/octet-stream",
+      key: "other.bin",
+      partSize: FIVE_MIB,
+      parts: [],
+      provider: "vercel-blob",
+      storageKey: "other.bin",
+      uploadId: "mpu-1",
+    };
+    await expect(
+      files.upload("big.bin", "data", { control: UploadControl.from(token) })
+    ).rejects.toThrow(/does not match/u);
+  });
+
+  test("resuming a non-vercel-blob token throws", async () => {
+    const files = new Files({ adapter: vercelBlob() });
+    const token = {
+      bucket: "b",
+      key: "big.bin",
+      provider: "gcs",
+      uri: "u",
+    } as ResumableUploadSession;
+    await expect(
+      files.upload("big.bin", "data", { control: UploadControl.from(token) })
+    ).rejects.toThrow(/Cannot resume a gcs/u);
   });
 });

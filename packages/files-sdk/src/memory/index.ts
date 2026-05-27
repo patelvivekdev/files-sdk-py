@@ -2,6 +2,8 @@ import type {
   Adapter,
   Body,
   ListResult,
+  OffsetResumableDriver,
+  ResumableUploadSession,
   SignedUpload,
   StoredFile,
   UploadResult,
@@ -181,8 +183,30 @@ const toStored = (key: string, entry: MemoryEntry): StoredFile =>
     { data: entry.bytes, kind: "buffer" }
   );
 
+interface PendingUpload {
+  chunks: Uint8Array[];
+  received: number;
+}
+
+const concatChunks = (chunks: Uint8Array[], total: number): Uint8Array => {
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
+};
+
+const MEMORY_DEFAULT_CHUNK = 64 * 1024;
+
 export const memory = (opts?: MemoryAdapterOptions): MemoryAdapter => {
   const store = new Map<string, MemoryEntry>();
+  // In-flight resumable uploads, keyed by an upload id. Lives on the adapter
+  // instance, so pause/resume works in-process; a new process (or instance)
+  // has none, which is why `adopt()` rejects an unknown id.
+  const pending = new Map<string, PendingUpload>();
+  let uploadSeq = 0;
 
   // Copy the body and metadata in so a later mutation of the caller's buffer or
   // metadata object can't reach into the store (and vice-versa on read) — value
@@ -312,6 +336,88 @@ export const memory = (opts?: MemoryAdapterOptions): MemoryAdapter => {
     },
     name: "memory",
     raw: store,
+    resumableUpload(key, resumableOpts): OffsetResumableDriver {
+      let uploadId: string | undefined;
+      let contentType = "application/octet-stream";
+      const requirePending = (): PendingUpload => {
+        const entry =
+          uploadId === undefined ? undefined : pending.get(uploadId);
+        if (!entry) {
+          throw new FilesError(
+            "Provider",
+            "memory: resumable session not found — memory uploads are in-process only and can't resume in a new instance."
+          );
+        }
+        return entry;
+      };
+      return {
+        adopt(session: ResumableUploadSession) {
+          if (session.provider !== "memory") {
+            throw new FilesError(
+              "Provider",
+              `Cannot resume a ${session.provider} session on a memory adapter.`
+            );
+          }
+          if (session.key !== key) {
+            throw new FilesError(
+              "Provider",
+              "Resume token does not match this upload's key."
+            );
+          }
+          ({ uploadId } = session);
+          ({ contentType } = session);
+        },
+        begin(meta): Promise<ResumableUploadSession> {
+          uploadSeq += 1;
+          uploadId = `mem-${uploadSeq}`;
+          ({ contentType } = meta);
+          pending.set(uploadId, { chunks: [], received: 0 });
+          return Promise.resolve({
+            contentType,
+            key,
+            provider: "memory",
+            uploadId,
+          });
+        },
+        complete(): Promise<UploadResult> {
+          const entry = requirePending();
+          const bytes = concatChunks(entry.chunks, entry.received);
+          const stored = put(key, bytes, contentType, {
+            cacheControl: resumableOpts.cacheControl,
+            metadata: resumableOpts.metadata,
+          });
+          pending.delete(uploadId as string);
+          return Promise.resolve({
+            contentType,
+            etag: stored.etag,
+            key,
+            lastModified: stored.lastModified,
+            size: stored.bytes.byteLength,
+          });
+        },
+        discard() {
+          if (uploadId !== undefined) {
+            pending.delete(uploadId);
+          }
+          return Promise.resolve();
+        },
+        mode: "offset",
+        partSize:
+          typeof resumableOpts.multipart === "object" &&
+          resumableOpts.multipart.partSize
+            ? resumableOpts.multipart.partSize
+            : MEMORY_DEFAULT_CHUNK,
+        probe(): Promise<{ nextOffset: number }> {
+          return Promise.resolve({ nextOffset: requirePending().received });
+        },
+        uploadAt({ offset, data }): Promise<{ nextOffset: number }> {
+          const entry = requirePending();
+          entry.chunks.push(new Uint8Array(data));
+          entry.received = offset + data.byteLength;
+          return Promise.resolve({ nextOffset: entry.received });
+        },
+      };
+    },
     signedUploadUrl(key, signOpts): Promise<SignedUpload> {
       // No real upload endpoint exists; the URL is an inert placeholder, so
       // the key need not exist yet (this is an upload target). `expires`
