@@ -20,7 +20,7 @@ import {
 } from "../internal/core.js";
 import { readEnv } from "../internal/env.js";
 import { FilesError } from "../internal/errors.js";
-import type { FilesErrorCode } from "../internal/errors.js";
+import type { ProviderFilesErrorCode } from "../internal/errors.js";
 import { createStoredFile } from "../internal/stored-file.js";
 
 export interface VercelBlobAdapterOptions {
@@ -169,7 +169,7 @@ const parseCacheControlMaxAge = (header: string): number | undefined => {
 const classifyBlobError = (
   status: number | undefined,
   name: string
-): FilesErrorCode => {
+): ProviderFilesErrorCode => {
   if (status === 404 || name.includes("NotFound")) {
     return "NotFound";
   }
@@ -187,7 +187,7 @@ const classifyBlobError = (
   return "Provider";
 };
 
-const DEFAULT_BLOB_MESSAGES: Record<FilesErrorCode, string> = {
+const DEFAULT_BLOB_MESSAGES: Record<ProviderFilesErrorCode, string> = {
   Conflict: "Conflict",
   NotFound: "Not found",
   Provider: "vercel-blob error",

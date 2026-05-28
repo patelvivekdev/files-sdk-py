@@ -24,7 +24,7 @@ import {
 } from "../internal/core.js";
 import { readEnv } from "../internal/env.js";
 import { FilesError } from "../internal/errors.js";
-import type { FilesErrorCode } from "../internal/errors.js";
+import type { ProviderFilesErrorCode } from "../internal/errors.js";
 import { createOffsetHttpDriver } from "../internal/resumable-offset-http.js";
 import { createStoredFile } from "../internal/stored-file.js";
 
@@ -118,7 +118,9 @@ const NOT_FOUND_STATUS = new Set([404]);
 const UNAUTH_STATUS = new Set([401, 403]);
 const CONFLICT_STATUS = new Set([409, 412]);
 
-const classifyDriveError = (status: number | undefined): FilesErrorCode => {
+const classifyDriveError = (
+  status: number | undefined
+): ProviderFilesErrorCode => {
   if (NOT_FOUND_STATUS.has(status ?? 0)) {
     return "NotFound";
   }
@@ -131,7 +133,7 @@ const classifyDriveError = (status: number | undefined): FilesErrorCode => {
   return "Provider";
 };
 
-const DEFAULT_MESSAGES: Record<FilesErrorCode, string> = {
+const DEFAULT_MESSAGES: Record<ProviderFilesErrorCode, string> = {
   Conflict: "Conflict",
   NotFound: "Not found",
   Provider: "Drive error",
