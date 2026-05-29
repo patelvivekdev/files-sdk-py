@@ -14,6 +14,7 @@ import type {
   UploadResult,
 } from "../index.js";
 import {
+  assertSlashDelimiter,
   DEFAULT_URL_EXPIRES_IN,
   deleteManyWithFallback,
   joinPublicUrl,
@@ -555,6 +556,58 @@ export const supabase = (opts: SupabaseAdapterOptions): SupabaseAdapter => {
       );
     },
     async list(options): Promise<ListResult> {
+      // The legacy list() is offset-based and folds folders in as zero-size
+      // rows; listV2 with_delimiter returns objects and folders separately
+      // with a real cursor. Nested so the flat `list` stays simple.
+      const listFolded = async (delimiter: string): Promise<ListResult> => {
+        assertSlashDelimiter("supabase", delimiter);
+        const { data, error } = await bucketRef.listV2(
+          {
+            limit: options?.limit ?? DEFAULT_LIST_LIMIT,
+            with_delimiter: true,
+            ...(options?.prefix && { prefix: options.prefix }),
+            ...(options?.cursor && { cursor: options.cursor }),
+          },
+          fetchParams(options?.signal)
+        );
+        if (error) {
+          throw mapSupabaseError(error);
+        }
+        const trimmedPrefix = options?.prefix?.replace(/\/$/u, "");
+        const fullPath = (name: string, key?: string): string =>
+          key ?? (trimmedPrefix ? `${trimmedPrefix}/${name}` : name);
+        const items: StoredFile[] = data.objects.map((obj) => {
+          const meta = (obj.metadata ?? {}) as SupabaseListItemMetadata;
+          const fullKey = fullPath(obj.name, obj.key);
+          return createStoredFile(
+            {
+              ...(meta.eTag && { etag: stripEtag(meta.eTag) }),
+              key: fullKey,
+              ...(meta.lastModified !== undefined && {
+                lastModified: toMs(meta.lastModified),
+              }),
+              ...(stringifyMetadata(meta as Record<string, unknown>) && {
+                metadata: stringifyMetadata(meta as Record<string, unknown>),
+              }),
+              size: meta.size ?? meta.contentLength ?? 0,
+              type: meta.mimetype ?? "application/octet-stream",
+            },
+            { factory: () => downloadAsBytes(fullKey), kind: "lazy" }
+          );
+        });
+        const prefixes = data.folders.map((folder) => {
+          const raw = fullPath(folder.name, folder.key);
+          return raw.endsWith("/") ? raw : `${raw}/`;
+        });
+        return {
+          items,
+          ...(data.hasNext && data.nextCursor && { cursor: data.nextCursor }),
+          ...(prefixes.length && { prefixes }),
+        };
+      };
+      if (options?.delimiter) {
+        return await listFolded(options.delimiter);
+      }
       const limit = options?.limit ?? DEFAULT_LIST_LIMIT;
       const offset = options?.cursor ? Number(options.cursor) : 0;
       if (!Number.isFinite(offset) || offset < 0) {
@@ -774,6 +827,7 @@ export const supabase = (opts: SupabaseAdapterOptions): SupabaseAdapter => {
         url: signedUrl,
       };
     },
+    supportsDelimiter: true,
     async upload(key, body, options) {
       const { data, contentType, contentLength } = await normalizeBody(
         body,

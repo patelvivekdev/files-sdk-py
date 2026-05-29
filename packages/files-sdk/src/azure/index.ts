@@ -17,6 +17,7 @@ import type {
 
 import type {
   Adapter,
+  ListResult,
   PartMeta,
   PartsResumableDriver,
   ResumableDriverOptions,
@@ -771,23 +772,7 @@ export const azure = (opts: AzureAdapterOptions): AzureAdapter => {
     },
     async list(options) {
       try {
-        const iterator = containerClient
-          .listBlobsFlat({
-            ...(options?.prefix && { prefix: options.prefix }),
-            ...(options?.signal && { abortSignal: options.signal }),
-          })
-          .byPage({
-            ...(options?.cursor && { continuationToken: options.cursor }),
-            ...(options?.limit !== undefined && {
-              maxPageSize: options.limit,
-            }),
-          });
-        const { value: page } = await iterator.next();
-        const segment = page?.segment as
-          | { blobItems?: BlobItemLike[] }
-          | undefined;
-        const blobItems = segment?.blobItems ?? [];
-        const items: StoredFile[] = blobItems.map((item) => {
+        const toItem = (item: BlobItemLike): StoredFile => {
           const props = item.properties ?? {};
           const itemKey = item.name;
           const itemEtag = stripEtag(props.etag);
@@ -814,7 +799,57 @@ export const azure = (opts: AzureAdapterOptions): AzureAdapter => {
               kind: "lazy",
             }
           );
-        });
+        };
+        // Hierarchy listing returns both blobs and "folders" (blobPrefixes);
+        // nested so the flat `list` stays simple.
+        const listByHierarchy = async (
+          delimiter: string
+        ): Promise<ListResult> => {
+          const iterator = containerClient
+            .listBlobsByHierarchy(delimiter, {
+              ...(options?.prefix && { prefix: options.prefix }),
+              ...(options?.signal && { abortSignal: options.signal }),
+            })
+            .byPage({
+              ...(options?.cursor && { continuationToken: options.cursor }),
+              ...(options?.limit !== undefined && {
+                maxPageSize: options.limit,
+              }),
+            });
+          const { value: hierarchyPage } = await iterator.next();
+          const segment = hierarchyPage?.segment as
+            | {
+                blobItems?: BlobItemLike[];
+                blobPrefixes?: { name: string }[];
+              }
+            | undefined;
+          const prefixes = (segment?.blobPrefixes ?? []).map((p) => p.name);
+          const nextToken = hierarchyPage?.continuationToken;
+          return {
+            items: (segment?.blobItems ?? []).map(toItem),
+            ...(nextToken && { cursor: nextToken }),
+            ...(prefixes.length && { prefixes }),
+          };
+        };
+        if (options?.delimiter) {
+          return await listByHierarchy(options.delimiter);
+        }
+        const iterator = containerClient
+          .listBlobsFlat({
+            ...(options?.prefix && { prefix: options.prefix }),
+            ...(options?.signal && { abortSignal: options.signal }),
+          })
+          .byPage({
+            ...(options?.cursor && { continuationToken: options.cursor }),
+            ...(options?.limit !== undefined && {
+              maxPageSize: options.limit,
+            }),
+          });
+        const { value: page } = await iterator.next();
+        const segment = page?.segment as
+          | { blobItems?: BlobItemLike[] }
+          | undefined;
+        const items = (segment?.blobItems ?? []).map(toItem);
         const nextToken = page?.continuationToken;
         return {
           items,
@@ -871,6 +906,7 @@ export const azure = (opts: AzureAdapterOptions): AzureAdapter => {
         throw mapAzureError(error);
       }
     },
+    supportsDelimiter: true,
     supportsRange: true,
     async upload(key, body, options) {
       const { cacheControl, metadata, multipart, onProgress, signal } =

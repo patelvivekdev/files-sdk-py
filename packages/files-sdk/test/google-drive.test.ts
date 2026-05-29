@@ -442,6 +442,19 @@ describe("google-drive adapter", () => {
     ]);
   });
 
+  test("list with a delimiter synthesizes common prefixes from fsdkKeys", async () => {
+    const files = new Files({ adapter: googleDrive(baseOpts) });
+    await files.upload("photos/cover.jpg", "x");
+    await files.upload("photos/2023/a.jpg", "x");
+    await files.upload("photos/2024/b.jpg", "x");
+    const { items, prefixes } = await files.list({
+      delimiter: "/",
+      prefix: "photos/",
+    });
+    expect(items.map((i) => i.key)).toEqual(["photos/cover.jpg"]);
+    expect(prefixes).toEqual(["photos/2023/", "photos/2024/"]);
+  });
+
   test("copy creates new file with the new fsdkKey and caches id", async () => {
     const files = new Files({ adapter: googleDrive(baseOpts) });
     await files.upload("from.txt", "hi");

@@ -352,6 +352,9 @@ export const sharepoint = (
       signOpts: SignUploadOptions
     ): Promise<SignedUpload> =>
       call((inner) => inner.signedUploadUrl(key, signOpts)),
+    // Delegates to the inner onedrive adapter, which returns folder common
+    // prefixes for a "/" delimiter; listOpts (incl. delimiter) is forwarded.
+    supportsDelimiter: true,
     // Delegates to the inner onedrive adapter, which honors Range on Graph's
     // /content endpoint; downloadOpts (incl. range) is forwarded above.
     supportsRange: true,

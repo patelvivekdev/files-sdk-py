@@ -179,9 +179,42 @@ const filesCopyV2Mock = mock((arg: { from_path: string; to_path: string }) => {
   );
 });
 
+const folderMetadataReference = (name: string, pathKey: string) => ({
+  ".tag": "folder" as const,
+  id: `folder-${name}`,
+  name,
+  path_display: `/${pathKey}`,
+  path_lower: `/${pathKey}`.toLowerCase(),
+});
+
 const filesListFolderMock = mock(
   (arg: { path: string; recursive?: boolean; limit?: number }) => {
     const root = arg.path === "" ? "" : keyFromPath(arg.path);
+    if (arg.recursive === false) {
+      // Immediate children: direct files plus one entry per subfolder.
+      const entries: unknown[] = [];
+      const folders = new Set<string>();
+      for (const [k, it] of store) {
+        if (root && !(k === root || k.startsWith(`${root}/`))) {
+          continue;
+        }
+        const rest = root ? k.slice(root.length + 1) : k;
+        const slash = rest.indexOf("/");
+        if (slash === -1) {
+          entries.push(fileMetadataReference(it, k));
+        } else {
+          folders.add(rest.slice(0, slash));
+        }
+      }
+      for (const name of folders) {
+        entries.push(
+          folderMetadataReference(name, root ? `${root}/${name}` : name)
+        );
+      }
+      return Promise.resolve(
+        wrapResult({ cursor: "next-cursor", entries, has_more: false })
+      );
+    }
     const entries = [...store.entries()]
       .filter(([k]) => !root || k === root || k.startsWith(`${root}/`))
       .map(([k, it]) => fileMetadataReference(it, k));
@@ -556,6 +589,37 @@ describe("dropbox adapter", () => {
     await files.upload("beta.txt", "x");
     const r = await files.list({ prefix: "alp" });
     expect(r.items.map((i) => i.key)).toEqual(["alpha.txt"]);
+  });
+
+  test("a delimiter lists one level and returns subfolders as prefixes", async () => {
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    await files.upload("photos/cover.jpg", "x");
+    await files.upload("photos/2023/a.jpg", "x");
+    await files.upload("photos/2024/b.jpg", "x");
+    const r = await files.list({ delimiter: "/", prefix: "photos/" });
+    expect(r.items.map((i) => i.key)).toEqual(["photos/cover.jpg"]);
+    expect(r.prefixes?.toSorted()).toEqual(["photos/2023/", "photos/2024/"]);
+  });
+
+  test("a delimiter on a missing folder returns an empty page", async () => {
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    filesListFolderMock.mockImplementationOnce(() =>
+      Promise.reject(
+        responseError(409, {
+          error: { ".tag": "path", path: { ".tag": "not_found" } },
+          error_summary: "path/not_found/",
+        })
+      )
+    );
+    const r = await files.list({ delimiter: "/", prefix: "missing/" });
+    expect(r.items).toEqual([]);
+  });
+
+  test("dropbox only supports the / delimiter", async () => {
+    const files = new Files({ adapter: dropbox(baseOpts) });
+    await expect(files.list({ delimiter: "|" })).rejects.toMatchObject({
+      code: "Provider",
+    });
   });
 
   test("list propagates has_more cursor", async () => {

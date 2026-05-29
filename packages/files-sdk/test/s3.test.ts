@@ -420,6 +420,25 @@ describe("s3 adapter", () => {
     expect(input.MaxKeys).toBe(10);
   });
 
+  test("list passes Delimiter and maps CommonPrefixes to prefixes", async () => {
+    s3Mock.on(ListObjectsV2Command).resolves({
+      CommonPrefixes: [{ Prefix: "a/b/" }, { Prefix: "a/c/" }, {}],
+      Contents: [
+        { ETag: '"1"', Key: "a/1.txt", LastModified: new Date(), Size: 1 },
+      ],
+      IsTruncated: false,
+    });
+    const files = new Files({
+      adapter: s3({ bucket: "test-bucket", region: "us-east-1" }),
+    });
+    const out = await files.list({ delimiter: "/", prefix: "a/" });
+    expect(out.items.map((i) => i.key)).toEqual(["a/1.txt"]);
+    expect(out.prefixes).toEqual(["a/b/", "a/c/"]);
+    const calls = s3Mock.commandCalls(ListObjectsV2Command);
+    const [{ input }] = firstCall(calls).args;
+    expect(input.Delimiter).toBe("/");
+  });
+
   test("url() returns a presigned GET URL by default (no publicBaseUrl)", async () => {
     const adapter = s3({
       bucket: "b",

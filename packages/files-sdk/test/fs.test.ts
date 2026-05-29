@@ -457,6 +457,17 @@ describe("fs adapter", () => {
       expect(page3.cursor).toBeUndefined();
     });
 
+    test("a delimiter collapses subdirectories into common prefixes", async () => {
+      const root = await makeRoot();
+      const files = new Files({ adapter: fsAdapter({ root }) });
+      await files.upload("a/1.txt", "1");
+      await files.upload("a/b/2.txt", "2");
+      await files.upload("a/c/3.txt", "3");
+      const result = await files.list({ delimiter: "/", prefix: "a/" });
+      expect(result.items.map((i) => i.key)).toEqual(["a/1.txt"]);
+      expect(result.prefixes).toEqual(["a/b/", "a/c/"]);
+    });
+
     test("does not include sidecar files as items", async () => {
       const root = await makeRoot();
       const files = new Files({ adapter: fsAdapter({ root }) });

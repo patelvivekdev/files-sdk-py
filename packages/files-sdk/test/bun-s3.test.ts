@@ -246,6 +246,14 @@ describe("bun-s3 adapter", () => {
     expect(await out.items[0]?.text()).toBe("1");
   });
 
+  test("list with a delimiter is rejected (no commonPrefixes in Bun's S3)", async () => {
+    const client = new FakeBunS3Client();
+    const files = new Files({ adapter: bunS3({ client }) });
+    await expect(files.list({ delimiter: "/" })).rejects.toMatchObject({
+      code: "Provider",
+    });
+  });
+
   test("url returns publicBaseUrl unless responseContentDisposition forces signing", async () => {
     const client = new FakeBunS3Client();
     const adapter = bunS3({

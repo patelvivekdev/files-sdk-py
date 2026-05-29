@@ -687,6 +687,27 @@ describe("box adapter", () => {
     expect(r.items.map((i) => i.key).toSorted()).toEqual(["a.txt", "b.txt"]);
   });
 
+  test("a delimiter returns subfolders as common prefixes", async () => {
+    const files = new Files({ adapter: box(baseOpts) });
+    await files.upload("a.txt", "x");
+    store.set("sub1", {
+      id: "sub1",
+      name: "photos",
+      parentId: ROOT_ID,
+      type: "folder",
+    });
+    const r = await files.list({ delimiter: "/" });
+    expect(r.items.map((i) => i.key)).toEqual(["a.txt"]);
+    expect(r.prefixes).toEqual(["photos/"]);
+  });
+
+  test("box only supports the / delimiter", async () => {
+    const files = new Files({ adapter: box(baseOpts) });
+    await expect(files.list({ delimiter: "|" })).rejects.toMatchObject({
+      code: "Provider",
+    });
+  });
+
   test("list applies prefix filter", async () => {
     const files = new Files({ adapter: box(baseOpts) });
     await files.upload("alpha.txt", "x");

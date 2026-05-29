@@ -628,6 +628,20 @@ describe("onedrive adapter", () => {
     expect(all.items.map((i) => i.key).toSorted()).toEqual(["a.txt", "b.txt"]);
   });
 
+  test("a delimiter surfaces folders as common prefixes", async () => {
+    const files = new Files({ adapter: onedrive(baseOpts) });
+    await files.upload("a.txt", "x");
+    store.set("photos", {
+      id: "fold-1",
+      isFolder: true,
+      name: "photos",
+      size: 0,
+    });
+    const r = await files.list({ delimiter: "/" });
+    expect(r.items.map((i) => i.key)).toEqual(["a.txt"]);
+    expect(r.prefixes).toEqual(["photos/"]);
+  });
+
   test("list applies prefix filter client-side", async () => {
     const files = new Files({ adapter: onedrive(baseOpts) });
     await files.upload("alpha.txt", "x");

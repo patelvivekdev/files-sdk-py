@@ -13,6 +13,7 @@ import type {
 } from "../index.js";
 import {
   assertRangeHonored,
+  assertSlashDelimiter,
   existsByProbe,
   joinPublicUrl,
   rangeRequestHeaders,
@@ -478,12 +479,16 @@ export const vercelBlob = (
     },
     async list(options): Promise<ListResult> {
       try {
+        if (options?.delimiter) {
+          assertSlashDelimiter("vercel-blob", options.delimiter);
+        }
         const result = await blob.list({
           ...(options?.signal && { abortSignal: options.signal }),
           ...auth,
           ...(options?.prefix && { prefix: options.prefix }),
           ...(options?.limit !== undefined && { limit: options.limit }),
           ...(options?.cursor && { cursor: options.cursor }),
+          ...(options?.delimiter && { mode: "folded" as const }),
         });
         const items: StoredFile[] = result.blobs.map((b) =>
           createStoredFile(
@@ -509,9 +514,11 @@ export const vercelBlob = (
             }
           )
         );
+        const prefixes = (result as { folders?: string[] }).folders;
         return {
           cursor: result.hasMore ? result.cursor : undefined,
           items,
+          ...(prefixes?.length && { prefixes }),
         };
       } catch (error) {
         throw mapBlobError(error);
@@ -649,6 +656,7 @@ export const vercelBlob = (
         },
       };
     },
+    supportsDelimiter: true,
     // Range rides on the standard-HTTP fetch of the public blob URL. Private
     // blobs read through `blob.get`, which has no range primitive, so they
     // fall through to the gate's loud throw.

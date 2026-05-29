@@ -307,6 +307,16 @@ describe("sftp adapter", () => {
     expect(docs.items.map((i) => i.key)).toEqual(["docs/a.txt"]);
   });
 
+  test("a delimiter collapses subdirectories into common prefixes", async () => {
+    const files = newFiles();
+    await files.upload("a/1.txt", "1");
+    await files.upload("a/b/2.txt", "2");
+    await files.upload("a/c/3.txt", "3");
+    const result = await files.list({ delimiter: "/", prefix: "a/" });
+    expect(result.items.map((i) => i.key)).toEqual(["a/1.txt"]);
+    expect(result.prefixes).toEqual(["a/b/", "a/c/"]);
+  });
+
   test("keys that escape the root are rejected", async () => {
     const files = newFiles();
     await expect(files.upload("../escape.txt", "x")).rejects.toMatchObject({

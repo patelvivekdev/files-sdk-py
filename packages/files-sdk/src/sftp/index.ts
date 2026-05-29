@@ -30,7 +30,7 @@ import { FilesError } from "../internal/errors.js";
 import { inferTypeFromName } from "../internal/mime.js";
 import { joinRemotePath, trimSlashes } from "../internal/remote-path.js";
 import { createStoredFile } from "../internal/stored-file.js";
-import { compareKeys, paginateKeys } from "../internal/walk-paginate.js";
+import { compareKeys, pageKeyList } from "../internal/walk-paginate.js";
 
 export interface SftpAdapterOptions {
   /** SFTP host. Falls back to `SFTP_HOST`. */
@@ -450,7 +450,8 @@ export const sftp = (opts: SftpAdapterOptions = {}): SftpAdapter => {
           throw error;
         }
         keys.sort(compareKeys);
-        const page = paginateKeys(keys, {
+        const page = pageKeyList(keys, {
+          ...(options?.delimiter && { delimiter: options.delimiter }),
           ...(options?.cursor !== undefined && { cursor: options.cursor }),
           ...(options?.limit !== undefined && { limit: options.limit }),
           ...(options?.prefix !== undefined && { prefix: options.prefix }),
@@ -473,6 +474,7 @@ export const sftp = (opts: SftpAdapterOptions = {}): SftpAdapter => {
         return {
           items,
           ...(page.cursor !== undefined && { cursor: page.cursor }),
+          ...(page.prefixes && { prefixes: page.prefixes }),
         };
       });
     },
@@ -574,6 +576,7 @@ export const sftp = (opts: SftpAdapterOptions = {}): SftpAdapter => {
         )
       );
     },
+    supportsDelimiter: true,
     upload(key, body: Body, options): Promise<UploadResult> {
       if (options?.metadata && Object.keys(options.metadata).length > 0) {
         throw new FilesError(

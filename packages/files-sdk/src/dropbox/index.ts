@@ -17,6 +17,7 @@ import type {
 } from "../index.js";
 import {
   assertRangeHonored,
+  assertSlashDelimiter,
   DEFAULT_URL_EXPIRES_IN,
   existsByProbe,
   joinPublicUrl,
@@ -1116,46 +1117,74 @@ export const dropbox = (opts: DropboxAdapterOptions): DropboxAdapter => {
       }
     },
     async list(options): Promise<ListResult> {
+      // With a delimiter, list one folder level (recursive: false) rooted at
+      // the prefix and surface subfolders as common prefixes; otherwise walk
+      // the whole tree recursively as before.
+      const folded = options?.delimiter !== undefined;
+      if (options?.delimiter) {
+        assertSlashDelimiter("dropbox", options.delimiter);
+      }
       try {
         await authHandle.ensureAccessToken();
         const res = options?.cursor
           ? await client.filesListFolderContinue({ cursor: options.cursor })
           : await client.filesListFolder({
               limit: options?.limit,
-              path: keyToPath(""),
-              recursive: true,
+              path: keyToPath(folded ? (options?.prefix ?? "") : ""),
+              recursive: !folded,
             });
         const result = res.result as files.ListFolderResult;
         const items: StoredFile[] = [];
-        for (const entry of result.entries) {
+        const prefixes: string[] = [];
+        // Classify one entry into items (files) or prefixes (folders, folded
+        // mode only); nested so the loop's branching stays out of `list`.
+        const collect = (entry: files.ListFolderResult["entries"][number]) => {
           const tag = (entry as { ".tag"?: string })[".tag"];
-          if (tag !== "file") {
-            continue;
-          }
-          const file = entry as files.FileMetadataReference;
           const path =
-            file.path_display ?? file.path_lower ?? `/${file.name ?? ""}`;
+            (entry as files.FileMetadataReference).path_display ??
+            (entry as files.FileMetadataReference).path_lower ??
+            `/${entry.name ?? ""}`;
           const key = pathToKey(path);
           if (!key) {
-            continue;
+            return;
+          }
+          if (tag === "folder") {
+            if (folded) {
+              prefixes.push(`${key}/`);
+            }
+            return;
+          }
+          if (tag !== "file") {
+            return;
           }
           if (options?.prefix && !key.startsWith(options.prefix)) {
-            continue;
+            return;
           }
-          const meta = fileMetaFromDropbox(file);
           items.push(
             createStoredFile(
-              { key, ...meta },
+              {
+                key,
+                ...fileMetaFromDropbox(entry as files.FileMetadataReference),
+              },
               { factory: lazyDownload(key), kind: "lazy" }
             )
           );
+        };
+        for (const entry of result.entries) {
+          collect(entry);
         }
         return {
           items,
           ...(result.has_more && { cursor: result.cursor }),
+          ...(prefixes.length && { prefixes }),
         };
       } catch (error) {
-        throw mapDropboxError(error);
+        const mapped = mapDropboxError(error);
+        // A folded listing of a folder that doesn't exist is an empty folder.
+        if (folded && mapped.code === "NotFound") {
+          return { items: [] };
+        }
+        throw mapped;
       }
     },
     name: "dropbox",
@@ -1176,6 +1205,7 @@ export const dropbox = (opts: DropboxAdapterOptions): DropboxAdapter => {
         )
       );
     },
+    supportsDelimiter: true,
     supportsRange: true,
     async upload(key, body, options): Promise<UploadResult> {
       if (options?.metadata && Object.keys(options.metadata).length > 0) {

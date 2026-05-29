@@ -11,6 +11,7 @@ import type {
 import { collectStream } from "../internal/core.js";
 import { FilesError } from "../internal/errors.js";
 import { createStoredFile } from "../internal/stored-file.js";
+import { paginateHierarchy } from "../internal/walk-paginate.js";
 
 /**
  * A value the {@link MemoryAdapterOptions.initial} seed accepts for one key.
@@ -314,6 +315,25 @@ export const memory = (opts?: MemoryAdapterOptions): MemoryAdapter => {
       // Cursor is the last key of the previous page; resume at the first key
       // strictly greater. Same scheme as the fs adapter for consistent
       // pagination across both.
+      if (options?.delimiter) {
+        const page = paginateHierarchy(
+          sorted.map(([key]) => key),
+          {
+            delimiter: options.delimiter,
+            limit,
+            ...(prefix && { prefix }),
+            ...(cursor !== undefined && { cursor }),
+          }
+        );
+        const pageKeys = new Set(page.items);
+        return Promise.resolve({
+          items: sorted
+            .filter(([key]) => pageKeys.has(key))
+            .map(([key, entry]) => toStored(key, entry)),
+          ...(page.cursor && { cursor: page.cursor }),
+          ...(page.prefixes.length && { prefixes: page.prefixes }),
+        });
+      }
       const startIdx = cursor ? sorted.findIndex(([key]) => key > cursor) : 0;
       const start = startIdx === -1 ? sorted.length : startIdx;
       const slice = sorted.slice(start, start + limit);
@@ -430,6 +450,7 @@ export const memory = (opts?: MemoryAdapterOptions): MemoryAdapter => {
         url: `memory://${key}?expires=${signOpts.expiresIn}`,
       });
     },
+    supportsDelimiter: true,
     supportsRange: true,
     async upload(key, body, options) {
       const bytes = await bodyToBytes(body);

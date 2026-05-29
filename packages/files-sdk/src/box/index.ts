@@ -25,6 +25,7 @@ import type {
 } from "../index.js";
 import {
   assertRangeHonored,
+  assertSlashDelimiter,
   DEFAULT_URL_EXPIRES_IN,
   existsByProbe,
   joinPublicUrl,
@@ -940,6 +941,10 @@ export const box = (opts: BoxAdapterOptions = {}): BoxAdapter => {
     async list(options): Promise<ListResult> {
       try {
         await authHandle.ensureReady();
+        const folded = options?.delimiter !== undefined;
+        if (options?.delimiter) {
+          assertSlashDelimiter("box", options.delimiter);
+        }
         const limit = options?.limit ?? 1000;
         const offset = options?.cursor
           ? Number.parseInt(options.cursor, 10)
@@ -965,22 +970,32 @@ export const box = (opts: BoxAdapterOptions = {}): BoxAdapter => {
         });
         const entries = page.entries ?? [];
         const items: StoredFile[] = [];
-        for (const entry of entries) {
+        const prefixes: string[] = [];
+        // Classify one child into items (files) or prefixes (subfolders,
+        // folded mode only); nested so the loop's branching stays out of
+        // `list`.
+        const collect = (entry: (typeof entries)[number]) => {
           const e = entry as BoxFileLike & { type?: string };
-          if (e.type !== "file" || !e.id || !e.name) {
-            continue;
+          if (options?.prefix && e.name && !e.name.startsWith(options.prefix)) {
+            return;
           }
-          if (options?.prefix && !e.name.startsWith(options.prefix)) {
-            continue;
+          if (folded && e.type === "folder" && e.name) {
+            prefixes.push(`${e.name}/`);
+            return;
+          }
+          if (e.type !== "file" || !e.id || !e.name) {
+            return;
           }
           fileIdCache.set(e.name, e.id);
-          const meta = fileMetaFromBox(e);
           items.push(
             createStoredFile(
-              { key: e.name, ...meta },
+              { key: e.name, ...fileMetaFromBox(e) },
               { factory: lazyDownload(e.name), kind: "lazy" }
             )
           );
+        };
+        for (const entry of entries) {
+          collect(entry);
         }
 
         const nextOffset = offset + entries.length;
@@ -991,6 +1006,7 @@ export const box = (opts: BoxAdapterOptions = {}): BoxAdapter => {
         return {
           items,
           ...(hasMore && { cursor: String(nextOffset) }),
+          ...(prefixes.length && { prefixes }),
         };
       } catch (error) {
         throw mapBoxError(error);
@@ -1099,6 +1115,7 @@ export const box = (opts: BoxAdapterOptions = {}): BoxAdapter => {
         )
       );
     },
+    supportsDelimiter: true,
     supportsRange: true,
     upload(key, body, options): Promise<UploadResult> {
       return runUpload(key, body, options);

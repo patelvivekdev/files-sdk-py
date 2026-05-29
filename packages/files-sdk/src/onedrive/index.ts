@@ -32,6 +32,7 @@ import type {
   UploadResult,
 } from "../index.js";
 import {
+  assertSlashDelimiter,
   existsByProbe,
   httpRangeHeader,
   rangedSize,
@@ -1070,6 +1071,10 @@ export const onedrive = (
       }
     },
     async list(options): Promise<ListResult> {
+      const folded = options?.delimiter !== undefined;
+      if (options?.delimiter) {
+        assertSlashDelimiter("onedrive", options.delimiter);
+      }
       try {
         const listPath = `${containerApiPath()}/children`;
         const initial = options?.cursor
@@ -1084,25 +1089,36 @@ export const onedrive = (
           ["@odata.nextLink"]?: string;
         };
         const items: StoredFile[] = [];
-        for (const item of res.value ?? []) {
-          if (item.folder) {
-            continue;
-          }
+        const prefixes: string[] = [];
+        // Classify one child into items (files) or prefixes (folders, folded
+        // mode only); nested so the loop's branching stays out of `list`.
+        const collect = (item: DriveItem) => {
           const name = item.name ?? "";
-          const key = rootFolderPath ? name : name;
-          if (options?.prefix && !key.startsWith(options.prefix)) {
-            continue;
+          if (options?.prefix && !name.startsWith(options.prefix)) {
+            return;
           }
-          const m = itemToStoredMeta(item);
+          if (item.folder) {
+            if (folded && name) {
+              prefixes.push(`${name}/`);
+            }
+            return;
+          }
           items.push(
             createStoredFile(
-              { key, ...m },
-              { factory: lazyDownload(key), kind: "lazy" }
+              { key: name, ...itemToStoredMeta(item) },
+              { factory: lazyDownload(name), kind: "lazy" }
             )
           );
+        };
+        for (const item of res.value ?? []) {
+          collect(item);
         }
         const cursor = res["@odata.nextLink"];
-        return { items, ...(cursor && { cursor }) };
+        return {
+          items,
+          ...(cursor && { cursor }),
+          ...(prefixes.length && { prefixes }),
+        };
       } catch (error) {
         throw mapGraphError(error);
       }
@@ -1145,6 +1161,7 @@ export const onedrive = (
         throw mapGraphError(error);
       }
     },
+    supportsDelimiter: true,
     supportsRange: true,
     async upload(key, body, options): Promise<UploadResult> {
       if (options?.metadata && Object.keys(options.metadata).length > 0) {

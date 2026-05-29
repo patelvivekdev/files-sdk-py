@@ -11,6 +11,7 @@ import type {
   UploadResult,
   UrlOptions,
 } from "../index.js";
+import { assertSlashDelimiter } from "../internal/core.js";
 import { readEnv } from "../internal/env.js";
 import { FilesError } from "../internal/errors.js";
 import type { FilesErrorCode } from "../internal/errors.js";
@@ -437,16 +438,26 @@ export const netlifyBlobs = (
       // (not exposed on the iterator value), so we still can't thread
       // it through the unified `cursor` API; we just stop iterating
       // when we have enough.
+      if (options?.delimiter) {
+        assertSlashDelimiter("netlify-blobs", options.delimiter);
+      }
       const limit = options?.limit;
       const blobs: { etag: string; key: string }[] = [];
+      // Directories repeat across pages, so collect them in a Set.
+      const directories = new Set<string>();
       const reachedLimit = (): boolean =>
         limit !== undefined && blobs.length >= limit;
       try {
         const iter = store.list({
           paginate: true,
           ...(options?.prefix && { prefix: options.prefix }),
+          ...(options?.delimiter && { directories: true }),
         });
         for await (const page of iter) {
+          for (const d of (page as { directories?: string[] }).directories ??
+            []) {
+            directories.add(d);
+          }
           for (const b of page.blobs) {
             blobs.push(b);
             if (reachedLimit()) {
@@ -485,7 +496,10 @@ export const netlifyBlobs = (
           }
         )
       );
-      return { items };
+      return {
+        items,
+        ...(directories.size && { prefixes: [...directories] }),
+      };
     },
     name: "netlify-blobs",
     raw: store,
@@ -495,6 +509,7 @@ export const netlifyBlobs = (
         "netlify-blobs: signed upload URLs are not available. Netlify Blobs has no presigned upload primitive — upload via the SDK or proxy through your application."
       );
     },
+    supportsDelimiter: true,
     async upload(key, body, options): Promise<UploadResult> {
       const contentType = options?.contentType ?? "application/octet-stream";
       let storable: Awaited<ReturnType<typeof bodyToStorable>>;

@@ -30,6 +30,7 @@ import {
 import { readEnv } from "../internal/env.js";
 import { FilesError } from "../internal/errors.js";
 import { createStoredFile } from "../internal/stored-file.js";
+import { compareKeys, paginateHierarchy } from "../internal/walk-paginate.js";
 
 export type CloudinaryResourceType = "image" | "video" | "raw";
 export type CloudinaryDeliveryType = "upload" | "private" | "authenticated";
@@ -168,6 +169,15 @@ const toBuffer = async (body: Body): Promise<Buffer> => {
       : normalized.data;
   return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 };
+
+interface CloudinaryResource {
+  public_id: string;
+  bytes?: number;
+  format?: string;
+  resource_type?: string;
+  etag?: string;
+  created_at?: string;
+}
 
 const resolveContentType = (
   resource: { resource_type?: string; format?: string },
@@ -388,6 +398,65 @@ export const cloudinaryAdapter = (
     },
     async list(listOpts?: ListOptions): Promise<ListResult> {
       try {
+        const toStored = (resource: CloudinaryResource): StoredFile =>
+          createStoredFile(
+            {
+              ...(resource.etag && { etag: resource.etag }),
+              key: resource.public_id,
+              ...(resource.created_at && {
+                lastModified: new Date(resource.created_at).getTime(),
+              }),
+              size: resource.bytes ?? 0,
+              type: resolveContentType(resource),
+            },
+            { factory: lazyDownload(resource.public_id), kind: "lazy" }
+          );
+        // resources() lists every public_id under the prefix (recursively),
+        // with no native folder mode that matches our API, so gather them all
+        // and synthesize the common prefixes in memory. Nested so the flat
+        // `list` stays simple.
+        const listFolded = async (delimiter: string): Promise<ListResult> => {
+          const byKey = new Map<string, CloudinaryResource>();
+          let next: string | undefined;
+          do {
+            const apiOpts: Record<string, unknown> = {
+              max_results: MAX_LIST_LIMIT,
+              resource_type: resourceType,
+              type,
+            };
+            if (listOpts?.prefix) {
+              apiOpts.prefix = listOpts.prefix;
+            }
+            if (next) {
+              apiOpts.next_cursor = next;
+            }
+            const resp = (await sdk.api.resources(apiOpts)) as {
+              resources?: CloudinaryResource[];
+              next_cursor?: string;
+            };
+            for (const r of resp.resources ?? []) {
+              byKey.set(r.public_id, r);
+            }
+            next = resp.next_cursor;
+          } while (next);
+          const sortedKeys = [...byKey.keys()].toSorted(compareKeys);
+          const page = paginateHierarchy(sortedKeys, {
+            delimiter,
+            ...(listOpts?.limit !== undefined && { limit: listOpts.limit }),
+            ...(listOpts?.prefix !== undefined && { prefix: listOpts.prefix }),
+            ...(listOpts?.cursor !== undefined && { cursor: listOpts.cursor }),
+          });
+          return {
+            items: page.items.map((key) =>
+              toStored(byKey.get(key) as CloudinaryResource)
+            ),
+            ...(page.cursor && { cursor: page.cursor }),
+            ...(page.prefixes.length && { prefixes: page.prefixes }),
+          };
+        };
+        if (listOpts?.delimiter) {
+          return await listFolded(listOpts.delimiter);
+        }
         const requested = listOpts?.limit ?? DEFAULT_LIST_LIMIT;
         const limit = Math.min(requested, MAX_LIST_LIMIT);
         const apiOpts: Record<string, unknown> = {
@@ -402,30 +471,10 @@ export const cloudinaryAdapter = (
           apiOpts.next_cursor = listOpts.cursor;
         }
         const response = (await sdk.api.resources(apiOpts)) as {
-          resources?: {
-            public_id: string;
-            bytes?: number;
-            format?: string;
-            resource_type?: string;
-            etag?: string;
-            created_at?: string;
-          }[];
+          resources?: CloudinaryResource[];
           next_cursor?: string;
         };
-        const items: StoredFile[] = (response.resources ?? []).map((resource) =>
-          createStoredFile(
-            {
-              ...(resource.etag && { etag: resource.etag }),
-              key: resource.public_id,
-              ...(resource.created_at && {
-                lastModified: new Date(resource.created_at).getTime(),
-              }),
-              size: resource.bytes ?? 0,
-              type: resolveContentType(resource),
-            },
-            { factory: lazyDownload(resource.public_id), kind: "lazy" }
-          )
-        );
+        const items: StoredFile[] = (response.resources ?? []).map(toStored);
         return {
           ...(response.next_cursor && { cursor: response.next_cursor }),
           items,
@@ -643,6 +692,7 @@ export const cloudinaryAdapter = (
         url,
       });
     },
+    supportsDelimiter: true,
     supportsRange: true,
     type,
     async upload(

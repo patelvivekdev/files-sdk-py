@@ -447,6 +447,25 @@ describe("gcs adapter", () => {
     expect(opts.pageToken).toBe("tok-1");
   });
 
+  test("list forwards delimiter and maps apiResponse.prefixes", async () => {
+    getFilesMock.mockImplementationOnce(() =>
+      Promise.resolve([
+        [makeFile("a/1.txt", true)],
+        null,
+        { prefixes: ["a/b/", "a/c/"] },
+      ])
+    );
+    const files = new Files({ adapter: gcs({ bucket: "uploads" }) });
+    const out = await files.list({ delimiter: "/", prefix: "a/" });
+    expect(out.items.map((i) => i.key)).toEqual(["a/1.txt"]);
+    expect(out.prefixes).toEqual(["a/b/", "a/c/"]);
+    const call = getFilesMock.mock.calls.at(-1);
+    if (!call) {
+      throw new Error("expected getFiles to have been called");
+    }
+    expect((call[0] as { delimiter?: string }).delimiter).toBe("/");
+  });
+
   test("list returns the next pageToken as cursor when more pages exist", async () => {
     getFilesMock.mockImplementationOnce(() =>
       Promise.resolve([

@@ -155,6 +155,7 @@ const listMock = mock(
   (opts?: {
     prefix?: string;
     paginate?: boolean;
+    directories?: boolean;
   }):
     | Promise<{
         blobs: { etag: string; key: string }[];
@@ -525,6 +526,34 @@ describe("netlify-blobs adapter", () => {
     expect(first.etag).toBe('"etag-1"');
     // Lazy body fetches via store.get.
     expect(await first.text()).toBe("one");
+  });
+
+  test("list with a delimiter requests directories and dedupes them", async () => {
+    listMock.mockImplementationOnce((opts) => {
+      expect(opts?.directories).toBe(true);
+      return {
+        // eslint-disable-next-line require-yield
+        async *[Symbol.asyncIterator]() {
+          yield {
+            blobs: [{ etag: '"e"', key: "a/1.txt" }],
+            directories: ["a/b/"],
+          };
+          // Directories repeat across pages; the adapter must dedupe.
+          yield { blobs: [], directories: ["a/b/", "a/c/"] };
+        },
+      };
+    });
+    const files = new Files({ adapter: netlifyBlobs({ name: "s" }) });
+    const out = await files.list({ delimiter: "/", prefix: "a/" });
+    expect(out.items.map((i) => i.key)).toEqual(["a/1.txt"]);
+    expect(out.prefixes?.toSorted()).toEqual(["a/b/", "a/c/"]);
+  });
+
+  test("netlify-blobs only supports the / delimiter", async () => {
+    const files = new Files({ adapter: netlifyBlobs({ name: "s" }) });
+    await expect(files.list({ delimiter: "|" })).rejects.toMatchObject({
+      code: "Provider",
+    });
   });
 
   test("list applies user-supplied limit client-side", async () => {

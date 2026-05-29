@@ -113,6 +113,22 @@ const listMock = mock(
   (_path: string, _opts: { limit: number; offset: number }) =>
     Promise.resolve(ok([baseListItem("a/1.txt"), baseListItem("a/2.txt")]))
 );
+const listV2Mock = mock((_opts?: unknown) =>
+  Promise.resolve(
+    ok({
+      // `b` carries a full `key`; `c` has only a leaf name (key reconstructed).
+      folders: [{ key: "a/b/", name: "b" }, { name: "c" }],
+      hasNext: false,
+      objects: [
+        {
+          key: "a/1.txt",
+          metadata: baseListItem("a/1.txt").metadata,
+          name: "1.txt",
+        },
+      ],
+    })
+  )
+);
 const getPublicUrlMock = mock((path: string, opts?: { download?: unknown }) => {
   const qs = opts?.download
     ? `?download=${typeof opts.download === "string" ? opts.download : ""}`
@@ -158,6 +174,7 @@ const bucketRef = {
   getPublicUrl: getPublicUrlMock,
   info: infoMock,
   list: listMock,
+  listV2: listV2Mock,
   remove: removeMock,
   upload: uploadMock,
 };
@@ -593,6 +610,24 @@ describe("supabase adapter", () => {
       expect(item.key).toBe("a/a/1.txt");
       await expect(files.head(item.key)).resolves.toBeDefined();
       await expect(files.download(item.key)).resolves.toBeDefined();
+    });
+
+    test("a delimiter lists via listV2 and maps folders to prefixes", async () => {
+      const out = await makeAdapter().list({ delimiter: "/", prefix: "a/" });
+      expect(out.items.map((i) => i.key)).toEqual(["a/1.txt"]);
+      // folder "a/c" (no trailing slash) is normalized to "a/c/".
+      expect(out.prefixes).toEqual(["a/b/", "a/c/"]);
+      const [v2Call] = listV2Mock.mock.calls;
+      if (!v2Call) {
+        throw new Error("expected listV2");
+      }
+      expect(v2Call[0]).toMatchObject({ prefix: "a/", with_delimiter: true });
+    });
+
+    test("rejects a non-slash delimiter", async () => {
+      await expect(
+        makeAdapter().list({ delimiter: "|" })
+      ).rejects.toMatchObject({ code: "Provider" });
     });
 
     test("encodes next offset as cursor when page is full", async () => {

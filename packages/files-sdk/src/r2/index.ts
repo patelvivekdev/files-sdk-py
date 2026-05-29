@@ -390,6 +390,7 @@ const r2FromBinding = (opts: R2BindingOptions): R2Adapter => {
           ...(options?.prefix && { prefix: options.prefix }),
           ...(options?.limit !== undefined && { limit: options.limit }),
           ...(options?.cursor && { cursor: options.cursor }),
+          ...(options?.delimiter && { delimiter: options.delimiter }),
         });
       } catch (error) {
         throw mapR2Error(error);
@@ -419,6 +420,9 @@ const r2FromBinding = (opts: R2BindingOptions): R2Adapter => {
       return {
         cursor: result.truncated ? result.cursor : undefined,
         items,
+        ...(result.delimitedPrefixes?.length && {
+          prefixes: result.delimitedPrefixes,
+        }),
       };
     },
     name: "r2-binding",
@@ -433,6 +437,7 @@ const r2FromBinding = (opts: R2BindingOptions): R2Adapter => {
       assertNoMaxSize(signOpts);
       return signer.signedUploadUrl(key, signOpts);
     },
+    supportsDelimiter: true,
     supportsRange: true,
     async upload(key, body, options) {
       const { data, contentType, contentLength } = await normalizeForR2(
@@ -651,6 +656,9 @@ const r2FromHttp = (opts: R2HttpOptions): R2Adapter => {
       const adapter = await ensure();
       return adapter.signedUploadUrl(key, signOpts);
     },
+    // `list` delegates to the inner S3 adapter, whose ListObjectsV2 honors
+    // `Delimiter` against R2's S3-compatible API.
+    supportsDelimiter: true,
     async upload(key, body, uploadOpts) {
       const adapter = await ensure();
       return adapter.upload(key, body, uploadOpts);

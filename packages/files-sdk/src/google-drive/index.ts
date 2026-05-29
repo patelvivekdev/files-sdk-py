@@ -27,6 +27,7 @@ import { FilesError } from "../internal/errors.js";
 import type { ProviderFilesErrorCode } from "../internal/errors.js";
 import { createOffsetHttpDriver } from "../internal/resumable-offset-http.js";
 import { createStoredFile } from "../internal/stored-file.js";
+import { compareKeys, paginateHierarchy } from "../internal/walk-paginate.js";
 
 export interface GoogleDriveAdapterOptions {
   /**
@@ -662,6 +663,66 @@ export const googleDrive = (
     async list(options): Promise<ListResult> {
       try {
         const q = `'${escapeQueryValue(rootFolderId)}' in parents and trashed=false`;
+        const toItem = (
+          f: drive_v3.Schema$File,
+          fsdkKey: string
+        ): StoredFile => {
+          const m = fileToStoredMeta(f);
+          const fileId = f.id ?? "";
+          if (fileId) {
+            fileIdCache.set(fsdkKey, fileId);
+          }
+          return createStoredFile(
+            { key: fsdkKey, ...m },
+            { factory: lazyDownload(fileId), kind: "lazy" }
+          );
+        };
+        const keyOf = (f: drive_v3.Schema$File): string | undefined =>
+          (f.appProperties as Record<string, string> | undefined)?.[KEY_PROP];
+        // Drive stores every object flat under rootFolderId, keyed by the
+        // fsdkKey appProperty (the Drive `name` is just the leaf). It can't
+        // sort/group by appProperty, so gather all keys and synthesize the
+        // common prefixes in memory, like the fs adapter. Nested so the flat
+        // `list` stays simple.
+        const listFolded = async (delimiter: string): Promise<ListResult> => {
+          const fileByKey = new Map<string, drive_v3.Schema$File>();
+          let pageToken: string | undefined;
+          do {
+            const res = (await driveClient.files.list(
+              {
+                ...sharedDriveParams,
+                fields: `nextPageToken, files(${FILE_FIELDS})`,
+                ...(pageToken && { pageToken }),
+                q,
+              },
+              signalOpts(options?.signal)
+            )) as { data: drive_v3.Schema$FileList };
+            for (const f of res.data.files ?? []) {
+              const key = keyOf(f);
+              if (key) {
+                fileByKey.set(key, f);
+              }
+            }
+            pageToken = res.data.nextPageToken ?? undefined;
+          } while (pageToken);
+          const sortedKeys = [...fileByKey.keys()].toSorted(compareKeys);
+          const page = paginateHierarchy(sortedKeys, {
+            delimiter,
+            ...(options?.limit !== undefined && { limit: options.limit }),
+            ...(options?.prefix !== undefined && { prefix: options.prefix }),
+            ...(options?.cursor !== undefined && { cursor: options.cursor }),
+          });
+          return {
+            items: page.items.map((key) =>
+              toItem(fileByKey.get(key) as drive_v3.Schema$File, key)
+            ),
+            ...(page.cursor && { cursor: page.cursor }),
+            ...(page.prefixes.length && { prefixes: page.prefixes }),
+          };
+        };
+        if (options?.delimiter) {
+          return await listFolded(options.delimiter);
+        }
         const res = (await driveClient.files.list(
           {
             ...sharedDriveParams,
@@ -675,28 +736,14 @@ export const googleDrive = (
         const driveFiles = res.data.files ?? [];
         const items: StoredFile[] = [];
         for (const f of driveFiles) {
-          const props = (f.appProperties ?? {}) as Record<string, string>;
-          const fsdkKey = props[KEY_PROP];
+          const fsdkKey = keyOf(f);
           if (!fsdkKey) {
             continue;
           }
           if (options?.prefix && !fsdkKey.startsWith(options.prefix)) {
             continue;
           }
-          const m = fileToStoredMeta(f);
-          const fileId = f.id ?? "";
-          if (fileId) {
-            fileIdCache.set(fsdkKey, fileId);
-          }
-          items.push(
-            createStoredFile(
-              { key: fsdkKey, ...m },
-              {
-                factory: lazyDownload(fileId),
-                kind: "lazy",
-              }
-            )
-          );
+          items.push(toItem(f, fsdkKey));
         }
         const cursor = res.data.nextPageToken ?? undefined;
         return { items, ...(cursor && { cursor }) };
@@ -888,6 +935,7 @@ export const googleDrive = (
         }),
       };
     },
+    supportsDelimiter: true,
     supportsRange: true,
     async upload(key, body, options): Promise<UploadResult> {
       assertNoReservedMetadata(options?.metadata);

@@ -703,6 +703,67 @@ describe("Files class", () => {
     expect(items.map((i) => i.key).toSorted()).toEqual(["a/1.txt", "a/2.txt"]);
   });
 
+  test("list with a delimiter returns folders as common prefixes", async () => {
+    const files = new Files({
+      adapter: fakeAdapter({ supportsDelimiter: true }),
+    });
+    await files.upload("a/1.txt", "1");
+    await files.upload("a/b/2.txt", "2");
+    await files.upload("a/c/3.txt", "3");
+    const { items, prefixes } = await files.list({
+      delimiter: "/",
+      prefix: "a/",
+    });
+    expect(items.map((i) => i.key)).toEqual(["a/1.txt"]);
+    expect(prefixes).toEqual(["a/b/", "a/c/"]);
+  });
+
+  test("a constructor prefix strips both item keys and common prefixes", async () => {
+    const files = new Files({
+      adapter: fakeAdapter({ supportsDelimiter: true }),
+      prefix: "users",
+    });
+    await files.upload("avatars/1.png", "one");
+    await files.upload("avatars/thumbs/2.png", "two");
+    const { items, prefixes } = await files.list({
+      delimiter: "/",
+      prefix: "avatars/",
+    });
+    expect(items.map((i) => i.key)).toEqual(["avatars/1.png"]);
+    expect(prefixes).toEqual(["avatars/thumbs/"]);
+  });
+
+  test("list rejects a delimiter on an adapter without support", async () => {
+    const files = new Files({ adapter: fakeAdapter() });
+    await files.upload("a/1.txt", "1");
+    await expect(files.list({ delimiter: "/" })).rejects.toMatchObject({
+      code: "Provider",
+    });
+  });
+
+  test("list rejects an empty delimiter", async () => {
+    const files = new Files({
+      adapter: fakeAdapter({ supportsDelimiter: true }),
+    });
+    await expect(files.list({ delimiter: "" })).rejects.toMatchObject({
+      code: "Provider",
+    });
+  });
+
+  test("listAll ignores delimiter and walks the whole tree", async () => {
+    const files = new Files({
+      adapter: fakeAdapter({ supportsDelimiter: true }),
+    });
+    await files.upload("a/1.txt", "1");
+    await files.upload("a/b/2.txt", "2");
+    await files.upload("a/c/3.txt", "3");
+    const keys: string[] = [];
+    for await (const file of files.listAll({ delimiter: "/", prefix: "a/" })) {
+      keys.push(file.key);
+    }
+    expect(keys.toSorted()).toEqual(["a/1.txt", "a/b/2.txt", "a/c/3.txt"]);
+  });
+
   test("constructor retries Provider failures", async () => {
     const adapter = fakeAdapter();
     let attempts = 0;

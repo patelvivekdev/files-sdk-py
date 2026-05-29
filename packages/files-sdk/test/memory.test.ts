@@ -470,6 +470,39 @@ describe("memory adapter", () => {
       expect(items).toEqual([]);
       expect(cursor).toBeUndefined();
     });
+
+    test("a delimiter collapses folders into common prefixes", async () => {
+      const adapter = memory();
+      await adapter.upload("a/1.txt", "1");
+      await adapter.upload("a/b/2.txt", "2");
+      await adapter.upload("a/c/3.txt", "3");
+      const { items, prefixes } = await adapter.list({
+        delimiter: "/",
+        prefix: "a/",
+      });
+      expect(items.map((i) => i.key)).toEqual(["a/1.txt"]);
+      expect(prefixes).toEqual(["a/b/", "a/c/"]);
+    });
+
+    test("a delimiter paginates items and prefixes together", async () => {
+      const adapter = memory();
+      await adapter.upload("a/1.txt", "1");
+      await adapter.upload("a/b/2.txt", "2");
+      const page1 = await adapter.list({
+        delimiter: "/",
+        limit: 1,
+        prefix: "a/",
+      });
+      expect(page1.items.map((i) => i.key)).toEqual(["a/1.txt"]);
+      expect(page1.cursor).toBe("a/1.txt");
+      const page2 = await adapter.list({
+        cursor: page1.cursor,
+        delimiter: "/",
+        limit: 1,
+        prefix: "a/",
+      });
+      expect(page2.prefixes).toEqual(["a/b/"]);
+    });
   });
 
   describe("url", () => {

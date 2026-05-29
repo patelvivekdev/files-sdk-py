@@ -272,6 +272,9 @@ export interface ListOptions extends OperationOptions {
   /**
    * Continuation token from a prior result. Pass the `cursor` field of the
    * previous page back in to fetch the next page; omit on the first call.
+   *
+   * A cursor is only valid for the exact `prefix` **and** `delimiter` it was
+   * produced with — hold both constant across a paginated sequence.
    */
   cursor?: string;
   /**
@@ -279,10 +282,39 @@ export interface ListOptions extends OperationOptions {
    * providers max around 1000). Defaults to 1000.
    */
   limit?: number;
+  /**
+   * Collapse keys at this boundary into "folders" (S3-style common prefixes),
+   * the building block for a file-browser UI. With `delimiter: "/"` and
+   * `prefix: "photos/"`, the page's `items` are only the direct files
+   * (`photos/cover.jpg`) and {@link ListResult.prefixes} holds the subfolders
+   * (`photos/2023/`, `photos/2024/`) — the keys nested deeper are folded into
+   * those prefixes rather than listed.
+   *
+   * **Supported** by the object-store adapters with native common-prefix
+   * listing (S3 and the whole `s3()` family, R2, Google Cloud Storage,
+   * Firebase Storage, Azure Blob), the local `fs`, in-memory, FTP, SFTP,
+   * Google Drive, and Cloudinary adapters (any delimiter string), plus the
+   * folder-based providers (Vercel Blob, Netlify Blobs, Supabase, Dropbox,
+   * Box, OneDrive, SharePoint) which only accept `"/"`.
+   *
+   * **Throws** a {@link FilesError} on adapters with no folder concept
+   * (UploadThing, Appwrite, PocketBase, Convex, Bun's S3) rather than silently
+   * returning a flat list. Check {@link Adapter.supportsDelimiter} to branch at
+   * runtime. Must be a non-empty string.
+   */
+  delimiter?: string;
 }
 
 export interface ListResult {
   items: StoredFile[];
+  /**
+   * Common prefixes ("folders") when {@link ListOptions.delimiter} is set —
+   * full keys including the trailing delimiter, e.g. `["photos/2023/",
+   * "photos/2024/"]`. Omitted when no delimiter is set or none are found. When
+   * the {@link Files} instance has a client `prefix`, these are scoped/stripped
+   * identically to item keys.
+   */
+  prefixes?: string[];
   cursor?: string;
 }
 
@@ -510,6 +542,14 @@ export interface Adapter<Raw = unknown> {
    * unset for adapters whose provider has no range primitive.
    */
   readonly supportsRange?: boolean;
+  /**
+   * Set `true` when `list` honors {@link ListOptions.delimiter} by returning
+   * S3-style common prefixes in {@link ListResult.prefixes}. The {@link Files}
+   * wrapper gates on this: a `delimiter` passed to an adapter without it throws
+   * before any provider call, rather than silently returning a flat list.
+   * Leave unset for adapters whose provider has no folder/prefix concept.
+   */
+  readonly supportsDelimiter?: boolean;
   upload(key: string, body: Body, opts?: UploadOptions): Promise<UploadResult>;
   /**
    * Download an object's body and metadata. When {@link DownloadOptions.range}
@@ -1467,6 +1507,7 @@ export class Files<A extends Adapter = Adapter> {
   list(opts?: ListOptions): Promise<ListResult> {
     const ctx: ActionContext = { type: "list" };
     return this.#action(ctx, () => {
+      this.#assertDelimiterSupported(opts);
       if (!this.#prefix) {
         return this.#run(
           opts,
@@ -1485,6 +1526,9 @@ export class Files<A extends Adapter = Adapter> {
           return {
             ...result,
             items: result.items.map((item) => this.#storedFile(item)),
+            ...(result.prefixes && {
+              prefixes: result.prefixes.map((p) => this.#stripPrefix(p)),
+            }),
           };
         },
         true,
@@ -1516,9 +1560,13 @@ export class Files<A extends Adapter = Adapter> {
    * @yields each stored object, one page at a time, following the cursor.
    */
   async *listAll(opts?: ListOptions): AsyncGenerator<StoredFile, void> {
-    let cursor = opts?.cursor;
+    // `delimiter` would collapse nested keys into folders, so `listAll` would
+    // silently walk only the top level. It yields objects, so strip it and
+    // always walk the full tree; use `list()` directly for the folder view.
+    const { delimiter: _delimiter, ...rest } = opts ?? {};
+    let { cursor } = rest;
     do {
-      const page = await this.list(cursor ? { ...opts, cursor } : opts);
+      const page = await this.list(cursor ? { ...rest, cursor } : rest);
       yield* page.items;
       ({ cursor } = page);
     } while (cursor);
@@ -1644,6 +1692,21 @@ export class Files<A extends Adapter = Adapter> {
       "ReadOnly",
       `Cannot call ${operation}() on a read-only Files instance.`
     );
+  }
+
+  #assertDelimiterSupported(opts?: ListOptions): void {
+    if (opts?.delimiter === undefined) {
+      return;
+    }
+    if (opts.delimiter === "") {
+      throw new FilesError("Provider", "delimiter must be a non-empty string");
+    }
+    if (!this.#adapter.supportsDelimiter) {
+      throw new FilesError(
+        "Provider",
+        `${this.#adapter.name}: directory-style listing (delimiter) is not supported by this adapter`
+      );
+    }
   }
 
   #storedFile(file: StoredFile): StoredFile {

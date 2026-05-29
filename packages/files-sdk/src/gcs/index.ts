@@ -287,11 +287,14 @@ export const gcs = (opts: GCSAdapterOptions): GCSAdapter => {
     },
     async list(options) {
       try {
-        const [files, nextQuery] = await bucket.getFiles({
+        // getFiles returns [files, nextQuery, apiResponse]; the third element
+        // carries `prefixes` (the common prefixes) when a delimiter is set.
+        const [files, nextQuery, apiResponse] = await bucket.getFiles({
           autoPaginate: false,
           ...(options?.prefix && { prefix: options.prefix }),
           ...(options?.limit !== undefined && { maxResults: options.limit }),
           ...(options?.cursor && { pageToken: options.cursor }),
+          ...(options?.delimiter && { delimiter: options.delimiter }),
         });
         const items: StoredFile[] = files.map((f) => {
           const m = metaToStored(f.metadata);
@@ -308,7 +311,13 @@ export const gcs = (opts: GCSAdapterOptions): GCSAdapter => {
         });
         const cursor = (nextQuery as { pageToken?: string } | null | undefined)
           ?.pageToken;
-        return { items, ...(cursor && { cursor }) };
+        const prefixes = (apiResponse as { prefixes?: string[] } | undefined)
+          ?.prefixes;
+        return {
+          items,
+          ...(cursor && { cursor }),
+          ...(prefixes?.length && { prefixes }),
+        };
       } catch (error) {
         throw mapGCSError(error);
       }
@@ -363,6 +372,7 @@ export const gcs = (opts: GCSAdapterOptions): GCSAdapter => {
         throw mapGCSError(error);
       }
     },
+    supportsDelimiter: true,
     supportsRange: true,
     async upload(key, body, options) {
       const { cacheControl, metadata, multipart, onProgress } = options ?? {};

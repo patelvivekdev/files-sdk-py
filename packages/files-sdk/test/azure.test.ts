@@ -182,9 +182,37 @@ const listBlobsFlatMock = mock((opts?: { prefix?: string }) => {
   lastByPageOpts?: { continuationToken?: string; maxPageSize?: number };
 };
 
+const listBlobsByHierarchyMock = mock(
+  (delimiter: string, opts?: { prefix?: string }) => {
+    listBlobsByHierarchyMock.lastDelimiter = delimiter;
+    listBlobsByHierarchyMock.lastOpts = opts;
+    return {
+      byPage() {
+        return {
+          next: () =>
+            Promise.resolve({
+              done: false,
+              value: {
+                continuationToken: "",
+                segment: {
+                  blobItems: [{ name: "a/1.txt", properties: baseProps() }],
+                  blobPrefixes: [{ name: "a/b/" }, { name: "a/c/" }],
+                },
+              },
+            }),
+        };
+      },
+    };
+  }
+) as ReturnType<typeof mock> & {
+  lastDelimiter?: string;
+  lastOpts?: { prefix?: string };
+};
+
 const getContainerClientMock = mock((_name: string) => ({
   getBlobClient: getBlobClientMock,
   getBlockBlobClient: getBlockBlobClientMock,
+  listBlobsByHierarchy: listBlobsByHierarchyMock,
   listBlobsFlat: listBlobsFlatMock,
 }));
 
@@ -980,6 +1008,21 @@ describe("azure adapter", () => {
       expect(listBlobsFlatMock.lastOpts?.prefix).toBe("a/");
       expect(listBlobsFlatMock.lastByPageOpts?.continuationToken).toBe("tok-1");
       expect(listBlobsFlatMock.lastByPageOpts?.maxPageSize).toBe(10);
+    });
+
+    test("a delimiter lists via hierarchy and maps blobPrefixes", async () => {
+      const files = new Files({
+        adapter: azure({
+          accountKey: "k",
+          accountName: ACCOUNT,
+          container: CONTAINER,
+        }),
+      });
+      const out = await files.list({ delimiter: "/", prefix: "a/" });
+      expect(out.items.map((i) => i.key)).toEqual(["a/1.txt"]);
+      expect(out.prefixes).toEqual(["a/b/", "a/c/"]);
+      expect(listBlobsByHierarchyMock.lastDelimiter).toBe("/");
+      expect(listBlobsByHierarchyMock.lastOpts?.prefix).toBe("a/");
     });
 
     test("returns continuationToken as cursor when more pages exist", async () => {

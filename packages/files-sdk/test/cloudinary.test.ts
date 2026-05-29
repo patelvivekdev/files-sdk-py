@@ -435,6 +435,32 @@ describe("cloudinary adapter", () => {
     expect(cursor).toBeUndefined();
   });
 
+  test("list > a delimiter synthesizes common prefixes from public_ids", async () => {
+    const base = {
+      created_at: "2024-01-01T00:00:00Z",
+      etag: "etag-x",
+      format: "jpg",
+      resource_type: "image",
+      type: "upload",
+    };
+    resourcesMock.mockResolvedValueOnce({
+      resources: [
+        { ...base, bytes: 1, public_id: "photos/cover.jpg" },
+        { ...base, bytes: 2, public_id: "photos/2023/a.jpg" },
+        { ...base, bytes: 3, public_id: "photos/2024/b.jpg" },
+      ],
+    });
+    const files = new Files({
+      adapter: cloudinary({ cloudName: CLOUD_NAME, resourceType: "image" }),
+    });
+    const { items, prefixes } = await files.list({
+      delimiter: "/",
+      prefix: "photos/",
+    });
+    expect(items.map((i) => i.key)).toEqual(["photos/cover.jpg"]);
+    expect(prefixes).toEqual(["photos/2023/", "photos/2024/"]);
+  });
+
   test("list > surfaces next_cursor when present", async () => {
     resourcesMock.mockResolvedValueOnce({
       next_cursor: "page-2",

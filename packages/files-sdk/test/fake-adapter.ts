@@ -15,6 +15,7 @@ import type {
   UrlOptions,
 } from "../src/index.js";
 import { FilesError } from "../src/internal/errors.js";
+import { paginateHierarchy } from "../src/internal/walk-paginate.js";
 
 interface Entry {
   bytes: Uint8Array;
@@ -94,6 +95,7 @@ const toStored = (key: string, entry: Entry): StoredFile =>
 
 export const fakeAdapter = (config?: {
   supportsRange?: boolean;
+  supportsDelimiter?: boolean;
 }): FakeAdapter => {
   const store = new Map<string, Entry>();
   let counter = 0;
@@ -187,6 +189,25 @@ export const fakeAdapter = (config?: {
       const sorted = [...store.entries()]
         .filter(([k]) => k.startsWith(prefix))
         .toSorted(([a], [b]) => compareKeys(a, b));
+      if (opts?.delimiter) {
+        const page = paginateHierarchy(
+          sorted.map(([k]) => k),
+          {
+            delimiter: opts.delimiter,
+            limit,
+            ...(prefix && { prefix }),
+            ...(cursor !== undefined && { cursor }),
+          }
+        );
+        const pageKeys = new Set(page.items);
+        return Promise.resolve({
+          cursor: page.cursor,
+          items: sorted
+            .filter(([k]) => pageKeys.has(k))
+            .map(([k, e]) => toStored(k, e)),
+          ...(page.prefixes.length && { prefixes: page.prefixes }),
+        });
+      }
       const start = cursor ? sorted.findIndex(([k]) => k > cursor) : 0;
       const slice = sorted.slice(
         start === -1 ? sorted.length : start,
@@ -201,6 +222,7 @@ export const fakeAdapter = (config?: {
     },
     name: "fake",
     raw: store,
+    ...(config?.supportsDelimiter && { supportsDelimiter: true }),
     ...(config?.supportsRange && { supportsRange: true }),
     signedUploadUrl(
       key: string,

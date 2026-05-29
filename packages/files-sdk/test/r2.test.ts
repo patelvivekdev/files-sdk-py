@@ -300,18 +300,26 @@ describe("r2 adapter — HTTP path", () => {
   });
 });
 
+interface BindingEntry {
+  bytes: Uint8Array;
+  httpMetadata?: { contentType?: string };
+  customMetadata?: Record<string, string>;
+  etag: string;
+  uploaded: Date;
+  size: number;
+}
+
+const toBindingObject = ([k, v]: [string, BindingEntry]) => ({
+  customMetadata: v.customMetadata,
+  etag: v.etag,
+  httpMetadata: v.httpMetadata,
+  key: k,
+  size: v.size,
+  uploaded: v.uploaded,
+});
+
 const fakeBinding = () => {
-  const map = new Map<
-    string,
-    {
-      bytes: Uint8Array;
-      httpMetadata?: { contentType?: string };
-      customMetadata?: Record<string, string>;
-      etag: string;
-      uploaded: Date;
-      size: number;
-    }
-  >();
+  const map = new Map<string, BindingEntry>();
   let counter = 0;
   const bucket = {
     delete(key: string) {
@@ -370,19 +378,41 @@ const fakeBinding = () => {
         uploaded: entry.uploaded,
       });
     },
-    list(opts?: { prefix?: string; limit?: number; cursor?: string }) {
+    list(opts?: {
+      prefix?: string;
+      limit?: number;
+      cursor?: string;
+      delimiter?: string;
+    }) {
       const prefix = opts?.prefix ?? "";
-      const objects = [...map.entries()]
-        .filter(([k]) => k.startsWith(prefix))
-        .map(([k, v]) => ({
-          customMetadata: v.customMetadata,
-          etag: v.etag,
-          httpMetadata: v.httpMetadata,
-          key: k,
-          size: v.size,
-          uploaded: v.uploaded,
-        }));
-      return Promise.resolve({ cursor: undefined, objects, truncated: false });
+      const matched = [...map.entries()].filter(([k]) => k.startsWith(prefix));
+      if (opts?.delimiter) {
+        const delim = opts.delimiter;
+        const objects: ReturnType<typeof toBindingObject>[] = [];
+        const delimited = new Set<string>();
+        for (const entry of matched) {
+          const rest = entry[0].slice(prefix.length);
+          const idx = rest.indexOf(delim);
+          if (idx === -1) {
+            objects.push(toBindingObject(entry));
+          } else {
+            delimited.add(prefix + rest.slice(0, idx + delim.length));
+          }
+        }
+        return Promise.resolve({
+          cursor: undefined,
+          delimitedPrefixes: [...delimited],
+          objects,
+          truncated: false,
+        });
+      }
+      const objects = matched.map(toBindingObject);
+      return Promise.resolve({
+        cursor: undefined,
+        delimitedPrefixes: [],
+        objects,
+        truncated: false,
+      });
     },
     async put(
       key: string,
@@ -761,6 +791,17 @@ describe("r2 adapter — Workers binding path", () => {
       "a/1.txt",
       "a/2.txt",
     ]);
+  });
+
+  test("binding list with a delimiter returns delimitedPrefixes", async () => {
+    const { bucket } = fakeBinding();
+    const files = new Files({ adapter: r2({ binding: bucket as never }) });
+    await files.upload("a/1.txt", "1", { contentType: "text/plain" });
+    await files.upload("a/b/2.txt", "2", { contentType: "text/plain" });
+    await files.upload("a/c/3.txt", "3", { contentType: "text/plain" });
+    const out = await files.list({ delimiter: "/", prefix: "a/" });
+    expect(out.items.map((i) => i.key)).toEqual(["a/1.txt"]);
+    expect(out.prefixes?.toSorted()).toEqual(["a/b/", "a/c/"]);
   });
 
   test("binding copy throws NotFound when source is missing", async () => {

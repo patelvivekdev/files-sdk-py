@@ -370,6 +370,10 @@ export const bunS3 = (opts: BunS3AdapterOptions = {}): BunS3Adapter => {
         throw mapBunS3Error(error);
       }
     },
+    // No `supportsDelimiter`: although Bun's S3 client accepts a `delimiter`
+    // option, its list response exposes no `commonPrefixes`, so the folder
+    // groupings can't be surfaced. The Files wrapper rejects a `delimiter`
+    // here before any provider call.
     async list(options) {
       try {
         const result = await client.list({

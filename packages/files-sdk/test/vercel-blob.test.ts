@@ -330,6 +330,38 @@ describe("vercel-blob adapter", () => {
     expect(out.items.map((i) => i.key)).toEqual(["a/1.txt"]);
   });
 
+  test("list with a delimiter requests folded mode and maps folders", async () => {
+    listMock.mockImplementationOnce((opts?: unknown) => {
+      expect((opts as { mode?: string }).mode).toBe("folded");
+      return Promise.resolve({
+        blobs: [
+          {
+            downloadUrl: "https://blob.test/a/1.txt?download=1",
+            etag: '"etag-a/1.txt"',
+            pathname: "a/1.txt",
+            size: 1,
+            uploadedAt: new Date(),
+            url: "https://blob.test/a/1.txt",
+          },
+        ],
+        cursor: undefined,
+        folders: ["a/b/", "a/c/"],
+        hasMore: false,
+      });
+    });
+    const files = new Files({ adapter: vercelBlob() });
+    const out = await files.list({ delimiter: "/", prefix: "a/" });
+    expect(out.items.map((i) => i.key)).toEqual(["a/1.txt"]);
+    expect(out.prefixes).toEqual(["a/b/", "a/c/"]);
+  });
+
+  test("vercel-blob only supports the / delimiter", async () => {
+    const files = new Files({ adapter: vercelBlob() });
+    await expect(files.list({ delimiter: "|" })).rejects.toMatchObject({
+      code: "Provider",
+    });
+  });
+
   test("download forwards signals to fetch on public blobs", async () => {
     const controller = new AbortController();
     let seenSignal: AbortSignal | undefined;

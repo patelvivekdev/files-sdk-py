@@ -26,6 +26,7 @@ import {
 import { FilesError } from "../internal/errors.js";
 import type { ProviderFilesErrorCode } from "../internal/errors.js";
 import { createStoredFile } from "../internal/stored-file.js";
+import { pageKeyList } from "../internal/walk-paginate.js";
 
 export interface FsAdapterOptions {
   /**
@@ -528,11 +529,14 @@ export const fs = (opts: FsAdapterOptions): FsAdapter => {
       // the first key strictly greater. Same scheme as the in-memory fake
       // adapter, so callers see consistent pagination semantics across
       // the fake (`test/fake-adapter.ts`) and fs adapters.
-      const startIdx = cursor ? keys.findIndex((k) => k > cursor) : 0;
-      const start = startIdx === -1 ? keys.length : startIdx;
-      const slice = keys.slice(start, start + limit);
+      const page = pageKeyList(keys, {
+        ...(options?.delimiter && { delimiter: options.delimiter }),
+        limit,
+        ...(prefix && { prefix }),
+        ...(cursor !== undefined && { cursor }),
+      });
       const items: StoredFile[] = [];
-      for (const key of slice) {
+      for (const key of page.keys) {
         const bodyPath = path.join(root, ...key.split("/"));
         try {
           const stat = await fsp.stat(bodyPath);
@@ -550,11 +554,10 @@ export const fs = (opts: FsAdapterOptions): FsAdapter => {
           throw mapFsError(error);
         }
       }
-      const lastKey = slice.at(-1);
-      const more = start + slice.length < keys.length;
       return {
         items,
-        ...(more && lastKey && { cursor: lastKey }),
+        ...(page.cursor !== undefined && { cursor: page.cursor }),
+        ...(page.prefixes && { prefixes: page.prefixes }),
       };
     },
     async move(from, to) {
@@ -719,6 +722,7 @@ export const fs = (opts: FsAdapterOptions): FsAdapter => {
         url: `${joinPublicUrl(urlBaseUrl, key)}?${params.toString()}`,
       });
     },
+    supportsDelimiter: true,
     supportsRange: true,
     async upload(key, body, options) {
       const bodyPath = resolveKeyPath(root, key);

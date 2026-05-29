@@ -695,6 +695,7 @@ export const s3 = (opts: S3AdapterOptions): S3Adapter => {
             ...(options?.prefix && { Prefix: options.prefix }),
             ...(options?.limit !== undefined && { MaxKeys: options.limit }),
             ...(options?.cursor && { ContinuationToken: options.cursor }),
+            ...(options?.delimiter && { Delimiter: options.delimiter }),
           }),
           options?.signal ? { abortSignal: options.signal } : undefined
         );
@@ -721,9 +722,13 @@ export const s3 = (opts: S3AdapterOptions): S3Adapter => {
             }
           );
         });
+        const prefixes = (result.CommonPrefixes ?? [])
+          .map((p) => p.Prefix)
+          .filter((p): p is string => p !== undefined);
         return {
           cursor: result.IsTruncated ? result.NextContinuationToken : undefined,
           items,
+          ...(prefixes.length && { prefixes }),
         };
       } catch (error) {
         throw wrapErr(error);
@@ -785,6 +790,7 @@ export const s3 = (opts: S3AdapterOptions): S3Adapter => {
         throw wrapErr(error);
       }
     },
+    supportsDelimiter: true,
     supportsRange: true,
     async upload(key, body, options) {
       const { cacheControl, metadata, multipart, onProgress, signal } =
