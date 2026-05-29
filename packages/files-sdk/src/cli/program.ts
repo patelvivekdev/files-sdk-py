@@ -283,7 +283,16 @@ const bulkBuilder = (args: unknown[], common: CommonRunOpts): CommonRunOpts => {
   } as CommonRunOpts;
 };
 
-export const buildProgram = (): Command => {
+/**
+ * Build the CLI. `loadMcp` is injectable so tests can supply a stub MCP module
+ * without globally mocking `./mcp.js` — a process-wide `mock.module` there leaks
+ * into other test files and can't be reliably reverted. When omitted, the `mcp`
+ * subcommand lazily dynamic-imports the module, so the optional
+ * `@modelcontextprotocol/sdk` dependency is only pulled in when it actually runs.
+ */
+export const buildProgram = (
+  loadMcp?: () => Promise<typeof McpModule>
+): Command => {
   const program = new Command();
   program
     .name("files")
@@ -581,7 +590,7 @@ export const buildProgram = (): Command => {
         // ERR_MODULE_NOT_FOUND.
         let mcp: typeof McpModule;
         try {
-          mcp = await import("./mcp.js");
+          mcp = await (loadMcp ? loadMcp() : import("./mcp.js"));
         } catch (loadError) {
           throw rewrapMcpLoadError(loadError);
         }

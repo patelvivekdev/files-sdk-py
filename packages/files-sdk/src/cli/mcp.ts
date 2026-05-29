@@ -545,8 +545,10 @@ export const buildMcpServer = async (
  */
 export const startMcpServer = async (
   opts: McpServerOpts,
-  createTransport: () => Transport = () => new StdioServerTransport()
+  createTransport?: () => Transport
 ): Promise<void> => {
   const server = await buildMcpServer(opts);
-  await server.connect(createTransport());
+  await server.connect(
+    createTransport ? createTransport() : new StdioServerTransport()
+  );
 };

@@ -1,35 +1,29 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import * as realMcp from "../src/cli/mcp.js";
 import { buildProgram } from "../src/cli/program.js";
 
-// The mcp subcommand pulls ./mcp.js in via a dynamic import inside its action
+// The mcp subcommand pulls its module in via a dynamic import inside its action
 // handler — that's load-bearing because @modelcontextprotocol/sdk is optional
-// and the real server blocks on stdio. The mock only needs to be in place
-// before parseAsync runs the action; program.ts itself doesn't import mcp.ts
-// statically, so installing the mock at module top level is sufficient.
-//
-// `mock.module` overrides persist in the process-wide module registry across
-// test files, so we spread the real module and only stub `startMcpServer` —
-// otherwise the other named exports (mcpDownloadSize, resolveMcpDownloadCap…)
-// would vanish for any test file that loads after this one.
-const MCP_MODULE_PATH = fileURLToPath(
-  new URL("../src/cli/mcp.ts", import.meta.url)
-);
+// and the real server attaches to stdin. Rather than `mock.module` the whole
+// module (a process-wide override that leaks into other test files and can't be
+// reliably reverted — it previously broke cli-mcp's startMcpServer test), we
+// inject a stub loader into buildProgram. The stub spreads the real module so
+// only `startMcpServer` is replaced, keeping the loader's type honest.
 let mcpStartCalls = 0;
 const mcpStartArgs: unknown[] = [];
-mock.module(MCP_MODULE_PATH, () => ({
-  ...realMcp,
-  startMcpServer: (opts: unknown) => {
-    mcpStartCalls += 1;
-    mcpStartArgs.push(opts);
-    return Promise.resolve();
-  },
-}));
+const loadStubMcp = (): Promise<typeof realMcp> =>
+  Promise.resolve({
+    ...realMcp,
+    startMcpServer: (opts: unknown) => {
+      mcpStartCalls += 1;
+      mcpStartArgs.push(opts);
+      return Promise.resolve();
+    },
+  });
 
 // Integration tests for program.ts — they drive `parseAsync` end-to-end against
 // the fs adapter so the wrap()/resolveOpts/action-builder paths get exercised.
@@ -92,7 +86,7 @@ let root: string;
 let cap: Capture;
 
 const run = (...argv: string[]): Promise<unknown> =>
-  buildProgram().parseAsync(["bun", "files", ...argv]);
+  buildProgram(loadStubMcp).parseAsync(["bun", "files", ...argv]);
 
 beforeEach(async () => {
   root = await fsp.mkdtemp(path.join(os.tmpdir(), "files-sdk-cli-prog-"));
@@ -355,7 +349,7 @@ describe("cli/program parseAsync (fs end-to-end)", () => {
     ).rejects.toThrow(/expected an integer/u);
   });
 
-  test("mcp action invokes startMcpServer on the (mocked) mcp module", async () => {
+  test("mcp action invokes startMcpServer on the injected mcp module", async () => {
     const before = mcpStartCalls;
     await run("--provider", "fs", "--root", root, "mcp");
     expect(mcpStartCalls).toBe(before + 1);
@@ -365,6 +359,25 @@ describe("cli/program parseAsync (fs end-to-end)", () => {
   test("mcp --allow-writes opts into mutation tools", async () => {
     await run("--provider", "fs", "--root", root, "mcp", "--allow-writes");
     expect(mcpStartArgs.at(-1)).toMatchObject({ allowWrites: true });
+  });
+
+  test("mcp load failure is rewrapped and routed through fail()", async () => {
+    const notFound = Object.assign(new Error("nope"), {
+      code: "ERR_MODULE_NOT_FOUND",
+    });
+    await expect(
+      buildProgram(() => Promise.reject(notFound)).parseAsync([
+        "bun",
+        "files",
+        "--provider",
+        "fs",
+        "--root",
+        root,
+        "mcp",
+      ])
+    ).rejects.toThrow("__exit:2");
+    const payload = JSON.parse(cap.stderr.join(""));
+    expect(payload.error.message).toContain("@modelcontextprotocol/sdk");
   });
 
   test("transfer routes through its action builder (dry-run)", async () => {
