@@ -17,7 +17,8 @@ const to = new Files({
 
 const { transferred, errors } = await transfer(from, to, {
   prefix: "uploads/",
-  onProgress: ({ done, key }) => console.log(`${done} done — ${key}`),
+  onProgress: ({ done, total, key }) =>
+    console.log(`${done}/${total} — ${key}`),
 });
 ```
 
@@ -64,12 +65,12 @@ await transfer(from, to, {
 
 ## Progress
 
-`onProgress` fires once per key as it settles, with a running `done` count and whether the key was `transferred` or `skipped`. There's no `total` — the source is walked lazily, so the full count isn't known until the walk finishes.
+`onProgress` fires once per key as it settles, carrying a running `done` count, the `total`, the `key`, and whether it was `transferred` or `skipped`. The source is walked in full before any transfer begins, so `total` is the final denominator from the very first event.
 
 ```ts lineNumbers
 await transfer(from, to, {
-  onProgress: ({ done, key, status }) => {
-    console.log(`${done}: ${key} (${status})`);
+  onProgress: ({ done, total, key, status }) => {
+    console.log(`${done}/${total}: ${key} (${status})`);
   },
 });
 ```

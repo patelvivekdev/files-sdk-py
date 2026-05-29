@@ -3,21 +3,21 @@ title: Commands
 description: Each CLI command maps to an SDK method - upload, download, head, exists, delete, copy, move, list, url, sign-upload, and transfer.
 ---
 
-Each command maps to a `Files` method. Same semantics, same `FilesError` codes, same `StoredFile` shape on the way out.
+Each command maps to a `Files` method. Same semantics, same `FilesError` codes, same `StoredFile` fields on the way out (emitted as flat JSON).
 
-| Command       | SDK method                                  | What it does                              |
-| ------------- | ------------------------------------------- | ----------------------------------------- |
-| `upload`      | [`upload`](/api/upload)                     | Write a file or piped stdin to a key      |
-| `download`    | [`download`](/api/download)                 | Read a key to disk or stream it to stdout |
-| `head`        | [`head`](/api/head)                         | Fetch metadata without the body           |
-| `exists`      | [`exists`](/api/exists)                     | Test a key — exit code only, no output    |
-| `list`        | [`list`](/api/list)                         | Page through keys under a prefix          |
-| `copy`        | [`copy`](/api/copy)                         | Copy a key to a new key                   |
-| `move`        | [`move`](/api/move)                         | Move (rename) a key                       |
-| `delete`      | [`delete`](/api/delete)                     | Delete one or more keys                   |
-| `url`         | [`url`](/api/url)                           | Get a read URL — presigned or public      |
-| `sign-upload` | [`signedUploadUrl`](/api/signed-upload-url) | Mint a browser-direct upload policy       |
-| `transfer`    | [`transfer`](/features/transfer)            | Stream every object to another provider   |
+| Command       | SDK method                                  | What it does                                          |
+| ------------- | ------------------------------------------- | ----------------------------------------------------- |
+| `upload`      | [`upload`](/api/upload)                     | Write a file or piped stdin to a key                  |
+| `download`    | [`download`](/api/download)                 | Read a key to disk or stream it to stdout             |
+| `head`        | [`head`](/api/head)                         | Fetch metadata without the body                       |
+| `exists`      | [`exists`](/api/exists)                     | Test a key — prints `{ exists, key }`, sets exit code |
+| `list`        | [`list`](/api/list)                         | Page through keys under a prefix                      |
+| `copy`        | [`copy`](/api/copy)                         | Copy a key to a new key                               |
+| `move`        | [`move`](/api/move)                         | Move (rename) a key                                   |
+| `delete`      | [`delete`](/api/delete)                     | Delete one or more keys                               |
+| `url`         | [`url`](/api/url)                           | Get a read URL — presigned or public                  |
+| `sign-upload` | [`signedUploadUrl`](/api/signed-upload-url) | Mint a browser-direct upload policy                   |
+| `transfer`    | [`transfer`](/features/transfer)            | Stream every object to another provider               |
 
 All examples use `--provider s3 --bucket uploads`; swap in any [provider](/providers) and its flags.
 
@@ -60,7 +60,7 @@ Pass several keys to inspect them in one call; see [many keys at once](#many-key
 
 ### exists
 
-Test whether a key exists. It prints nothing and signals through the exit code, so it drops straight into a shell conditional.
+Test whether a key exists. It prints `{ exists, key }` and signals the result through the exit code too, so it drops straight into a shell conditional.
 
 ```bash lineNumbers
 files --provider s3 --bucket uploads exists reports/2026-q1.pdf   # exit 0 = exists, 1 = missing

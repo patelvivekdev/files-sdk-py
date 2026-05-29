@@ -77,7 +77,7 @@ adapter.raw.clear(); // wipe between tests
 
 - **Non-persistent.** The store lives in the process. Everything is lost when the process exits, and two `Files` instances built from separate `memory()` calls don't share data. Not for production.
 - **Value semantics.** Bodies are copied in on upload (and on seed), so mutating a `Uint8Array` you passed in later doesn't change the stored bytes.
-- **Content ETag.** The `etag` is a stable hash of the bytes (pure-JS FNV-1a, no `node:crypto`), so re-uploading identical content yields the same ETag - matching how real backends behave.
+- **Content ETag.** The `etag` is a stable hash of the bytes (a pure-JS polynomial rolling hash, no `node:crypto`), so re-uploading identical content yields the same ETag - matching how real backends behave.
 
 ## Compatibility
 

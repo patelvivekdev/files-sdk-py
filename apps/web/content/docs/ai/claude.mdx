@@ -89,8 +89,8 @@ Pass `readOnly: true` to drop every write tool from the bundled MCP server. The 
 // Strip every write tool. The model can browse but cannot mutate
 // the bucket regardless of approval configuration.
 createClaudeFileTools({ files, readOnly: true });
-// allowedTools → ["mcp__files__listFiles", "mcp__files__getFileMetadata",
-//                 "mcp__files__downloadFile", "mcp__files__getFileUrl"]
+// allowedTools → ["mcp__files__downloadFile", "mcp__files__getFileMetadata",
+//                 "mcp__files__getFileUrl", "mcp__files__listFiles"]
 ```
 
 ## Server name
@@ -101,7 +101,7 @@ Claude addresses each MCP tool as `mcp__<server-name>__<tool-name>`. The default
 // Override the MCP server name - affects the mcp__<server>__<tool>
 // prefix the model sees, and the mcpServers map key.
 const tools = createClaudeFileTools({ files, serverName: "storage" });
-// tools.allowedTools → ["mcp__storage__listFiles", ...]
+// tools.allowedTools → ["mcp__storage__copyFile", ...]
 // tools.mcpServers   → { storage: <McpSdkServerConfigWithInstance> }
 ```
 

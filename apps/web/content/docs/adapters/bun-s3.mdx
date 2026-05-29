@@ -5,7 +5,7 @@ description: AWS S3 (and any S3-compatible bucket) via Bun's native Bun.S3Client
 
 ## Installation
 
-This adapter has no extra peer dependencies - the runtime (Node or Bun) provides everything it needs.
+This adapter has no extra peer dependencies, but it requires the Bun runtime - it's built on Bun's native `Bun.S3Client`, which Node doesn't provide. (Outside Bun it throws unless you hand it a `Bun.S3Client`-shaped `client` yourself.)
 
 ```package-install
 files-sdk

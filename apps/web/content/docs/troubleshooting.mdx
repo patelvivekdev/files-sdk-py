@@ -154,7 +154,7 @@ files --provider s3 --bucket uploads --verbose head missing.txt
 # adds stack traces to the error envelope
 
 files --provider s3 --bucket uploads --dry-run delete reports/q1.pdf
-# → {"dryRun":true,"provider":"s3","action":"delete","key":"reports/q1.pdf"}
+# → {"action":"delete","dryRun":true,"provider":"s3","keys":["reports/q1.pdf"]}
 ```
 
 Exit codes are stable: `0` ok, `1` `NotFound` (or `exists → false`), `2` `Provider`, `3` `Unauthorized`, `4` `Conflict`.
