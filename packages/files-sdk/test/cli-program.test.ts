@@ -178,11 +178,14 @@ describe("cli/program parseAsync (fs end-to-end)", () => {
       "--limit",
       "5",
       "--cursor",
-      "abc"
+      "abc",
+      "--delimiter",
+      "/"
     );
     expect(lastJson(cap.stdout)).toMatchObject({
       action: "list",
       cursor: "abc",
+      delimiter: "/",
       dryRun: true,
       limit: 5,
       prefix: "p/",

@@ -80,6 +80,13 @@ The result carries a `cursor` for the next page. Pass `--all` to follow the curs
 files --provider s3 --bucket uploads list --prefix logs/ --all | jq '.items[].key'
 ```
 
+Pass `--delimiter` to collapse keys into folders — the direct files come back in `items` and the subfolders in a `prefixes` array (full keys with the trailing delimiter). This is the building block for a file-browser view; it throws on adapters with no folder concept, and can't be combined with `--all`:
+
+```bash lineNumbers
+files --provider s3 --bucket uploads list --prefix photos/ --delimiter / | jq '.prefixes'
+# ["photos/2023/", "photos/2024/"]
+```
+
 ### copy
 
 Copy a key to a new key, leaving the source in place.

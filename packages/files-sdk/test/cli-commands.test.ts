@@ -201,6 +201,19 @@ describe("cli/commands dry-run", () => {
     });
   });
 
+  test("list dry-run echoes delimiter", async () => {
+    await runList({
+      ...baseOpts({ dryRun: true }),
+      delimiter: "/",
+      prefix: "p/",
+    });
+    expect(lastJson(cap.stdout)).toMatchObject({
+      action: "list",
+      delimiter: "/",
+      prefix: "p/",
+    });
+  });
+
   test("url dry-run echoes expiresIn and disposition", async () => {
     await runUrl({
       ...baseOpts({ dryRun: true }),
@@ -688,6 +701,39 @@ describe("cli/commands new surface", () => {
   test("list --all dry-run echoes all: true", async () => {
     await runList({ ...baseOpts({ dryRun: true }), all: true });
     expect(lastJson(cap.stdout).all).toBe(true);
+  });
+
+  test("list --delimiter returns direct files in items, subfolders in prefixes", async () => {
+    await write("photos/cover.jpg", "x");
+    await write("photos/2023/a.jpg", "x");
+    await write("photos/2024/b.jpg", "x");
+    cap.stdout.length = 0;
+    await runList({ ...baseOpts(), delimiter: "/", prefix: "photos/" });
+    const out = lastJson(cap.stdout) as {
+      items: { key: string }[];
+      prefixes?: string[];
+    };
+    expect(out.items.map((i) => i.key)).toEqual(["photos/cover.jpg"]);
+    expect(out.prefixes?.toSorted()).toEqual(["photos/2023/", "photos/2024/"]);
+  });
+
+  test("list omits prefixes when a delimiter turns up no folders", async () => {
+    await write("flat/a.txt", "x");
+    await write("flat/b.txt", "x");
+    cap.stdout.length = 0;
+    await runList({ ...baseOpts(), delimiter: "/", prefix: "flat/" });
+    const out = lastJson(cap.stdout) as { items: { key: string }[] };
+    expect(out.items.map((i) => i.key).toSorted()).toEqual([
+      "flat/a.txt",
+      "flat/b.txt",
+    ]);
+    expect(out).not.toHaveProperty("prefixes");
+  });
+
+  test("list rejects --delimiter combined with --all before any I/O", async () => {
+    await expect(
+      runList({ ...baseOpts(), all: true, delimiter: "/" })
+    ).rejects.toThrow(/pass one, not both/u);
   });
 
   test("transfer copies every object to another provider", async () => {

@@ -297,6 +297,26 @@ describe("cli/mcp tools (write-enabled)", () => {
     expect((all.data.items as unknown[]).length).toBe(2);
   });
 
+  test("list with delimiter splits files and folders", async () => {
+    await call(h.client, "upload", { key: "d/cover.jpg", text: "x" });
+    await call(h.client, "upload", { key: "d/2024/a.jpg", text: "x" });
+
+    const res = await call(h.client, "list", { delimiter: "/", prefix: "d/" });
+    expect(res.isError).toBe(false);
+    expect(res.data.items as { key: string }[]).toMatchObject([
+      { key: "d/cover.jpg" },
+    ]);
+    expect(res.data.prefixes).toEqual(["d/2024/"]);
+  });
+
+  test("list rejects delimiter combined with all", async () => {
+    const res = await call(h.client, "list", { all: true, delimiter: "/" });
+    expect(res.isError).toBe(true);
+    expect((res.data.error as { message: string }).message).toMatch(
+      /pass one, not both/u
+    );
+  });
+
   test("url success and unsupported-option error", async () => {
     await call(h.client, "upload", { key: "u.txt", text: "x" });
 

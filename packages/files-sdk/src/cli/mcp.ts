@@ -376,7 +376,7 @@ export const buildMcpServer = async (
     "list",
     {
       description:
-        "List up to `limit` objects under an optional `prefix`. Paginated via `cursor`. Pass `all: true` to walk every page (following the cursor) and return all items at once.",
+        'List up to `limit` objects under an optional `prefix`. Paginated via `cursor`. Pass `all: true` to walk every page (following the cursor) and return all items at once. Pass a `delimiter` (e.g. "/") to collapse keys into folders — direct files come back in `items`, subfolders in `prefixes` (throws on adapters with no folder concept; cannot combine with `all`).',
       inputSchema: {
         all: z
           .boolean()
@@ -385,24 +385,42 @@ export const buildMcpServer = async (
             "Walk every page and return all items (ignores cursor paging)"
           ),
         cursor: z.string().optional(),
+        delimiter: z
+          .string()
+          .optional()
+          .describe(
+            "Collapse keys at this boundary into folders, returned in `prefixes`"
+          ),
         limit: z.number().int().positive().optional(),
         prefix: z.string().optional(),
       },
       title: "List objects",
     },
-    async ({ prefix, cursor, limit, all }) => {
+    async ({ prefix, cursor, limit, delimiter, all }) => {
       try {
         if (all) {
+          if (delimiter !== undefined) {
+            throw new FilesError(
+              "Provider",
+              "`delimiter` lists one folder level and `all` walks the whole tree — pass one, not both"
+            );
+          }
           const items: ReturnType<typeof storedFileToJson>[] = [];
           for await (const file of files.listAll({ cursor, limit, prefix })) {
             items.push(storedFileToJson(file));
           }
           return ok({ items });
         }
-        const result = await files.list({ cursor, limit, prefix });
+        const result = await files.list({
+          cursor,
+          ...(delimiter !== undefined && { delimiter }),
+          limit,
+          prefix,
+        });
         return ok({
           cursor: result.cursor,
           items: result.items.map(storedFileToJson),
+          ...(result.prefixes && { prefixes: result.prefixes }),
         });
       } catch (error) {
         return errorPayload(error);

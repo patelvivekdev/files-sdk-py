@@ -7,7 +7,7 @@ description: Boot a built-in read-only MCP server on stdio, with provider and cr
 
 Pass `--allow-writes` to also expose mutating tools: `upload`, `delete`, `copy`, `move`, `sign-upload`, and `transfer`.
 
-The tools mirror the CLI surface: `download` accepts a byte `range`, `head`/`exists` take arrays of keys plus `concurrency`/`stopOnError`, and `list` accepts `all` to walk every page. With `--allow-writes`, `upload` accepts `multipart`, `delete` takes arrays of keys plus `concurrency`/`stopOnError`, and `transfer` takes a destination provider config (`to`) to copy objects across backends.
+The tools mirror the CLI surface: `download` accepts a byte `range`, `head`/`exists` take arrays of keys plus `concurrency`/`stopOnError`, and `list` accepts `all` to walk every page or a `delimiter` to return one folder level (files in `items`, subfolders in `prefixes`). With `--allow-writes`, `upload` accepts `multipart`, `delete` takes arrays of keys plus `concurrency`/`stopOnError`, and `transfer` takes a destination provider config (`to`) to copy objects across backends.
 
 ```bash lineNumbers
 # Start the read-only MCP server on stdio

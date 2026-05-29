@@ -416,6 +416,7 @@ export interface ListCmdOpts extends CommonRunOpts {
   prefix?: string;
   cursor?: string;
   limit?: number;
+  delimiter?: string;
   all?: boolean;
 }
 
@@ -426,12 +427,25 @@ export const runList = async (opts: ListCmdOpts): Promise<void> => {
       {
         all: opts.all,
         cursor: opts.cursor,
+        delimiter: opts.delimiter,
         limit: opts.limit,
         prefix: opts.prefix,
       },
       opts
     );
   }
+
+  // --delimiter collapses one level into folders; --all walks the whole tree
+  // (SDK `listAll` strips delimiter for exactly this reason). They're
+  // contradictory, so reject the combination loudly rather than silently
+  // dropping one — mirrors how the SDK's listAll ignores delimiter.
+  if (opts.all && opts.delimiter !== undefined) {
+    throw new FilesError(
+      "Provider",
+      "--delimiter lists one folder level and --all walks the whole tree — pass one, not both"
+    );
+  }
+
   const { files } = await loadFiles(opts.global);
 
   // --all walks every page transparently (Files.listAll), following the cursor
@@ -451,6 +465,7 @@ export const runList = async (opts: ListCmdOpts): Promise<void> => {
 
   const result = await files.list({
     cursor: opts.cursor,
+    ...(opts.delimiter !== undefined && { delimiter: opts.delimiter }),
     limit: opts.limit,
     prefix: opts.prefix,
   });
@@ -458,6 +473,9 @@ export const runList = async (opts: ListCmdOpts): Promise<void> => {
     {
       cursor: result.cursor,
       items: result.items.map(storedFileToJson),
+      // Mirror the SDK: `prefixes` is present only when a delimiter turned up
+      // folders, omitted otherwise.
+      ...(result.prefixes && { prefixes: result.prefixes }),
     },
     opts
   );

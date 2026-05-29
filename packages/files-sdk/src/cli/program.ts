@@ -464,6 +464,10 @@ export const buildProgram = (): Command => {
       intArg
     )
     .option(
+      "--delimiter <delimiter>",
+      "collapse keys at this boundary into folders — direct files in `items`, subfolders in `prefixes` (throws on adapters with no folder concept)"
+    )
+    .option(
       "--all",
       "walk every page, following the cursor, and return all items"
     )
@@ -474,6 +478,7 @@ export const buildProgram = (): Command => {
           ...common,
           all: opts.all as boolean | undefined,
           cursor: opts.cursor as string | undefined,
+          delimiter: opts.delimiter as string | undefined,
           limit: opts.limit as number | undefined,
           prefix: opts.prefix as string | undefined,
         } as CommonRunOpts;
