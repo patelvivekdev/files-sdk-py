@@ -34,6 +34,7 @@ const newId = (): string => {
 const parseItemPath = (
   apiPath: string
 ): { virtualPath: string; suffix?: string } | null => {
+  const [pathOnly] = apiPath.split("?", 1);
   // Strip whichever base prefix the adapter generated:
   //   /me/drive | /drives/{id} | /sites/{id}/drive | /users/{id}/drive
   // and parse the remaining /root[:/path:][/suffix] tail. Examples:
@@ -41,7 +42,7 @@ const parseItemPath = (
   //   .../root:/docs/a.txt:/content       -> { virtualPath: "docs/a.txt", suffix: "content" }
   //   .../root:/docs:/children            -> { virtualPath: "docs",       suffix: "children" }
   //   .../root/children                   -> { virtualPath: "",           suffix: "children" }
-  const tail = apiPath.replace(
+  const tail = (pathOnly ?? apiPath).replace(
     /^(?:\/me\/drive|\/drives\/[^/]+|\/sites\/[^/]+\/drive|\/users\/[^/]+\/drive)/u,
     ""
   );
@@ -639,12 +640,40 @@ describe("onedrive adapter", () => {
     const files = new Files({ adapter: onedrive(baseOpts) });
     dispatchGet.mockImplementationOnce(() =>
       Promise.resolve({
-        "@odata.nextLink": "https://graph.microsoft.com/v1.0/next-page",
+        "@odata.nextLink":
+          "https://graph.microsoft.com/v1.0/me/drive/root/children?$skiptoken=abc",
         value: [],
       })
     );
     const r = await files.list();
-    expect(r.cursor).toBe("https://graph.microsoft.com/v1.0/next-page");
+    expect(r.cursor).toBe(
+      "https://graph.microsoft.com/v1.0/me/drive/root/children?$skiptoken=abc"
+    );
+  });
+
+  test("list only follows cursors bound to the configured root", async () => {
+    const files = new Files({
+      adapter: onedrive({ ...baseOpts, rootFolderPath: "safe" }),
+    });
+
+    await expect(
+      files.list({
+        cursor:
+          "https://graph.microsoft.com/v1.0/me/drive/root/children?$skiptoken=abc",
+      })
+    ).rejects.toMatchObject({
+      code: "Provider",
+      message: expect.stringContaining("cursor"),
+    });
+    expect(dispatchGet).not.toHaveBeenCalled();
+
+    await files.list({
+      cursor:
+        "https://graph.microsoft.com/v1.0/me/drive/root:/safe:/children?$skiptoken=abc",
+    });
+    expect(dispatchGet.mock.calls.at(-1)?.[0]).toBe(
+      "/me/drive/root:/safe:/children?$skiptoken=abc"
+    );
   });
 
   test("copy creates new item at destination and polls monitor URL", async () => {
@@ -829,7 +858,6 @@ describe("onedrive adapter", () => {
     const out = await files.signedUploadUrl("a.txt", {
       contentType: "text/plain",
       expiresIn: 3600,
-      maxSize: 1024,
     });
     expect(out).toEqual({
       headers: { "Content-Type": "text/plain" },
@@ -846,6 +874,22 @@ describe("onedrive adapter", () => {
     expect(body.item.name).toBe("a.txt");
   });
 
+  test("signedUploadUrl rejects maxSize before creating a Graph session", async () => {
+    const files = new Files({ adapter: onedrive(baseOpts) });
+    await expect(
+      files.signedUploadUrl("a.txt", { expiresIn: 3600, maxSize: 1024 })
+    ).rejects.toThrow(/maxSize.*minSize|content-length-range/iu);
+    expect(dispatchPost).not.toHaveBeenCalled();
+  });
+
+  test("signedUploadUrl rejects minSize before creating a Graph session", async () => {
+    const files = new Files({ adapter: onedrive(baseOpts) });
+    await expect(
+      files.signedUploadUrl("a.txt", { expiresIn: 3600, minSize: 1 })
+    ).rejects.toThrow(/maxSize.*minSize|content-length-range/iu);
+    expect(dispatchPost).not.toHaveBeenCalled();
+  });
+
   test("rootFolderPath nests virtual keys under the configured folder", async () => {
     const files = new Files({
       adapter: onedrive({ ...baseOpts, rootFolderPath: "/SDK Storage/" }),
@@ -853,6 +897,24 @@ describe("onedrive adapter", () => {
     await files.upload("a.txt", "hi", { contentType: "text/plain" });
     const [putCall] = dispatchPut.mock.calls;
     expect(putCall?.[0]).toBe("/me/drive/root:/SDK%20Storage/a.txt:/content");
+  });
+
+  test("rootFolderPath rejects dot segments in configured roots and keys", async () => {
+    expect(() =>
+      onedrive({ ...baseOpts, rootFolderPath: "../SDK Storage" })
+    ).toThrow(/rootFolderPath must not contain/u);
+
+    const files = new Files({
+      adapter: onedrive({ ...baseOpts, rootFolderPath: "SDK Storage" }),
+    });
+    await expect(files.download("../secret.txt")).rejects.toThrow(
+      /key must not contain/u
+    );
+    await expect(files.upload("docs/../secret.txt", "x")).rejects.toThrow(
+      /key must not contain/u
+    );
+    expect(dispatchGet).not.toHaveBeenCalled();
+    expect(dispatchPut).not.toHaveBeenCalled();
   });
 
   test("driveId option targets /drives/{id}", async () => {

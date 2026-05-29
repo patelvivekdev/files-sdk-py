@@ -477,6 +477,45 @@ describe("google-drive adapter", () => {
     expect((err as FilesError).code).toBe("NotFound");
   });
 
+  test("resolve fileId is scoped to rootFolderId", async () => {
+    store.set("outside-1", {
+      appProperties: { fsdkKey: "secret.txt" },
+      id: "outside-1",
+      md5Checksum: "etag-outside-1",
+      mimeType: "text/plain",
+      modifiedTime: STABLE_MODIFIED,
+      name: "secret.txt",
+      parents: ["outsideRoot"],
+      size: "6",
+    });
+    const files = new Files({ adapter: googleDrive(baseOpts) });
+
+    const missing = await files
+      .head("secret.txt")
+      .catch((error: unknown) => error);
+    expect(missing).toBeInstanceOf(FilesError);
+    expect((missing as FilesError).code).toBe("NotFound");
+
+    const [listArgs] = filesListMock.mock.calls.at(-1) ?? [];
+    expect((listArgs as { q?: string }).q).toContain("'rootX' in parents");
+
+    await files.upload("scoped.txt", "inside");
+    store.set("outside-2", {
+      appProperties: { fsdkKey: "scoped.txt" },
+      id: "outside-2",
+      md5Checksum: "etag-outside-2",
+      mimeType: "text/plain",
+      modifiedTime: STABLE_MODIFIED,
+      name: "scoped.txt",
+      parents: ["outsideRoot"],
+      size: "7",
+    });
+    const fresh = new Files({ adapter: googleDrive(baseOpts) });
+    await expect(fresh.head("scoped.txt")).resolves.toMatchObject({
+      key: "scoped.txt",
+    });
+  });
+
   test("resolve fileId throws Conflict when two files share a virtual key", async () => {
     const files = new Files({ adapter: googleDrive(baseOpts) });
     await files.upload("dup.txt", "hi");
@@ -549,7 +588,6 @@ describe("google-drive adapter", () => {
     const out = await files.signedUploadUrl("a.txt", {
       contentType: "text/plain",
       expiresIn: 3600,
-      maxSize: 1024,
     });
 
     expect(out).toEqual({
@@ -562,11 +600,25 @@ describe("google-drive adapter", () => {
     const headers = captured?.init?.headers as Record<string, string>;
     expect(headers.Authorization).toBe("Bearer test-access-token");
     expect(headers["X-Upload-Content-Type"]).toBe("text/plain");
-    expect(headers["X-Upload-Content-Length"]).toBe("1024");
+    expect(headers["X-Upload-Content-Length"]).toBeUndefined();
     const body = JSON.parse(captured?.init?.body as string);
     expect(body.name).toBe("a.txt");
     expect(body.parents).toEqual(["rootX"]);
     expect(body.appProperties.fsdkKey).toBe("a.txt");
+  });
+
+  test("signedUploadUrl rejects maxSize because Drive sessions cannot enforce it", async () => {
+    const files = new Files({ adapter: googleDrive(baseOpts) });
+    await expect(
+      files.signedUploadUrl("a.txt", { expiresIn: 60, maxSize: 1024 })
+    ).rejects.toThrow(/maxSize.*minSize|content-length-range/iu);
+  });
+
+  test("signedUploadUrl rejects minSize because Drive sessions cannot enforce it", async () => {
+    const files = new Files({ adapter: googleDrive(baseOpts) });
+    await expect(
+      files.signedUploadUrl("a.txt", { expiresIn: 60, minSize: 1 })
+    ).rejects.toThrow(/maxSize.*minSize|content-length-range/iu);
   });
 
   test("signedUploadUrl throws when adapter constructed with `client` escape hatch", async () => {

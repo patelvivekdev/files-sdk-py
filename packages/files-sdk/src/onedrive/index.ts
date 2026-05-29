@@ -238,12 +238,71 @@ const trimSlashes = (s: string): string => {
   return start === 0 && end === s.length ? s : s.slice(start, end);
 };
 
+const assertNoRelativeSegments = (path: string, label: string): void => {
+  if (
+    trimSlashes(path)
+      .split("/")
+      .filter(Boolean)
+      .some((segment) => segment === "." || segment === "..")
+  ) {
+    throw new FilesError(
+      "Provider",
+      `onedrive: ${label} must not contain . or .. path segments`
+    );
+  }
+};
+
+const normalizeRootFolderPath = (path: string | undefined): string => {
+  const normalized = trimSlashes(path ?? "");
+  assertNoRelativeSegments(normalized, "rootFolderPath");
+  return normalized;
+};
+
 const encodePathSegments = (path: string): string =>
   trimSlashes(path)
     .split("/")
     .filter(Boolean)
     .map(encodeURIComponent)
     .join("/");
+
+const GRAPH_API_VERSION_PREFIX = "/v1.0";
+
+const throwListCursorRootMismatch = (): never => {
+  throw new FilesError(
+    "Provider",
+    "onedrive: list cursor does not match this adapter root"
+  );
+};
+
+const normalizeListCursor = (cursor: string, expectedPath: string): string => {
+  let apiPath = cursor;
+  if (/^[a-z][a-z\d+.-]*:/iu.test(cursor)) {
+    try {
+      const url = new URL(cursor);
+      if (
+        url.protocol !== "https:" ||
+        !url.pathname.startsWith(`${GRAPH_API_VERSION_PREFIX}/`)
+      ) {
+        throwListCursorRootMismatch();
+      }
+      apiPath = `${url.pathname.slice(GRAPH_API_VERSION_PREFIX.length)}${
+        url.search
+      }`;
+    } catch {
+      throwListCursorRootMismatch();
+    }
+  }
+
+  if (!apiPath.startsWith("/")) {
+    throwListCursorRootMismatch();
+  }
+  const queryStart = apiPath.indexOf("?");
+  const pathOnly = queryStart === -1 ? apiPath : apiPath.slice(0, queryStart);
+  if (pathOnly !== expectedPath) {
+    throwListCursorRootMismatch();
+  }
+  return apiPath;
+};
 
 interface NormalizedBody {
   data: Buffer;
@@ -587,7 +646,7 @@ export const onedrive = (
   }
 
   const basePath = resolveBasePath(opts);
-  const rootFolderPath = trimSlashes(opts.rootFolderPath ?? "");
+  const rootFolderPath = normalizeRootFolderPath(opts.rootFolderPath);
   const publicByDefault = opts.publicByDefault ?? false;
   const copyTimeoutMs = opts.copyTimeoutMs ?? DEFAULT_COPY_TIMEOUT_MS;
 
@@ -605,6 +664,7 @@ export const onedrive = (
   }
 
   const itemApiPath = (key: string): string => {
+    assertNoRelativeSegments(key, "key");
     const fullPath = rootFolderPath
       ? `${rootFolderPath}/${trimSlashes(key)}`
       : trimSlashes(key);
@@ -1011,9 +1071,10 @@ export const onedrive = (
     },
     async list(options): Promise<ListResult> {
       try {
-        // Cursor (when provided) is the @odata.nextLink absolute URL, which
-        // the Graph client accepts as a path.
-        const initial = options?.cursor ?? `${containerApiPath()}/children`;
+        const listPath = `${containerApiPath()}/children`;
+        const initial = options?.cursor
+          ? normalizeListCursor(options.cursor, listPath)
+          : listPath;
         let req = client.api(initial);
         if (!options?.cursor && options?.limit !== undefined) {
           req = req.top(options.limit);
@@ -1051,6 +1112,12 @@ export const onedrive = (
     resumableUpload: createResumableDriver,
     rootFolderPath,
     async signedUploadUrl(key, signOpts): Promise<SignedUpload> {
+      if (signOpts.maxSize !== undefined || signOpts.minSize !== undefined) {
+        throw new FilesError(
+          "Provider",
+          "onedrive: `maxSize` and `minSize` are not supported for signed upload URLs. Graph upload sessions do not enforce a server-side content-length-range policy; enforce size limits at your application gateway / proxy before issuing the session URL."
+        );
+      }
       try {
         const res = (await client
           .api(`${itemApiPath(key)}/createUploadSession`)

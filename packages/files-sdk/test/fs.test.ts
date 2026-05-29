@@ -540,6 +540,30 @@ describe("fs adapter", () => {
       });
     });
 
+    test("constructor prefix rejects dot segments before fs path resolution", async () => {
+      const root = await makeRoot();
+      await fsp.mkdir(path.join(root, "tenant-b"), { recursive: true });
+      await fsp.writeFile(path.join(root, "tenant-b", "secret.txt"), "secret");
+      const files = new Files({
+        adapter: fsAdapter({ root }),
+        prefix: "tenant-a",
+      });
+
+      await expect(
+        files.download("../tenant-b/secret.txt")
+      ).rejects.toMatchObject({
+        code: "Provider",
+      });
+      await expect(
+        files.upload("../tenant-b/pwn.txt", "pwn")
+      ).rejects.toMatchObject({
+        code: "Provider",
+      });
+      await expect(
+        fsp.readFile(path.join(root, "tenant-b", "pwn.txt"), "utf-8")
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    });
+
     test("rejects deeply traversing keys", async () => {
       const root = await makeRoot();
       const files = new Files({ adapter: fsAdapter({ root }) });
@@ -681,15 +705,14 @@ describe("fs adapter", () => {
       expect(u).toBe("http://localhost:3000/files/a.txt");
     });
 
-    test("appends responseContentDisposition with urlBaseUrl", async () => {
+    test("throws on responseContentDisposition with urlBaseUrl", async () => {
       const root = await makeRoot();
       const files = new Files({
         adapter: fsAdapter({ root, urlBaseUrl: "http://localhost:3000/files" }),
       });
-      const u = await files.url("a.txt", {
-        responseContentDisposition: "attachment",
-      });
-      expect(u).toContain("response-content-disposition=attachment");
+      await expect(
+        files.url("a.txt", { responseContentDisposition: "attachment" })
+      ).rejects.toMatchObject({ code: "Provider" });
     });
 
     test("throws on responseContentDisposition without urlBaseUrl", async () => {

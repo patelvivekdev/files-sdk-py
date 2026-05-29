@@ -451,6 +451,36 @@ describe("sharepoint adapter", () => {
     expect(signed.url).toBe("https://upload.example.com/session-abc");
   });
 
+  test("signedUploadUrl > rejects maxSize before creating an upload session", async () => {
+    const files = new Files({
+      adapter: sharepoint({
+        clientCredentials: CREDS,
+        driveId: "d",
+      }),
+    });
+    await expect(
+      files.signedUploadUrl("big.bin", { expiresIn: 3600, maxSize: 1024 })
+    ).rejects.toThrow(/maxSize.*minSize|content-length-range/iu);
+    expect(lastCalls.some((c) => c.path.endsWith("/createUploadSession"))).toBe(
+      false
+    );
+  });
+
+  test("signedUploadUrl > rejects minSize before creating an upload session", async () => {
+    const files = new Files({
+      adapter: sharepoint({
+        clientCredentials: CREDS,
+        driveId: "d",
+      }),
+    });
+    await expect(
+      files.signedUploadUrl("big.bin", { expiresIn: 3600, minSize: 1 })
+    ).rejects.toThrow(/maxSize.*minSize|content-length-range/iu);
+    expect(lastCalls.some((c) => c.path.endsWith("/createUploadSession"))).toBe(
+      false
+    );
+  });
+
   test("siteUrl > non-URL string throws Provider", async () => {
     const adapter = sharepoint({
       clientCredentials: CREDS,
@@ -638,6 +668,29 @@ describe("sharepoint adapter", () => {
       driveId: "d",
     });
     expect(adapter.rootFolderPath).toBe("");
+  });
+
+  test("rootFolderPath > rejects dot segments in roots and delegated keys", async () => {
+    const unsafeRoot = sharepoint({
+      clientCredentials: CREDS,
+      driveId: "d",
+      rootFolderPath: "../Uploads",
+    });
+    await expect(unsafeRoot.list()).rejects.toThrow(
+      /rootFolderPath must not contain/u
+    );
+
+    const files = new Files({
+      adapter: sharepoint({
+        clientCredentials: CREDS,
+        driveId: "d",
+        rootFolderPath: "Uploads",
+      }),
+    });
+    await expect(files.download("../secret.txt")).rejects.toThrow(
+      /key must not contain/u
+    );
+    expect(lastCalls).toEqual([]);
   });
 
   test("delete > delegates to onedrive (DELETE on item path)", async () => {
@@ -862,6 +915,40 @@ describe("sharepoint adapter", () => {
     });
     const result = await adapter.list();
     expect(result.items).toEqual([]);
+  });
+
+  test("clientCredentials direct > list cursors stay bound to rootFolderPath", async () => {
+    const adapter = sharepoint({
+      clientCredentials: CREDS,
+      driveId: "d",
+      rootFolderPath: "safe",
+    });
+
+    await expect(
+      adapter.list({
+        cursor:
+          "https://graph.microsoft.com/v1.0/drives/d/root/children?$skiptoken=abc",
+      })
+    ).rejects.toMatchObject({
+      code: "Provider",
+      message: expect.stringContaining("cursor"),
+    });
+    expect(lastCalls).toEqual([]);
+
+    getHandler = (path) => {
+      if (path === "/drives/d/root:/safe:/children?$skiptoken=abc") {
+        return { value: [] };
+      }
+      return {};
+    };
+    const result = await adapter.list({
+      cursor:
+        "https://graph.microsoft.com/v1.0/drives/d/root:/safe:/children?$skiptoken=abc",
+    });
+    expect(result.items).toEqual([]);
+    expect(lastCalls.at(-1)?.path).toBe(
+      "/drives/d/root:/safe:/children?$skiptoken=abc"
+    );
   });
 
   test("non-OneDrive error > passes through unchanged (no relabel)", async () => {
