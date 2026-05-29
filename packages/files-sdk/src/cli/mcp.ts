@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { z } from "zod";
 
 import { transfer } from "../index.js";
@@ -539,10 +540,13 @@ export const buildMcpServer = async (
 /**
  * Start an MCP server on stdio. Builds the server (binding provider +
  * credentials, registering tools) and connects it to a stdio transport so the
- * host agent can drive it.
+ * host agent can drive it. The transport factory is injectable so tests can
+ * supply an inert stand-in instead of one that attaches to process.stdin.
  */
-export const startMcpServer = async (opts: McpServerOpts): Promise<void> => {
+export const startMcpServer = async (
+  opts: McpServerOpts,
+  createTransport: () => Transport = () => new StdioServerTransport()
+): Promise<void> => {
   const server = await buildMcpServer(opts);
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  await server.connect(createTransport());
 };

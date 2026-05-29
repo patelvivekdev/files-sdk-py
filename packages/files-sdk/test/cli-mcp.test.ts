@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -407,8 +407,10 @@ describe("cli/mcp startMcpServer", () => {
     // without attaching listeners to process.stdin (which would keep the test
     // process alive).
     let started = false;
-    // Inert transport standing in for the stdio one — the stub methods don't
-    // read `this`, so silence the rule the way the other fake clients do.
+    // Inert transport standing in for the stdio one — injected directly so the
+    // test never has to mock.module the transport binding (which is captured at
+    // mcp.ts eval time and so depends on import order across the suite). The
+    // stub methods don't read `this`, so silence the rule the fake clients hit.
     class FakeStdioTransport {
       onclose?: () => void;
       onerror?: (err: Error) => void;
@@ -427,18 +429,17 @@ describe("cli/mcp startMcpServer", () => {
         return Promise.resolve();
       }
     }
-    mock.module("@modelcontextprotocol/sdk/server/stdio.js", () => ({
-      StdioServerTransport: FakeStdioTransport,
-    }));
 
     const { startMcpServer } = await import("../src/cli/mcp.js");
     const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mcp-stdio-"));
     try {
-      await startMcpServer({ global: { provider: "fs", root } });
+      await startMcpServer(
+        { global: { provider: "fs", root } },
+        () => new FakeStdioTransport()
+      );
       expect(started).toBe(true);
     } finally {
       await fsp.rm(root, { force: true, recursive: true });
-      mock.restore();
     }
   });
 });
