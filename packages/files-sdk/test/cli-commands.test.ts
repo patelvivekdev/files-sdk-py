@@ -12,6 +12,7 @@ import {
   runList,
   runMove,
   runSignUpload,
+  runSync,
   runTransfer,
   runUpload,
   runUrl,
@@ -804,5 +805,106 @@ describe("cli/commands new surface", () => {
       to: JSON.stringify({ provider: "fs", root: destRoot }),
     });
     expect(cap.stderr.join("")).toContain("transferred p.txt");
+  });
+
+  test("sync mirrors new objects to another provider", async () => {
+    await write("m/a.txt", "one");
+    await write("m/b.txt", "two");
+    const destRoot = await fsp.mkdtemp(
+      path.join(os.tmpdir(), "files-sdk-dst-")
+    );
+    tmpDirs.push(destRoot);
+    await runSync({
+      ...baseOpts(),
+      to: JSON.stringify({ provider: "fs", root: destRoot }),
+    });
+    const out = lastJson(cap.stdout) as { uploaded: string[] };
+    expect(out.uploaded.toSorted()).toEqual(["m/a.txt", "m/b.txt"]);
+    expect(await fsp.readFile(path.join(destRoot, "m/a.txt"), "utf-8")).toBe(
+      "one"
+    );
+  });
+
+  test("sync --prune deletes destination keys absent from the source", async () => {
+    await write("keep.txt", "fresh");
+    const destRoot = await fsp.mkdtemp(
+      path.join(os.tmpdir(), "files-sdk-dst-")
+    );
+    tmpDirs.push(destRoot);
+    await fsp.writeFile(path.join(destRoot, "stale.txt"), "gone");
+    await runSync({
+      ...baseOpts(),
+      prune: true,
+      to: JSON.stringify({ provider: "fs", root: destRoot }),
+    });
+    expect(lastJson(cap.stdout)).toMatchObject({
+      deleted: ["stale.txt"],
+      uploaded: ["keep.txt"],
+    });
+    expect(await fsp.exists(path.join(destRoot, "stale.txt"))).toBe(false);
+  });
+
+  test("sync --compare size skips destination objects of the same length", async () => {
+    await write("s.txt", "alpha");
+    const destRoot = await fsp.mkdtemp(
+      path.join(os.tmpdir(), "files-sdk-dst-")
+    );
+    tmpDirs.push(destRoot);
+    // Same length as the source body, different bytes.
+    await fsp.writeFile(path.join(destRoot, "s.txt"), "OLD!!");
+    await runSync({
+      ...baseOpts(),
+      compare: "size",
+      to: JSON.stringify({ provider: "fs", root: destRoot }),
+    });
+    expect(lastJson(cap.stdout)).toMatchObject({
+      skipped: ["s.txt"],
+      uploaded: [],
+    });
+    // Skipped, not overwritten.
+    expect(await fsp.readFile(path.join(destRoot, "s.txt"), "utf-8")).toBe(
+      "OLD!!"
+    );
+  });
+
+  test("sync dry-run returns the real plan from both sides without mutating", async () => {
+    await write("new.txt", "n");
+    const destRoot = await fsp.mkdtemp(
+      path.join(os.tmpdir(), "files-sdk-dst-")
+    );
+    tmpDirs.push(destRoot);
+    await fsp.writeFile(path.join(destRoot, "stale.txt"), "gone");
+    await runSync({
+      ...baseOpts({ dryRun: true }),
+      prune: true,
+      to: JSON.stringify({ provider: "fs", root: destRoot }),
+    });
+    expect(lastJson(cap.stdout)).toMatchObject({
+      deleted: ["stale.txt"],
+      uploaded: ["new.txt"],
+    });
+    // dry run mutates nothing on either side.
+    expect(await fsp.exists(path.join(destRoot, "new.txt"))).toBe(false);
+    expect(await fsp.exists(path.join(destRoot, "stale.txt"))).toBe(true);
+  });
+
+  test("sync rejects a non-object or provider-less --to", async () => {
+    await expect(runSync({ ...baseOpts(), to: "null" })).rejects.toThrow(
+      FilesError
+    );
+  });
+
+  test("sync surfaces verbose per-key progress on stderr", async () => {
+    await write("p.txt", "data");
+    const destRoot = await fsp.mkdtemp(
+      path.join(os.tmpdir(), "files-sdk-dst-")
+    );
+    tmpDirs.push(destRoot);
+    cap.stderr.length = 0;
+    await runSync({
+      ...baseOpts({ verbose: true }),
+      to: JSON.stringify({ provider: "fs", root: destRoot }),
+    });
+    expect(cap.stderr.join("")).toContain("uploaded p.txt");
   });
 });

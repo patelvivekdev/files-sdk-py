@@ -8,6 +8,7 @@ import { Cli } from "@/components/capabilities/cli";
 import { LifecycleHooks } from "@/components/capabilities/lifecycle-hooks";
 import { Methods } from "@/components/capabilities/methods";
 import { Multipart } from "@/components/capabilities/multipart";
+import { Sync } from "@/components/capabilities/sync";
 import { UploadProgress } from "@/components/capabilities/upload-progress";
 import { CodeBlock } from "@/components/code-block";
 import { FadeIn } from "@/components/fade-in";
@@ -155,6 +156,32 @@ const chunk = await files.download("video.mp4", {
     docHref: "/features/onaction",
     panel: <LifecycleHooks />,
     title: "Lifecycle hooks",
+  },
+  {
+    code: `const live = new Files({ adapter: s3({ bucket: "live" }) });
+const backup = new Files({
+  adapter: r2({
+    bucket: "backup",
+    accountId,
+    accessKeyId,
+    secretAccessKey,
+  }),
+});
+
+// back up S3 to R2 — only the delta moves
+const {
+  uploaded,
+  skipped,
+  deleted,
+} = await sync(live, backup, {
+  prune: true,
+  compare: "size",
+});`,
+    description:
+      "sync() reconciles one backend onto another — uploading only what changed, skipping what's identical, and pruning what's gone. Back up or migrate in a line, and dry-run the plan first.",
+    docHref: "/api/sync",
+    panel: <Sync />,
+    title: "Mirror across backends",
   },
 ];
 

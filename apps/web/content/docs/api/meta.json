@@ -1,5 +1,14 @@
 {
   "root": true,
   "title": "API",
-  "pages": ["index", "errors", "---Methods---", "..."]
+  "pages": [
+    "index",
+    "errors",
+    "stored-file",
+    "---Global Methods---",
+    "sync",
+    "transfer",
+    "---Instance Methods---",
+    "..."
+  ]
 }

@@ -5,7 +5,7 @@ description: Read an object - a Blob-backed StoredFile by default, or a Readable
 
 `files.download(key, options?)` · `files.download(keys)`
 
-Reads an object. Returns a [`StoredFile`](/api#the-storedfile-type) by default (Blob-backed). Pass `{ as: "stream" }` to opt into a `ReadableStream` for large objects.
+Reads an object. Returns a [`StoredFile`](/api/stored-file) by default (Blob-backed). Pass `{ as: "stream" }` to opt into a `ReadableStream` for large objects.
 
 ```ts lineNumbers
 const file = await files.download("avatars/abc.png");

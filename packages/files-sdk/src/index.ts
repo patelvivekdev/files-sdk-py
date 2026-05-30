@@ -35,6 +35,13 @@ export type {
 export type { BodySource, StoredFileMeta } from "./internal/stored-file.js";
 export { createStoredFile } from "./internal/stored-file.js";
 export {
+  sync,
+  type SyncCompare,
+  type SyncOptions,
+  type SyncProgress,
+  type SyncResult,
+} from "./internal/sync.js";
+export {
   transfer,
   type TransferOptions,
   type TransferProgress,

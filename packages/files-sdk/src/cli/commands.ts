@@ -3,7 +3,7 @@ import type {
   MultipartOptions,
   UploadManyItem,
 } from "../index.js";
-import { transfer } from "../index.js";
+import { sync, transfer } from "../index.js";
 import { FilesError } from "../internal/errors.js";
 import { inferTypeFromName } from "../internal/mime.js";
 import {
@@ -597,6 +597,62 @@ export const runTransfer = async (opts: TransferCmdOpts): Promise<void> => {
     // transformKey can't be expressed as a flag; identity is the only mapping
     // reachable from the CLI. onProgress streams to stderr under --verbose so
     // it never pollutes the JSON result on stdout.
+    ...(opts.verbose && {
+      onProgress: ({ done, total, key, status }) =>
+        process.stderr.write(`${done}/${total} ${status} ${key}\n`),
+    }),
+  });
+
+  emit(result, opts);
+  if (result.errors?.length) {
+    process.exit(exitCode(result.errors[0]?.error.code ?? "Provider"));
+  }
+};
+
+export interface SyncCmdOpts extends CommonRunOpts {
+  /** Destination provider config as JSON — a {@link GlobalCliOptions} blob. */
+  to: string;
+  prefix?: string;
+  destPrefix?: string;
+  /** Mirror mode — delete destination keys the source no longer has. */
+  prune?: boolean;
+  /** Change detection. The function form of `compare` isn't reachable from a flag. */
+  compare?: "etag" | "size";
+  limit?: number;
+  concurrency?: number;
+  stopOnError?: boolean;
+}
+
+export const runSync = async (opts: SyncCmdOpts): Promise<void> => {
+  // Same shape as `transfer`: the source comes from the global flags, the
+  // destination is a separate provider supplied as a JSON blob.
+  const destConfig = parseJson<GlobalCliOptions>(opts.to);
+  if (!destConfig || typeof destConfig !== "object") {
+    throw new FilesError(
+      "Provider",
+      "--to must be a JSON object of destination provider options"
+    );
+  }
+
+  // Unlike `transfer`, `--dry-run` here is *not* a no-network echo: a mirror
+  // dry run lists both sides and returns the real reconciliation plan (what
+  // would be uploaded / skipped / pruned) without mutating anything — that
+  // preview is the whole point. So both providers load even under `--dry-run`.
+  const [source, dest] = await Promise.all([
+    loadFiles(opts.global),
+    loadFiles(destConfig),
+  ]);
+
+  const result = await sync(source.files, dest.files, {
+    ...(opts.prefix !== undefined && { prefix: opts.prefix }),
+    ...(opts.destPrefix !== undefined && { destPrefix: opts.destPrefix }),
+    ...(opts.prune && { prune: true }),
+    ...(opts.compare !== undefined && { compare: opts.compare }),
+    ...(opts.dryRun && { dryRun: true }),
+    ...(opts.limit !== undefined && { limit: opts.limit }),
+    ...buildBulkOptions(opts),
+    // transformKey can't be expressed as a flag. onProgress streams to stderr
+    // under --verbose so it never pollutes the JSON result on stdout.
     ...(opts.verbose && {
       onProgress: ({ done, total, key, status }) =>
         process.stderr.write(`${done}/${total} ${status} ${key}\n`),

@@ -17,7 +17,8 @@ Each command maps to a `Files` method. Same semantics, same `FilesError` codes, 
 | `delete`      | [`delete`](/api/delete)                     | Delete one or more keys                               |
 | `url`         | [`url`](/api/url)                           | Get a read URL — presigned or public                  |
 | `sign-upload` | [`signedUploadUrl`](/api/signed-upload-url) | Mint a browser-direct upload policy                   |
-| `transfer`    | [`transfer`](/features/transfer)            | Stream every object to another provider               |
+| `transfer`    | [`transfer`](/api/transfer)                 | Stream every object to another provider               |
+| `sync`        | [`sync`](/api/sync)                         | Mirror onto another provider (skip-unchanged, prune)  |
 
 All examples use `--provider s3 --bucket uploads`; swap in any [provider](/providers) and its flags.
 
@@ -143,6 +144,22 @@ files --provider s3 --bucket old --verbose \
   transfer \
   --to '{"provider":"r2","bucket":"new","accountId":"...","accessKeyId":"...","secretAccessKey":"..."}' \
   --prefix uploads/ --no-overwrite --concurrency 16
+```
+
+### sync
+
+Mirror the source onto another provider: upload new or changed objects, skip the unchanged ones, and — with `--prune` — delete destination keys the source no longer has. `--compare` picks the change check (`etag`, the default, or `size` for cross-provider mirrors). Unlike every other command, `--dry-run` here lists both sides and prints the real reconciliation plan (`{ uploaded, skipped, deleted }`) without mutating anything — preview a `--prune` before you run it.
+
+```bash lineNumbers
+# Back up an S3 prefix to R2 — only the delta moves, and the backup mirrors deletes
+files --provider s3 --bucket live --verbose \
+  sync \
+  --to '{"provider":"r2","bucket":"backup","accountId":"...","accessKeyId":"...","secretAccessKey":"..."}' \
+  --prefix uploads/ --prune --compare size --concurrency 16
+
+# Preview what a pruning mirror would do, read-only
+files --provider s3 --bucket live \
+  sync --to '{"provider":"r2","bucket":"backup",...}' --prune --dry-run
 ```
 
 ## Global flags

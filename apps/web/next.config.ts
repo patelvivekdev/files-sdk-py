@@ -20,6 +20,11 @@ const nextConfig: NextConfig = {
       permanent: false,
       source: "/ai",
     },
+    {
+      destination: "/api/transfer",
+      permanent: true,
+      source: "/features/transfer",
+    },
   ],
   rewrites: () => [
     {

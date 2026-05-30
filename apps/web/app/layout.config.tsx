@@ -25,9 +25,10 @@ export const baseOptions: BaseLayoutProps = {
   githubUrl: "https://github.com/haydenbleasel/files-sdk",
   links: [
     { text: "Adapters", url: "/adapters" },
+    { text: "AI", url: "/ai" },
     { text: "API", url: "/api" },
     { text: "CLI", url: "/cli" },
-    { text: "AI", url: "/ai" },
+    { text: "Features", url: "/features" },
   ],
   nav: {
     title: (

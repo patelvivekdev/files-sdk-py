@@ -405,6 +405,45 @@ describe("cli/program parseAsync (fs end-to-end)", () => {
     });
   });
 
+  test("sync routes its flags through the builder and mirrors with prune", async () => {
+    const dest = await fsp.mkdtemp(
+      path.join(os.tmpdir(), "files-sdk-syncdst-")
+    );
+    tmpDirs.push(dest);
+    await fsp.mkdir(path.join(root, "data"), { recursive: true });
+    await fsp.writeFile(path.join(root, "data/a.txt"), "alpha");
+    await fsp.mkdir(path.join(dest, "data"), { recursive: true });
+    await fsp.writeFile(path.join(dest, "data/stale.txt"), "gone");
+    await run(
+      "--provider",
+      "fs",
+      "--root",
+      root,
+      "sync",
+      "--to",
+      JSON.stringify({ provider: "fs", root: dest }),
+      "--prefix",
+      "data/",
+      "--dest-prefix",
+      "data/",
+      "--prune",
+      "--compare",
+      "size",
+      "--concurrency",
+      "2",
+      "--limit",
+      "50"
+    );
+    expect(lastJson(cap.stdout)).toMatchObject({
+      deleted: ["data/stale.txt"],
+      uploaded: ["data/a.txt"],
+    });
+    expect(await fsp.exists(path.join(dest, "data/stale.txt"))).toBe(false);
+    expect(await fsp.readFile(path.join(dest, "data/a.txt"), "utf-8")).toBe(
+      "alpha"
+    );
+  });
+
   test("upload/download new flags route through their builders", async () => {
     const local = path.join(root, "in.txt");
     await fsp.writeFile(local, "payload");

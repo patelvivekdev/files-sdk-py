@@ -1,0 +1,27 @@
+---
+title: StoredFile
+description: The type returned by download, head, and list - File's name/size/type/lastModified, plus the key, etag, and metadata that storage adds.
+---
+
+Native `File` covers `name`, `size`, `type`, and `lastModified`, but storage adds three things it doesn't carry: a full `key`, an `etag` for cache validation, and user-defined `metadata`. `StoredFile` mirrors `File`'s shape and adds those.
+
+```ts lineNumbers
+interface StoredFile {
+  // File-shaped:
+  name: string; // = key
+  size: number;
+  type: string; // = contentType
+  lastModified?: number;
+  arrayBuffer(): Promise<ArrayBuffer>;
+  text(): Promise<string>;
+  stream(): ReadableStream;
+  blob(): Promise<Blob>;
+
+  // Storage-specific:
+  key: string;
+  etag?: string;
+  metadata?: Record<string, string>;
+}
+```
+
+`upload` accepts a native `File` as input. `download`, `head`, and `list` all return `StoredFile`. The body accessors on results from `head` and `list` lazy-fetch on call.

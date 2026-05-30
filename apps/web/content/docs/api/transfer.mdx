@@ -1,5 +1,5 @@
 ---
-title: Transfer
+title: transfer
 description: Stream every object under a prefix from one Files instance to another - the cross-provider migration that the unified surface uniquely enables, built entirely on listAll, download, and upload.
 ---
 
@@ -23,6 +23,8 @@ const { transferred, errors } = await transfer(from, to, {
 ```
 
 Both arguments are full [`Files`](/api) instances, not raw adapters, so each leg honors its own instance's `prefix`, retries, timeouts, and [hooks](/features/onaction). Each object is streamed download-to-upload, so the destination never sees a buffered copy of a large file.
+
+`transfer` is a one-shot copy. For an incremental, optionally-pruning mirror — skip-unchanged, delete extraneous keys, dry-run the plan — reach for [`sync`](/api/sync) instead.
 
 ## What travels
 

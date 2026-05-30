@@ -207,6 +207,7 @@ describe("cli/program", () => {
       "mcp",
       "move",
       "sign-upload",
+      "sync",
       "transfer",
       "upload",
       "url",

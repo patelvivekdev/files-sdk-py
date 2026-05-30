@@ -5,7 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { z } from "zod";
 
-import { transfer } from "../index.js";
+import { sync, transfer } from "../index.js";
 import { rangedSize } from "../internal/core.js";
 import { FilesError } from "../internal/errors.js";
 import { storedFileToJson } from "./io.js";
@@ -522,6 +522,86 @@ export const buildMcpServer = async (
           const result = await transfer(files, dest.files, {
             ...(prefix !== undefined && { prefix }),
             ...(overwrite === false && { overwrite: false }),
+            ...(limit !== undefined && { limit }),
+            ...(concurrency !== undefined && { concurrency }),
+            ...(stopOnError && { stopOnError: true }),
+          });
+          return ok(result);
+        } catch (error) {
+          return errorPayload(error);
+        }
+      }
+    );
+
+    server.registerTool(
+      "sync",
+      {
+        description:
+          "Mirror the configured (source) provider onto another: upload new or changed objects, skip unchanged ones, and (with `prune`) delete destination keys the source no longer has. The destination is a separate provider config (`to`). Set `dryRun` to preview the plan without mutating. Returns `{ uploaded, skipped, deleted?, errors? }`.",
+        inputSchema: {
+          compare: z
+            .enum(["etag", "size"])
+            .optional()
+            .describe(
+              "Change detection: 'etag' (size + etag, default) or 'size' (byte length only — for cross-provider mirrors)"
+            ),
+          concurrency: concurrencyArg,
+          destPrefix: z
+            .string()
+            .optional()
+            .describe(
+              "Scope the destination walk (compare + prune) to this prefix (defaults to prefix)"
+            ),
+          dryRun: z
+            .boolean()
+            .optional()
+            .describe(
+              "Compute the reconciliation plan without uploading or deleting anything"
+            ),
+          limit: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Page size for the source and destination walks"),
+          prefix: z
+            .string()
+            .optional()
+            .describe("Only mirror keys under this prefix"),
+          prune: z
+            .boolean()
+            .optional()
+            .describe(
+              "Mirror mode: delete destination keys the source no longer has (destructive)"
+            ),
+          stopOnError: stopOnErrorArg,
+          to: z
+            .record(z.string(), z.unknown())
+            .describe(
+              'Destination provider options, e.g. { "provider": "r2", "bucket": "backup", "accountId": "..." }'
+            ),
+        },
+        title: "Mirror objects to another provider",
+      },
+      async ({
+        to,
+        prefix,
+        destPrefix,
+        prune,
+        compare,
+        dryRun,
+        limit,
+        concurrency,
+        stopOnError,
+      }) => {
+        try {
+          const dest = await loadFiles(to as unknown as GlobalCliOptions);
+          const result = await sync(files, dest.files, {
+            ...(prefix !== undefined && { prefix }),
+            ...(destPrefix !== undefined && { destPrefix }),
+            ...(prune && { prune: true }),
+            ...(compare !== undefined && { compare }),
+            ...(dryRun && { dryRun: true }),
             ...(limit !== undefined && { limit }),
             ...(concurrency !== undefined && { concurrency }),
             ...(stopOnError && { stopOnError: true }),

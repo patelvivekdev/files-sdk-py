@@ -11,6 +11,7 @@ import {
   runList,
   runMove,
   runSignUpload,
+  runSync,
   runTransfer,
   runUpload,
   runUrl,
@@ -575,11 +576,59 @@ export const buildProgram = (
     );
 
   program
+    .command("sync")
+    .description(
+      "mirror the configured (source) provider onto another (--to): upload new or changed objects, skip unchanged ones, and optionally prune extraneous destination keys"
+    )
+    .requiredOption(
+      "--to <json>",
+      'destination provider options as JSON (same shape as the global flags, e.g. \'{"provider":"r2","bucket":"backup","accountId":"..."}\')'
+    )
+    .option("--prefix <prefix>", "only mirror keys under this prefix")
+    .option(
+      "--dest-prefix <prefix>",
+      "scope the destination walk (compare + prune) to this prefix (defaults to --prefix)"
+    )
+    .option(
+      "--prune",
+      "delete destination keys the source no longer has (mirror mode — destructive)"
+    )
+    .addOption(
+      new Option(
+        "--compare <mode>",
+        "how an existing destination object is judged up to date"
+      ).choices(["etag", "size"])
+    )
+    .option(
+      "--limit <n>",
+      "page size for the source and destination walks",
+      intArg
+    )
+    .option("--concurrency <n>", "parallel uploads", intArg)
+    .option("--stop-on-error", "stop at the first failure")
+    .action(
+      wrap(runSync as (opts: never) => Promise<void>, (args, common) => {
+        const [opts] = args as [Record<string, unknown>];
+        return {
+          ...common,
+          compare: opts.compare as "etag" | "size" | undefined,
+          concurrency: opts.concurrency as number | undefined,
+          destPrefix: opts.destPrefix as string | undefined,
+          limit: opts.limit as number | undefined,
+          prefix: opts.prefix as string | undefined,
+          prune: opts.prune as boolean | undefined,
+          stopOnError: opts.stopOnError as boolean | undefined,
+          to: opts.to as string,
+        } as CommonRunOpts;
+      })
+    );
+
+  program
     .command("mcp")
     .description("start a read-only MCP server on stdio")
     .option(
       "--allow-writes",
-      "also expose mutating MCP tools: upload, delete, copy, move, sign-upload, and transfer"
+      "also expose mutating MCP tools: upload, delete, copy, move, sign-upload, transfer, and sync"
     )
     .action(async (opts, cmd) => {
       const { global, out } = resolveOpts(cmd as Command);

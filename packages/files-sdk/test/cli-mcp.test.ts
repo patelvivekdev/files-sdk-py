@@ -369,6 +369,51 @@ describe("cli/mcp tools (write-enabled)", () => {
     const result = await call(h.client, "transfer", { to: {} });
     expect(result.isError).toBe(true);
   });
+
+  test("sync mirrors to a destination provider and prunes", async () => {
+    await call(h.client, "upload", { key: "m/a.txt", text: "alpha" });
+    const destRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "mcp-sync-"));
+    await fsp.mkdir(path.join(destRoot, "m"), { recursive: true });
+    await fsp.writeFile(path.join(destRoot, "m/stale.txt"), "gone");
+
+    const result = await call(h.client, "sync", {
+      compare: "size",
+      concurrency: 2,
+      prefix: "m/",
+      prune: true,
+      to: { provider: "fs", root: destRoot },
+    });
+    expect(result.isError).toBe(false);
+    expect(result.data.uploaded).toEqual(["m/a.txt"]);
+    expect(result.data.deleted).toEqual(["m/stale.txt"]);
+
+    await fsp.rm(destRoot, { force: true, recursive: true });
+  });
+
+  test("sync dryRun returns the plan without mutating", async () => {
+    await call(h.client, "upload", { key: "d/new.txt", text: "n" });
+    const destRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "mcp-sync-dry-"));
+    await fsp.mkdir(path.join(destRoot, "d"), { recursive: true });
+    await fsp.writeFile(path.join(destRoot, "d/stale.txt"), "gone");
+
+    const result = await call(h.client, "sync", {
+      dryRun: true,
+      prefix: "d/",
+      prune: true,
+      to: { provider: "fs", root: destRoot },
+    });
+    expect(result.data.uploaded).toEqual(["d/new.txt"]);
+    expect(result.data.deleted).toEqual(["d/stale.txt"]);
+    expect(await fsp.exists(path.join(destRoot, "d/new.txt"))).toBe(false);
+    expect(await fsp.exists(path.join(destRoot, "d/stale.txt"))).toBe(true);
+
+    await fsp.rm(destRoot, { force: true, recursive: true });
+  });
+
+  test("sync reports a bad destination config as an error", async () => {
+    const result = await call(h.client, "sync", { to: {} });
+    expect(result.isError).toBe(true);
+  });
 });
 
 describe("cli/mcp tools (error paths)", () => {
@@ -460,6 +505,7 @@ describe("cli/mcp read-only server", () => {
         "move",
         "sign-upload",
         "transfer",
+        "sync",
       ]) {
         expect(names).not.toContain(writeTool);
       }

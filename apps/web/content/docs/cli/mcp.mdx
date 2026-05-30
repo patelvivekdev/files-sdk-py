@@ -5,9 +5,9 @@ description: Boot a built-in read-only MCP server on stdio, with provider and cr
 
 `files ... mcp` boots a read-only [MCP server](https://modelcontextprotocol.io) on stdio. By default it exposes `download`, `head`, `exists`, `list`, and `url`. The provider and credentials are bound at server startup; the agent only passes operation arguments, never secrets.
 
-Pass `--allow-writes` to also expose mutating tools: `upload`, `delete`, `copy`, `move`, `sign-upload`, and `transfer`.
+Pass `--allow-writes` to also expose mutating tools: `upload`, `delete`, `copy`, `move`, `sign-upload`, `transfer`, and `sync`.
 
-The tools mirror the CLI surface: `download` accepts a byte `range`, `head`/`exists` take arrays of keys plus `concurrency`/`stopOnError`, and `list` accepts `all` to walk every page or a `delimiter` to return one folder level (files in `items`, subfolders in `prefixes`). With `--allow-writes`, `upload` accepts `multipart`, `delete` takes arrays of keys plus `concurrency`/`stopOnError`, and `transfer` takes a destination provider config (`to`) to copy objects across backends.
+The tools mirror the CLI surface: `download` accepts a byte `range`, `head`/`exists` take arrays of keys plus `concurrency`/`stopOnError`, and `list` accepts `all` to walk every page or a `delimiter` to return one folder level (files in `items`, subfolders in `prefixes`). With `--allow-writes`, `upload` accepts `multipart`, `delete` takes arrays of keys plus `concurrency`/`stopOnError`, `transfer` takes a destination provider config (`to`) to copy objects across backends, and `sync` mirrors onto a destination provider with `prune`, `compare`, and `dryRun` (set `dryRun` to preview the reconciliation plan read-only).
 
 ```bash lineNumbers
 # Start the read-only MCP server on stdio

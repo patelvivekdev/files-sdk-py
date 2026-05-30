@@ -1,6 +1,6 @@
 ---
 title: Overview
-description: The full Files SDK API - ten unified methods plus a key-bound handle, the shared per-operation options, and the StoredFile type.
+description: The full Files SDK API - ten unified methods plus a key-bound handle, the shared per-operation options, and the StoredFile return type.
 ---
 
 The surface is small: a `Files` instance with ten methods, plus `files.file(key)` for a key-bound handle. Each method takes one key (or an array, where bulk applies), accepts the shared `signal` / `timeout` / `retries` options, and throws a normalized `FilesError`. Each method has its own page; this page covers the pieces that cut across all of them.
@@ -8,7 +8,7 @@ The surface is small: a `Files` instance with ten methods, plus `files.file(key)
 ## Functions
 
 - [`upload`](/api/upload) - write a body to a key, one or many.
-- [`download`](/api/download) - read an object as a `StoredFile` or a stream.
+- [`download`](/api/download) - read an object as a [`StoredFile`](/api/stored-file) or a stream.
 - [`head`](/api/head) - fetch metadata without materializing the body.
 - [`exists`](/api/exists) - check whether a key exists.
 - [`delete`](/api/delete) - remove one object or many.
@@ -18,6 +18,11 @@ The surface is small: a `Files` instance with ten methods, plus `files.file(key)
 - [`url`](/api/url) - a direct or signed URL to fetch a key.
 - [`signedUploadUrl`](/api/signed-upload-url) - a presigned PUT/POST contract for direct browser uploads.
 - [`file`](/api/file) - a `FileHandle` bound to one key.
+
+Two **global functions** stand apart from the instance methods — they take two `Files` instances and move objects between backends, built entirely on the methods above:
+
+- [`transfer`](/api/transfer) - stream every object from one instance to another.
+- [`sync`](/api/sync) - mirror one instance onto another (skip-unchanged, prune, dry-run).
 
 ## Scoping keys with a prefix
 
@@ -51,25 +56,4 @@ See [Timeouts](/features/timeouts), [Retries](/features/retries), and [Cancellat
 
 ## The StoredFile type
 
-Native `File` covers `name`, `size`, `type`, and `lastModified`, but storage adds three things it doesn't carry: a full `key`, an `etag` for cache validation, and user-defined `metadata`. `StoredFile` mirrors `File`'s shape and adds those.
-
-```ts lineNumbers
-interface StoredFile {
-  // File-shaped:
-  name: string; // = key
-  size: number;
-  type: string; // = contentType
-  lastModified?: number;
-  arrayBuffer(): Promise<ArrayBuffer>;
-  text(): Promise<string>;
-  stream(): ReadableStream;
-  blob(): Promise<Blob>;
-
-  // Storage-specific:
-  key: string;
-  etag?: string;
-  metadata?: Record<string, string>;
-}
-```
-
-`upload` accepts a native `File` as input. `download`, `head`, and `list` all return `StoredFile`. The body accessors on results from `head` and `list` lazy-fetch on call.
+`download`, `head`, and `list` all return [`StoredFile`](/api/stored-file) — a type that mirrors native `File`'s shape and adds the `key`, `etag`, and `metadata` that storage carries.
