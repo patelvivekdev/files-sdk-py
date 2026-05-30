@@ -1,0 +1,31 @@
+{
+  "name": "1.7-video",
+  "version": "1.0.0",
+  "private": true,
+  "description": "1.7 release video for Files SDK",
+  "license": "UNLICENSED",
+  "repository": {},
+  "sideEffects": [
+    "*.css"
+  ],
+  "scripts": {
+    "dev": "remotion studio",
+    "upgrade": "remotion upgrade",
+    "types": "tsc"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.465",
+    "@remotion/google-fonts": "^4.0.465",
+    "@remotion/sfx": "^4.0.465",
+    "@remotion/tailwind-v4": "4.0.465",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "remotion": "4.0.465",
+    "tailwindcss": "4.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.15",
+    "@types/web": "0.0.349",
+    "typescript": "6.0.3"
+  }
+}
