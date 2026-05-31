@@ -100,7 +100,10 @@ const encryption = (key: CryptoKey): FilesPlugin => ({
 <Callout>
   You don't have to write this one yourself - a production-ready
   [`encryption()`](/plugins/encryption) plugin ships in `files-sdk/encryption`,
-  with real envelope encryption over the Web Crypto API.
+  with real envelope encryption over the Web Crypto API. A
+  [`compression()`](/plugins/compression) plugin ships alongside it in
+  `files-sdk/compression`; put it first so it sees plaintext: `plugins:
+  [compression(), encryption(key)]`.
 </Callout>
 
 ## extend: new methods

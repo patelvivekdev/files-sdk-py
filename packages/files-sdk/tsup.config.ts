@@ -6,6 +6,7 @@ export default defineConfig({
   entry: [
     "src/index.ts",
     "src/cli/index.ts",
+    "src/compression/index.ts",
     "src/encryption/index.ts",
     "src/s3/index.ts",
     "src/bun-s3/index.ts",
