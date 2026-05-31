@@ -5,6 +5,7 @@ import {
   mapMany,
 } from "./internal/core.js";
 import { FilesError } from "./internal/errors.js";
+import { globMatcher, globPrefix } from "./internal/glob.js";
 import { runResumableUpload } from "./internal/resumable.js";
 import type {
   ResumableDriver,
@@ -335,6 +336,60 @@ export interface ListResult {
    */
   prefixes?: string[];
   cursor?: string;
+}
+
+/**
+ * How a string {@link SearchOptions.match | pattern} is interpreted by
+ * {@link Files.search}. A `RegExp` pattern ignores this and always matches by
+ * regex.
+ *
+ * - `"glob"` (default) — standard glob (via picomatch): `*` matches a run of
+ *   characters within a path segment, `**` spans segments, `?` is a single
+ *   non-`/` character, plus `[a-z]` classes, `{a,b}` braces, and a leading `!`
+ *   to negate. Dotfiles are matched (keys are opaque, not hidden files). A glob
+ *   with no wildcards (e.g. `"report.pdf"`) is an **exact** key match, not a
+ *   substring match.
+ * - `"regex"` — the string is compiled to a `RegExp` (with the `u` flag) and
+ *   tested against the key.
+ * - `"substring"` — matches keys that contain the pattern anywhere.
+ * - `"exact"` — matches keys equal to the pattern.
+ */
+export type SearchMatch = "glob" | "regex" | "substring" | "exact";
+
+export interface SearchOptions extends OperationOptions {
+  /**
+   * Restrict the underlying walk to keys starting with this prefix. For a glob
+   * pattern a literal prefix is inferred automatically (`uploads/2024/*.pdf`
+   * walks only the `uploads/2024` prefix); set this explicitly to bound a
+   * `regex`, `substring`, or `caseInsensitive` search — which have no inferable
+   * prefix — to part of a large bucket. Composes with the {@link Files}
+   * instance `prefix` exactly like {@link ListOptions.prefix}.
+   */
+  prefix?: string;
+  /**
+   * Page size for each underlying `list()` call — the walk's batch size, not a
+   * cap on results. See {@link ListOptions.limit}.
+   */
+  limit?: number;
+  /**
+   * Stop after yielding this many matches. Omit to yield every match (the walk
+   * still pages lazily, so memory stays bounded).
+   */
+  maxResults?: number;
+  /**
+   * How to interpret a string `pattern`. Defaults to `"glob"`. Ignored when
+   * `pattern` is a `RegExp`.
+   */
+  match?: SearchMatch;
+  /**
+   * Match case-insensitively. Adds the `i` flag for `glob` and `regex` and
+   * lowercases both sides for `substring` and `exact`. A `RegExp` that already
+   * sets its own `i` flag is honored regardless. When set, the automatic glob
+   * prefix push-down is disabled (a provider prefix filter is case-sensitive),
+   * so pass an explicit `prefix` to bound a case-insensitive search. Defaults
+   * to `false`.
+   */
+  caseInsensitive?: boolean;
 }
 
 export interface DeleteManyOptions {
@@ -950,6 +1005,49 @@ const assertValidKey = (key: string, label = "key"): void => {
   if (key.includes("\0")) {
     throw new FilesError("Provider", `${label} must not contain null bytes`);
   }
+};
+
+// Compile a search pattern into a key predicate once, up front, so the per-key
+// cost during the walk is a single test/compare and an invalid regex throws
+// before any provider call.
+const buildSearchMatcher = (
+  pattern: string | RegExp,
+  match: SearchMatch,
+  caseInsensitive: boolean
+): ((key: string) => boolean) => {
+  if (
+    typeof pattern === "string" &&
+    (match === "substring" || match === "exact")
+  ) {
+    const needle = caseInsensitive ? pattern.toLowerCase() : pattern;
+    const contains = match === "substring";
+    return (key) => {
+      const hay = caseInsensitive ? key.toLowerCase() : key;
+      return contains ? hay.includes(needle) : hay === needle;
+    };
+  }
+  if (typeof pattern === "string" && match === "glob") {
+    return globMatcher(pattern, caseInsensitive);
+  }
+  // A RegExp instance, or a string compiled as a regex.
+  let regexp: RegExp;
+  if (pattern instanceof RegExp) {
+    regexp =
+      caseInsensitive && !pattern.flags.includes("i")
+        ? new RegExp(pattern.source, `${pattern.flags}i`)
+        : pattern;
+  } else {
+    try {
+      regexp = new RegExp(pattern, caseInsensitive ? "iu" : "u");
+    } catch (error) {
+      throw new FilesError(
+        "Provider",
+        `search pattern is not a valid regular expression: ${pattern}`,
+        error
+      );
+    }
+  }
+  return (key) => regexp.test(key);
 };
 
 const assertNoRelativeSegments = (key: string, label = "key"): void => {
@@ -2074,6 +2172,77 @@ export class Files<A extends Adapter = Adapter> {
       yield* page.items;
       ({ cursor } = page);
     } while (cursor);
+  }
+
+  /**
+   * Find objects whose key matches `pattern`, walking every page like
+   * {@link listAll}.
+   *
+   * `pattern` is a glob by default (standard glob via picomatch: `*` stays
+   * within a path segment, `**` spans segments, `?` is one character, plus
+   * `[a-z]` classes, `{a,b}` braces, and `!` negation). Pass a `RegExp`, or
+   * `match: "regex" | "substring" | "exact"`, to switch how a string is
+   * interpreted (see {@link SearchMatch}). Matching is against the
+   * caller-facing key, so the instance `prefix` is already stripped.
+   *
+   * ```ts
+   * for await (const file of files.search("photos/*.jpg")) {
+   *   console.log(file.key, file.size);
+   * }
+   * // "**" spans path segments — every object under uploads/, at any depth:
+   * const all = await Array.fromAsync(files.search("uploads/**"));
+   * ```
+   *
+   * For a glob, the literal head is pushed down as a `list()` prefix so the
+   * walk is scoped (`uploads/2024/*.pdf` only lists the `uploads/2024` prefix);
+   * for other modes pass {@link SearchOptions.prefix} to bound it. Search reads
+   * every page under that prefix — use {@link SearchOptions.maxResults} or
+   * `break` to stop early. Matching against `file.key` reuses the same page walk
+   * as {@link listAll}, so retries/timeouts and the `onAction` `list` hook apply
+   * per page.
+   *
+   * @yields each matching object, following the cursor across pages.
+   */
+  async *search(
+    pattern: string | RegExp,
+    opts?: SearchOptions
+  ): AsyncGenerator<StoredFile, void> {
+    const {
+      prefix,
+      limit,
+      maxResults,
+      match = "glob",
+      caseInsensitive = false,
+      ...rest
+    } = opts ?? {};
+    if (maxResults !== undefined && maxResults <= 0) {
+      return;
+    }
+    const matches = buildSearchMatcher(pattern, match, caseInsensitive);
+    // Only a glob carries an inferable literal prefix, and only when matching
+    // case-sensitively (a provider prefix filter can't be case-folded).
+    const walkPrefix =
+      prefix ??
+      (typeof pattern === "string" && match === "glob" && !caseInsensitive
+        ? globPrefix(pattern)
+        : "");
+    const listOpts: ListOptions = { ...rest };
+    if (walkPrefix) {
+      listOpts.prefix = walkPrefix;
+    }
+    if (limit !== undefined) {
+      listOpts.limit = limit;
+    }
+    let yielded = 0;
+    for await (const file of this.listAll(listOpts)) {
+      if (matches(file.key)) {
+        yield file;
+        yielded += 1;
+        if (maxResults !== undefined && yielded >= maxResults) {
+          return;
+        }
+      }
+    }
   }
 
   /**

@@ -297,6 +297,33 @@ describe("cli/mcp tools (write-enabled)", () => {
     expect((all.data.items as unknown[]).length).toBe(2);
   });
 
+  test("search returns keys matching a glob, regex, or substring", async () => {
+    await call(h.client, "upload", { key: "se/a.pdf", text: "x" });
+    await call(h.client, "upload", { key: "se/b.txt", text: "x" });
+    await call(h.client, "upload", { key: "se/c.pdf", text: "x" });
+
+    const glob = await call(h.client, "search", { pattern: "se/*.pdf" });
+    expect(glob.isError).toBe(false);
+    expect(
+      (glob.data.items as { key: string }[]).map((i) => i.key).toSorted()
+    ).toEqual(["se/a.pdf", "se/c.pdf"]);
+
+    const regex = await call(h.client, "search", {
+      match: "regex",
+      pattern: "\\.txt$",
+      prefix: "se/",
+    });
+    expect((regex.data.items as { key: string }[]).map((i) => i.key)).toEqual([
+      "se/b.txt",
+    ]);
+
+    const capped = await call(h.client, "search", {
+      maxResults: 1,
+      pattern: "se/*.pdf",
+    });
+    expect(capped.data.items as unknown[]).toHaveLength(1);
+  });
+
   test("list with delimiter splits files and folders", async () => {
     await call(h.client, "upload", { key: "d/cover.jpg", text: "x" });
     await call(h.client, "upload", { key: "d/2024/a.jpg", text: "x" });
@@ -436,6 +463,7 @@ describe("cli/mcp tools (error paths)", () => {
       ["copy", { from: "a", to: "b" }],
       ["move", { from: "a", to: "b" }],
       ["list", {}],
+      ["search", { pattern: "*" }],
       ["sign-upload", { expiresIn: 60, key: "k.txt" }],
     ];
     for (const [name, args] of cases) {
@@ -496,7 +524,14 @@ describe("cli/mcp read-only server", () => {
     try {
       const names = await toolNames(h.client);
       expect(names).toEqual(
-        expect.arrayContaining(["download", "head", "exists", "list", "url"])
+        expect.arrayContaining([
+          "download",
+          "head",
+          "exists",
+          "list",
+          "search",
+          "url",
+        ])
       );
       for (const writeTool of [
         "upload",

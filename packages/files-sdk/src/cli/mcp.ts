@@ -430,6 +430,59 @@ export const buildMcpServer = async (
   );
 
   server.registerTool(
+    "search",
+    {
+      description:
+        'Find objects whose key matches `pattern`. By default `pattern` is a glob (`*` within a path segment, `**` across `/`, `?` one character); set `match` to "regex", "substring", or "exact" to change that. Walks every page, following the cursor. A glob\'s literal prefix is pushed down automatically; for other modes (or a case-insensitive search) pass `prefix` to bound the walk over a large bucket.',
+      inputSchema: {
+        caseInsensitive: z
+          .boolean()
+          .optional()
+          .describe("Match case-insensitively"),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Page size for the underlying walk (not a cap on results)"),
+        match: z
+          .enum(["glob", "regex", "substring", "exact"])
+          .optional()
+          .describe("How to interpret `pattern` (default glob)"),
+        maxResults: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Stop after this many matches"),
+        pattern: z.string(),
+        prefix: z
+          .string()
+          .optional()
+          .describe("Scope the walk to this key prefix"),
+      },
+      title: "Search objects",
+    },
+    async ({ pattern, match, prefix, limit, maxResults, caseInsensitive }) => {
+      try {
+        const items: ReturnType<typeof storedFileToJson>[] = [];
+        for await (const file of files.search(pattern, {
+          caseInsensitive,
+          limit,
+          match,
+          maxResults,
+          prefix,
+        })) {
+          items.push(storedFileToJson(file));
+        }
+        return ok({ items });
+      } catch (error) {
+        return errorPayload(error);
+      }
+    }
+  );
+
+  server.registerTool(
     "url",
     {
       description:

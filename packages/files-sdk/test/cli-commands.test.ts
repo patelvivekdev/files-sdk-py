@@ -11,6 +11,7 @@ import {
   runHead,
   runList,
   runMove,
+  runSearch,
   runSignUpload,
   runSync,
   runTransfer,
@@ -212,6 +213,35 @@ describe("cli/commands dry-run", () => {
       action: "list",
       delimiter: "/",
       prefix: "p/",
+    });
+  });
+
+  test("search dry-run echoes the resolved match mode and pattern", async () => {
+    await runSearch({
+      ...baseOpts({ dryRun: true }),
+      maxResults: 5,
+      pattern: "docs/*.pdf",
+      prefix: "docs/",
+    });
+    expect(lastJson(cap.stdout)).toMatchObject({
+      action: "search",
+      match: "glob",
+      maxResults: 5,
+      pattern: "docs/*.pdf",
+      prefix: "docs/",
+    });
+  });
+
+  test("search dry-run resolves --regex to match: regex", async () => {
+    await runSearch({
+      ...baseOpts({ dryRun: true }),
+      pattern: "\\.pdf$",
+      regex: true,
+    });
+    expect(lastJson(cap.stdout)).toMatchObject({
+      action: "search",
+      match: "regex",
+      pattern: "\\.pdf$",
     });
   });
 
@@ -425,6 +455,46 @@ describe("cli/commands real (fs adapter)", () => {
       items: { key: string }[];
     };
     expect(out.items.map((i) => i.key)).toEqual(["docs/a", "docs/b"]);
+  });
+
+  test("search returns keys matching a glob", async () => {
+    const local = path.join(root, "in.txt");
+    await uploadFile("s/a.pdf", "a", local);
+    await uploadFile("s/b.txt", "b", local);
+    await uploadFile("s/c.pdf", "c", local);
+    cap.stdout.length = 0;
+    await runSearch({ ...baseOpts(), pattern: "s/*.pdf" });
+    const out = lastJson(cap.stdout) as { items: { key: string }[] };
+    expect(out.items.map((i) => i.key).toSorted()).toEqual([
+      "s/a.pdf",
+      "s/c.pdf",
+    ]);
+  });
+
+  test("search --regex matches by regular expression", async () => {
+    const local = path.join(root, "in.txt");
+    await uploadFile("r/one.log", "1", local);
+    await uploadFile("r/two.txt", "2", local);
+    cap.stdout.length = 0;
+    await runSearch({
+      ...baseOpts(),
+      pattern: "\\.log$",
+      prefix: "r/",
+      regex: true,
+    });
+    const out = lastJson(cap.stdout) as { items: { key: string }[] };
+    expect(out.items.map((i) => i.key)).toEqual(["r/one.log"]);
+  });
+
+  test("search honors --max-results", async () => {
+    const local = path.join(root, "in.txt");
+    for (const name of ["m/1.txt", "m/2.txt", "m/3.txt"]) {
+      await uploadFile(name, "x", local);
+    }
+    cap.stdout.length = 0;
+    await runSearch({ ...baseOpts(), maxResults: 2, pattern: "m/*.txt" });
+    const out = lastJson(cap.stdout) as { items: { key: string }[] };
+    expect(out.items).toHaveLength(2);
   });
 
   test("url returns a file:// URL by default for the fs adapter", async () => {

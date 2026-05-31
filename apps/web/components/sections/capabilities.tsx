@@ -8,6 +8,7 @@ import { Cli } from "@/components/capabilities/cli";
 import { LifecycleHooks } from "@/components/capabilities/lifecycle-hooks";
 import { Methods } from "@/components/capabilities/methods";
 import { Multipart } from "@/components/capabilities/multipart";
+import { Search } from "@/components/capabilities/search";
 import { Sync } from "@/components/capabilities/sync";
 import { UploadProgress } from "@/components/capabilities/upload-progress";
 import { CodeBlock } from "@/components/code-block";
@@ -45,6 +46,25 @@ await files.delete(["old/1.png", "old/2.png"]);`,
     docHref: "/api",
     panel: <Methods />,
     title: "Every operation, one interface",
+  },
+  {
+    code: `// glob by default — ** spans folders
+for await (const file of files.search("invoices/**/*.pdf")) {
+  console.log(file.key, file.size);
+}
+
+// or a regex, substring, or exact match
+const errors = files.search(/error|panic/, { prefix: "logs/" });
+
+// collect into an array, capped
+const recent = await Array.fromAsync(
+  files.search("*.png", { maxResults: 20 }),
+);`,
+    description:
+      "files.search() finds objects by key — a glob by default, or a regex, substring, or exact match. Matches stream back as an async iterable, and a glob's prefix scopes the walk to skip the rest of the bucket.",
+    docHref: "/api/search",
+    panel: <Search />,
+    title: "Find files by name, glob, or regex",
   },
   {
     code: `import { createFileTools } from "files-sdk/ai-sdk";

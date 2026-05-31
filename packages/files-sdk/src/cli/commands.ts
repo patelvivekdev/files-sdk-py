@@ -1,6 +1,7 @@
 import type {
   BulkOptions,
   MultipartOptions,
+  SearchMatch,
   UploadManyItem,
 } from "../index.js";
 import { sync, transfer } from "../index.js";
@@ -479,6 +480,53 @@ export const runList = async (opts: ListCmdOpts): Promise<void> => {
     },
     opts
   );
+};
+
+export interface SearchCmdOpts extends CommonRunOpts {
+  pattern: string;
+  match?: SearchMatch;
+  regex?: boolean;
+  prefix?: string;
+  limit?: number;
+  maxResults?: number;
+  caseInsensitive?: boolean;
+}
+
+export const runSearch = async (opts: SearchCmdOpts): Promise<void> => {
+  // `--regex` is shorthand for `--match regex`; otherwise honor `--match`
+  // (default glob). Patterns over the CLI/MCP are always strings.
+  const match: SearchMatch = opts.regex ? "regex" : (opts.match ?? "glob");
+
+  if (opts.dryRun) {
+    return dryRun(
+      "search",
+      {
+        caseInsensitive: opts.caseInsensitive,
+        limit: opts.limit,
+        match,
+        maxResults: opts.maxResults,
+        pattern: opts.pattern,
+        prefix: opts.prefix,
+      },
+      opts
+    );
+  }
+
+  const { files } = await loadFiles(opts.global);
+
+  // search walks every page under the (inferred or explicit) prefix, following
+  // the cursor, so the result has no `cursor`. Mirrors `list --all`.
+  const items: ReturnType<typeof storedFileToJson>[] = [];
+  for await (const file of files.search(opts.pattern, {
+    caseInsensitive: opts.caseInsensitive,
+    limit: opts.limit,
+    match,
+    maxResults: opts.maxResults,
+    prefix: opts.prefix,
+  })) {
+    items.push(storedFileToJson(file));
+  }
+  emit({ items }, opts);
 };
 
 export interface UrlCmdOpts extends CommonRunOpts {

@@ -187,6 +187,72 @@ describe("cli/program parseAsync (fs end-to-end)", () => {
     });
   });
 
+  test("search <pattern> wires --prefix/--limit/--max-results/--case-insensitive", async () => {
+    await run(
+      "--provider",
+      "fs",
+      "--root",
+      root,
+      "--dry-run",
+      "search",
+      "docs/*.pdf",
+      "--prefix",
+      "docs/",
+      "--limit",
+      "3",
+      "--max-results",
+      "7",
+      "--case-insensitive"
+    );
+    expect(lastJson(cap.stdout)).toMatchObject({
+      action: "search",
+      caseInsensitive: true,
+      dryRun: true,
+      limit: 3,
+      match: "glob",
+      maxResults: 7,
+      pattern: "docs/*.pdf",
+      prefix: "docs/",
+      provider: "fs",
+    });
+  });
+
+  test("search --regex and --match resolve the match mode", async () => {
+    await run(
+      "--provider",
+      "fs",
+      "--root",
+      root,
+      "--dry-run",
+      "search",
+      "\\.pdf$",
+      "--regex"
+    );
+    expect(lastJson(cap.stdout)).toMatchObject({
+      action: "search",
+      match: "regex",
+      pattern: "\\.pdf$",
+    });
+
+    cap.stdout.length = 0;
+    await run(
+      "--provider",
+      "fs",
+      "--root",
+      root,
+      "--dry-run",
+      "search",
+      "report",
+      "--match",
+      "substring"
+    );
+    expect(lastJson(cap.stdout)).toMatchObject({
+      action: "search",
+      match: "substring",
+      pattern: "report",
+    });
+  });
+
   test("head/exists/delete/copy/url dry-run go through their action builders", async () => {
     for (const argv of [
       ["head", "k"],

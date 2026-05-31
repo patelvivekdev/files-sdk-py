@@ -10,13 +10,14 @@ import {
   runHead,
   runList,
   runMove,
+  runSearch,
   runSignUpload,
   runSync,
   runTransfer,
   runUpload,
   runUrl,
 } from "./commands.js";
-import type { CommonRunOpts } from "./commands.js";
+import type { CommonRunOpts, SearchCmdOpts } from "./commands.js";
 import { fail, parseJson } from "./io.js";
 import type { OutputOpts } from "./io.js";
 import type { GlobalCliOptions } from "./loader.js";
@@ -491,6 +492,43 @@ export const buildProgram = (
           delimiter: opts.delimiter as string | undefined,
           limit: opts.limit as number | undefined,
           prefix: opts.prefix as string | undefined,
+        } as CommonRunOpts;
+      })
+    );
+
+  program
+    .command("search <pattern>")
+    .description(
+      "find objects whose key matches a glob (default), regex, substring, or exact pattern; walks every page"
+    )
+    .option(
+      "--match <mode>",
+      "how to interpret <pattern>: glob (default), regex, substring, or exact"
+    )
+    .option("--regex", "shorthand for --match regex")
+    .option(
+      "--prefix <prefix>",
+      "scope the walk to this key prefix (required to bound a regex/substring/case-insensitive search)"
+    )
+    .option(
+      "--limit <n>",
+      "page size for the underlying walk (not a cap on results)",
+      intArg
+    )
+    .option("--max-results <n>", "stop after this many matches", intArg)
+    .option("--case-insensitive", "match case-insensitively")
+    .action(
+      wrap(runSearch as (opts: never) => Promise<void>, (args, common) => {
+        const [pattern, opts] = args as [string, Record<string, unknown>];
+        return {
+          ...common,
+          caseInsensitive: opts.caseInsensitive as boolean | undefined,
+          limit: opts.limit as number | undefined,
+          match: opts.match as SearchCmdOpts["match"],
+          maxResults: opts.maxResults as number | undefined,
+          pattern,
+          prefix: opts.prefix as string | undefined,
+          regex: opts.regex as boolean | undefined,
         } as CommonRunOpts;
       })
     );

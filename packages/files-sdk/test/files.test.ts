@@ -1568,3 +1568,244 @@ describe("upload progress", () => {
     ]);
   });
 });
+
+const searchCollect = async (
+  gen: AsyncGenerator<{ key: string }, void>
+): Promise<string[]> => {
+  const keys: string[] = [];
+  for await (const file of gen) {
+    keys.push(file.key);
+  }
+  return keys;
+};
+
+const searchSeed = async (files: Files, keys: string[]): Promise<void> => {
+  for (const key of keys) {
+    await files.upload(key, key);
+  }
+};
+
+// A fakeAdapter whose `list` records the prefix it's called with, so tests can
+// assert prefix push-down (or its absence).
+const listSpy = (): {
+  adapter: ReturnType<typeof fakeAdapter>;
+  prefixes: (string | undefined)[];
+} => {
+  const adapter = fakeAdapter();
+  const prefixes: (string | undefined)[] = [];
+  const baseList = adapter.list.bind(adapter);
+  adapter.list = (opts) => {
+    prefixes.push(opts?.prefix);
+    return baseList(opts);
+  };
+  return { adapter, prefixes };
+};
+
+describe("Files.search", () => {
+  test("glob is the default and matches whole keys within a segment", async () => {
+    const files = new Files({ adapter: fakeAdapter() });
+    await searchSeed(files, ["a/1.txt", "a/2.log", "a/deep/3.txt", "b/4.txt"]);
+    // `*` does not cross `/`, so the nested a/deep/3.txt is excluded.
+    expect(await searchCollect(files.search("a/*.txt"))).toEqual(["a/1.txt"]);
+  });
+
+  test("`**` spans path segments at any depth", async () => {
+    const files = new Files({ adapter: fakeAdapter() });
+    await searchSeed(files, ["docs/x.pdf", "docs/2024/q1.pdf", "img/y.png"]);
+    const keys = await searchCollect(files.search("docs/**/*.pdf"));
+    expect(keys.toSorted()).toEqual(["docs/2024/q1.pdf", "docs/x.pdf"]);
+  });
+
+  test("walks across pages when the page size is below the match count", async () => {
+    const files = new Files({ adapter: fakeAdapter() });
+    await searchSeed(files, [
+      "p/1.txt",
+      "p/2.txt",
+      "p/3.txt",
+      "p/4.txt",
+      "q/5.txt",
+    ]);
+    const keys = await searchCollect(files.search("p/*.txt", { limit: 2 }));
+    expect(keys.toSorted()).toEqual([
+      "p/1.txt",
+      "p/2.txt",
+      "p/3.txt",
+      "p/4.txt",
+    ]);
+  });
+
+  test("pushes a glob's literal prefix down to the underlying list", async () => {
+    const { adapter, prefixes } = listSpy();
+    const files = new Files({ adapter });
+    await searchSeed(files, [
+      "uploads/2024/a.pdf",
+      "uploads/2023/b.pdf",
+      "other/c.pdf",
+    ]);
+
+    expect(await searchCollect(files.search("uploads/2024/*.pdf"))).toEqual([
+      "uploads/2024/a.pdf",
+    ]);
+    expect(prefixes).toEqual(["uploads/2024"]);
+  });
+
+  test("a leading-wildcard glob pushes down no prefix", async () => {
+    const { adapter, prefixes } = listSpy();
+    const files = new Files({ adapter });
+    await searchSeed(files, ["a/x.txt", "b/y.txt"]);
+
+    const keys = await searchCollect(files.search("**/*.txt"));
+    expect(keys.toSorted()).toEqual(["a/x.txt", "b/y.txt"]);
+    expect(prefixes).toEqual([undefined]);
+  });
+
+  test("match: regex tests the key, and an explicit prefix bounds the walk", async () => {
+    const { adapter, prefixes } = listSpy();
+    const files = new Files({ adapter });
+    await searchSeed(files, [
+      "logs/error.log",
+      "logs/info.log",
+      "data/error.log",
+    ]);
+
+    expect(
+      await searchCollect(
+        files.search("error\\.log$", { match: "regex", prefix: "logs/" })
+      )
+    ).toEqual(["logs/error.log"]);
+    expect(prefixes).toEqual(["logs/"]);
+  });
+
+  test("a RegExp instance matches by regex", async () => {
+    const files = new Files({ adapter: fakeAdapter() });
+    await searchSeed(files, ["a.txt", "b.png", "c.txt"]);
+    const keys = await searchCollect(files.search(/\.txt$/u));
+    expect(keys.toSorted()).toEqual(["a.txt", "c.txt"]);
+  });
+
+  test("caseInsensitive recompiles a RegExp that lacks the i flag", async () => {
+    const files = new Files({ adapter: fakeAdapter() });
+    await searchSeed(files, ["Photo.JPG", "note.txt"]);
+    expect(
+      await searchCollect(
+        files.search(/photo\.jpg/u, { caseInsensitive: true })
+      )
+    ).toEqual(["Photo.JPG"]);
+  });
+
+  test("caseInsensitive leaves an already-i RegExp untouched", async () => {
+    const files = new Files({ adapter: fakeAdapter() });
+    await searchSeed(files, ["Photo.JPG"]);
+    expect(
+      await searchCollect(
+        files.search(/photo\.jpg/iu, { caseInsensitive: true })
+      )
+    ).toEqual(["Photo.JPG"]);
+  });
+
+  test("an invalid regex pattern throws before walking", async () => {
+    const { adapter, prefixes } = listSpy();
+    const files = new Files({ adapter });
+    await searchSeed(files, ["a.txt"]);
+
+    await expect(files.search("(", { match: "regex" }).next()).rejects.toThrow(
+      FilesError
+    );
+    // It rejected before any list call.
+    expect(prefixes).toEqual([]);
+  });
+
+  test("match: substring matches anywhere in the key", async () => {
+    const files = new Files({ adapter: fakeAdapter() });
+    await searchSeed(files, ["q1-report-final.pdf", "summary.txt"]);
+    expect(
+      await searchCollect(files.search("report", { match: "substring" }))
+    ).toEqual(["q1-report-final.pdf"]);
+  });
+
+  test("match: substring honors caseInsensitive", async () => {
+    const files = new Files({ adapter: fakeAdapter() });
+    await searchSeed(files, ["q1-REPORT.pdf", "summary.txt"]);
+    expect(
+      await searchCollect(
+        files.search("report", { caseInsensitive: true, match: "substring" })
+      )
+    ).toEqual(["q1-REPORT.pdf"]);
+  });
+
+  test("match: exact requires the whole key to match", async () => {
+    const files = new Files({ adapter: fakeAdapter() });
+    await searchSeed(files, ["a/1.txt", "a/1.txt.bak"]);
+    expect(
+      await searchCollect(files.search("a/1.txt", { match: "exact" }))
+    ).toEqual(["a/1.txt"]);
+  });
+
+  test("match: exact honors caseInsensitive", async () => {
+    const files = new Files({ adapter: fakeAdapter() });
+    await searchSeed(files, ["A/One.TXT", "A/Two.txt"]);
+    expect(
+      await searchCollect(
+        files.search("a/one.txt", { caseInsensitive: true, match: "exact" })
+      )
+    ).toEqual(["A/One.TXT"]);
+  });
+
+  test("maxResults caps matches and stops paging early", async () => {
+    const { adapter, prefixes } = listSpy();
+    const files = new Files({ adapter });
+    await searchSeed(files, [
+      "m/1.txt",
+      "m/2.txt",
+      "m/3.txt",
+      "m/4.txt",
+      "m/5.txt",
+    ]);
+
+    const hits = await searchCollect(
+      files.search("m/*.txt", { limit: 1, maxResults: 2 })
+    );
+    expect(hits).toHaveLength(2);
+    // One page per match, then it returns — no further pages are fetched.
+    expect(prefixes).toHaveLength(2);
+  });
+
+  test("maxResults of 0 yields nothing", async () => {
+    const files = new Files({ adapter: fakeAdapter() });
+    await searchSeed(files, ["a.txt", "b.txt"]);
+    expect(
+      await searchCollect(files.search("*.txt", { maxResults: 0 }))
+    ).toEqual([]);
+  });
+
+  test("no matches yields an empty result", async () => {
+    const files = new Files({ adapter: fakeAdapter() });
+    await searchSeed(files, ["a.txt", "b.txt"]);
+    expect(await searchCollect(files.search("zzz*"))).toEqual([]);
+  });
+
+  test("caseInsensitive glob disables prefix push-down", async () => {
+    const { adapter, prefixes } = listSpy();
+    const files = new Files({ adapter });
+    await searchSeed(files, ["Uploads/a.pdf", "uploads/b.pdf"]);
+
+    // A case-sensitive provider prefix would miss the lowercased key, so the
+    // glob head is not pushed down; both keys are walked and matched.
+    const keys = await searchCollect(
+      files.search("Uploads/*.pdf", { caseInsensitive: true })
+    );
+    expect(keys.toSorted()).toEqual(["Uploads/a.pdf", "uploads/b.pdf"]);
+    expect(prefixes).toEqual([undefined]);
+  });
+
+  test("matches the caller-facing key under a constructor prefix", async () => {
+    const adapter = fakeAdapter();
+    const files = new Files({ adapter, prefix: "tenant" });
+    await files.upload("avatars/1.png", "one");
+    await files.upload("avatars/2.png", "two");
+    await files.upload("docs/notes.txt", "doc");
+
+    const keys = await searchCollect(files.search("avatars/*.png"));
+    expect(keys.toSorted()).toEqual(["avatars/1.png", "avatars/2.png"]);
+  });
+});
