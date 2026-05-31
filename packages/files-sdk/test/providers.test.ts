@@ -33,6 +33,7 @@ const NON_PROVIDER_EXPORTS = new Set([
   "./encryption",
   "./openai",
   "./providers",
+  "./tracing",
   "./usage",
   "./validation",
   "./versioning",
