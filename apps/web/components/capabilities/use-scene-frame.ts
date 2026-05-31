@@ -9,7 +9,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 // All ported scene logic is authored at 30fps (matching the Remotion sources in
-// packages/1.6-video), so frame thresholds copy over unchanged.
+// packages/videos/src/v1-6), so frame thresholds copy over unchanged.
 const FPS = 30;
 
 type Easing = (t: number) => number;
