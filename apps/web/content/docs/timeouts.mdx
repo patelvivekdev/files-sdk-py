@@ -20,10 +20,10 @@ A per-call value always wins over the constructor default for that operation.
 
 ## Per attempt, not per call
 
-The timeout applies to **each attempt**, not to the call as a whole. Since a timeout isn't itself retryable, this only matters across retries triggered by _other_ (provider) failures: if attempt 1 fails with a retryable provider error, attempt 2 starts with a fresh timeout. A call that retries up to `n` times can therefore run for as long as `timeout × n` plus the [backoff](/features/retries#backoff) waits in between. Budget for the whole call accordingly, or bound it end-to-end with a [`signal`](/features/cancellations) you abort yourself.
+The timeout applies to **each attempt**, not to the call as a whole. Since a timeout isn't itself retryable, this only matters across retries triggered by _other_ (provider) failures: if attempt 1 fails with a retryable provider error, attempt 2 starts with a fresh timeout. A call that retries up to `n` times can therefore run for as long as `timeout × n` plus the [backoff](/retries#backoff) waits in between. Budget for the whole call accordingly, or bound it end-to-end with a [`signal`](/cancellations) you abort yourself.
 
 ## Interaction with adapter timeouts
 
 Some adapters apply their own download timeout (Vercel Blob, UploadThing). When both are in play the two abort signals are merged, so whichever fires first wins — your `timeout` can tighten the deadline but never loosen the adapter's.
 
-See [Retries](/features/retries) for what counts as retryable, and [Cancellation](/features/cancellations) for caller-driven aborts, which share the same `aborted` failure shape.
+See [Retries](/retries) for what counts as retryable, and [Cancellation](/cancellations) for caller-driven aborts, which share the same `aborted` failure shape.

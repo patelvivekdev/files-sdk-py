@@ -97,7 +97,7 @@ await files.upload("db.tar", stream, {
 });`,
     description:
       "Hand off a large body or an unbounded stream and files-sdk splits it into parts, uploading them with bounded concurrency. Tune the part size and parallelism, or just say multipart: true.",
-    docHref: "/features/multipart",
+    docHref: "/multipart",
     panel: <Multipart />,
     title: "Multipart, in parallel",
   },
@@ -115,7 +115,7 @@ await files.upload(items, {
 });`,
     description:
       "Pass one callback and get byte-level progress for every file — buffered or streamed, single or bulk. Drive a progress bar per key without ever touching the transport.",
-    docHref: "/features/onprogress",
+    docHref: "/api/onprogress",
     panel: <UploadProgress />,
     title: "Live upload progress",
   },
@@ -153,7 +153,7 @@ const chunk = await files.download("video.mp4", {
 });`,
     description:
       "Wire metrics, logging, and error reporting once at the constructor. onAction, onRetry, and onError fire for every operation across every adapter — fire-and-forget, never in your way.",
-    docHref: "/features/onaction",
+    docHref: "/api/onaction",
     panel: <LifecycleHooks />,
     title: "Lifecycle hooks",
   },

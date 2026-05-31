@@ -9,6 +9,11 @@
     "sync",
     "transfer",
     "---Instance Methods---",
-    "..."
+    "...",
+    "---Hooks---",
+    "onaction",
+    "onerror",
+    "onretry",
+    "onprogress"
   ]
 }

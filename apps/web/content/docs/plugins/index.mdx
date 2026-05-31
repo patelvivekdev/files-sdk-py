@@ -3,7 +3,7 @@ title: Overview
 description: Wrap every operation on a Files instance in an ordered pipeline - transform, veto, or observe - and contribute new namespaced methods. The interceptable superset of hooks.
 ---
 
-A [`hook`](/features/onaction) can only watch an operation go by. A **plugin** can change it. Plugins are an opt-in, ordered pipeline you pass to the constructor; each one wraps every operation on the instance and can transform the inputs, veto the call, observe the result - or add entirely new methods.
+A [`hook`](/api/onaction) can only watch an operation go by. A **plugin** can change it. Plugins are an opt-in, ordered pipeline you pass to the constructor; each one wraps every operation on the instance and can transform the inputs, veto the call, observe the result - or add entirely new methods.
 
 ```ts lineNumbers
 import { createFiles, handlers } from "files-sdk";
@@ -25,7 +25,7 @@ const files = createFiles({
 await files.upload("a.txt", "hello"); // stored as "HELLO"
 ```
 
-Reach for a plugin when you need to **change** behavior - envelope-encrypt bodies at rest, gate uploads through a virus scanner, meter bandwidth, mirror writes to a backup region. Keep [hooks](/features/onaction) for lightweight, fire-and-forget observability; a plugin's `wrap` is the interceptable superset that can transform and veto where hooks only watch.
+Reach for a plugin when you need to **change** behavior - envelope-encrypt bodies at rest, gate uploads through a virus scanner, meter bandwidth, mirror writes to a backup region. Keep [hooks](/api/onaction) for lightweight, fire-and-forget observability; a plugin's `wrap` is the interceptable superset that can transform and veto where hooks only watch.
 
 ## The two capabilities
 
@@ -58,10 +58,10 @@ Plugins compose as **ordered, nested layers**: `plugins[0]` is the outermost. Wi
 
 ### Where plugins sit
 
-Plugins run **inside** the [`onAction`](/features/onaction) / [`onError`](/features/onerror) hooks but **outside** [retries](/features/retries) and [key prefixing](/features/prefixes):
+Plugins run **inside** the [`onAction`](/api/onaction) / [`onError`](/api/onerror) hooks but **outside** [retries](/retries) and [key prefixing](/prefixes):
 
 - A `wrap` runs **once per logical operation**, not once per retry attempt. Encryption seals the body once; a retry resends the bytes the plugin already produced.
-- Plugins see **caller-facing keys** - never the internal [prefixed](/features/prefixes) path. A key-rewriting plugin rewrites before prefixing.
+- Plugins see **caller-facing keys** - never the internal [prefixed](/prefixes) path. A key-rewriting plugin rewrites before prefixing.
 - The hooks still fire around the whole thing, so `onAction` reports the final, plugin-produced result.
 
 ### Bulk operations too
@@ -138,6 +138,6 @@ files.usage(); // ✅ typed
 ## Things to keep in mind
 
 - **Order is the contract.** `[compress, encrypt]` compresses then encrypts (encrypted bytes don't compress); `[validate, scan, transform]` fails fast before doing work. Document each plugin's place even though reads self-order.
-- **Buffering transforms break streaming.** Encrypt / compress / scan need the whole body in memory, which is incompatible with unknown-length streams and [resumable uploads](/features/resumable) (which re-read the original body). Gate those plugins the way the core already gates streams.
+- **Buffering transforms break streaming.** Encrypt / compress / scan need the whole body in memory, which is incompatible with unknown-length streams and [resumable uploads](/resumable) (which re-read the original body). Gate those plugins the way the core already gates streams.
 - **Metadata-stashing needs adapter support.** A plugin that round-trips state through `options.metadata` (an encryption IV, say) only works on adapters that [support metadata](/api/upload) - the same gate a direct `metadata` upload hits.
-- **`wrap` runs outside the timeout.** Per-attempt [timeouts](/features/timeouts) bound the adapter call, not a slow plugin. The caller's `options` (including `signal`) ride on the operation, so a plugin can opt into cancellation itself.
+- **`wrap` runs outside the timeout.** Per-attempt [timeouts](/timeouts) bound the adapter call, not a slow plugin. The caller's `options` (including `signal`) ride on the operation, so a plugin can opt into cancellation itself.

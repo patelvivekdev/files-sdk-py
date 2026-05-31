@@ -23,7 +23,7 @@ const { uploaded, deleted } = await sync(from, to, {
 });
 ```
 
-Both arguments are full [`Files`](/api) instances, so each leg honors its own instance's `prefix`, retries, timeouts, and [hooks](/features/onaction). Changed objects are streamed download-to-upload, exactly like `transfer`, so the destination never sees a buffered copy of a large file. Only the body, content type, and user metadata travel with each object.
+Both arguments are full [`Files`](/api) instances, so each leg honors its own instance's `prefix`, retries, timeouts, and [hooks](/api/onaction). Changed objects are streamed download-to-upload, exactly like `transfer`, so the destination never sees a buffered copy of a large file. Only the body, content type, and user metadata travel with each object.
 
 Both sides are walked in full before any work begins — `sync` runs two listings up front (the destination walk drives both the comparison and the prune). That's the cost of a two-sided reconcile; if you only want a cheap one-shot copy, use `transfer` instead.
 
@@ -62,7 +62,7 @@ console.log(
 
 ## Result shape
 
-Like the [bulk actions](/features/bulk), `sync` does **not** throw on a partial failure. Successes, skips, and failures come back separated:
+Like the [bulk actions](/bulk), `sync` does **not** throw on a partial failure. Successes, skips, and failures come back separated:
 
 ```ts lineNumbers
 const { uploaded, skipped, deleted, errors } = await sync(from, to, {

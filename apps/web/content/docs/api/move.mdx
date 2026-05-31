@@ -11,7 +11,7 @@ Moves (renames) the object at `from` to `to` and resolves to `void`.
 await files.move("uploads/tmp-abc.png", "avatars/user-123.png");
 ```
 
-Both keys are validated, and on a client with a [prefix](/features/prefixes) both `from` and `to` are resolved against it. The destination is overwritten if it already exists. A missing `from` throws [`FilesError`](/api/errors) with `code: "NotFound"`.
+Both keys are validated, and on a client with a [prefix](/prefixes) both `from` and `to` are resolved against it. The destination is overwritten if it already exists. A missing `from` throws [`FilesError`](/api/errors) with `code: "NotFound"`.
 
 ## How it moves
 
@@ -32,7 +32,7 @@ Moving a key onto itself (`from === to`, after the client `prefix` is applied) i
 
 ## Options
 
-`move` accepts the shared `OperationOptions` — `signal`, `timeout`, and `retries`. As elsewhere, only `Provider` failures are [retried](/features/retries); deterministic errors like `NotFound` are returned immediately.
+`move` accepts the shared `OperationOptions` — `signal`, `timeout`, and `retries`. As elsewhere, only `Provider` failures are [retried](/retries); deterministic errors like `NotFound` are returned immediately.
 
 ```ts lineNumbers
 await files.move("uploads/tmp-abc.png", "avatars/user-123.png", {

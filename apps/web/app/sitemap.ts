@@ -17,12 +17,8 @@ const priorityForDocsUrl = (url: string): number => {
   if (url === "/cli" || url === "/ai") {
     return 0.8;
   }
-  // ai / cli / features sub-pages (e.g. /ai/openai, /cli/commands, /features/bulk)
-  if (
-    url.startsWith("/ai/") ||
-    url.startsWith("/cli/") ||
-    url.startsWith("/features/")
-  ) {
+  // ai / cli sub-pages (e.g. /ai/openai, /cli/commands)
+  if (url.startsWith("/ai/") || url.startsWith("/cli/")) {
     return 0.7;
   }
   // adapter detail pages (e.g. /adapters/s3)

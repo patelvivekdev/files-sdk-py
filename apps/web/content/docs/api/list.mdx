@@ -28,7 +28,7 @@ for await (const file of files.listAll({ prefix: "avatars/" })) {
 }
 ```
 
-Each item is the same [`StoredFile`](/api/stored-file) `list` yields. `prefix` scopes the walk; `limit` sets the **page size** each underlying `list` fetches (not a total cap), and a `cursor` resumes from a prior position. Every page is a real `list` call, so it honors the client `prefix`, [retries and timeouts](/features/retries), and fires one [`onAction`](/features/onaction) `list` event per page. `break` out of the loop to stop early — no further pages are fetched.
+Each item is the same [`StoredFile`](/api/stored-file) `list` yields. `prefix` scopes the walk; `limit` sets the **page size** each underlying `list` fetches (not a total cap), and a `cursor` resumes from a prior position. Every page is a real `list` call, so it honors the client `prefix`, [retries and timeouts](/retries), and fires one [`onAction`](/api/onaction) `list` event per page. `break` out of the loop to stop early — no further pages are fetched.
 
 `listAll` runs on every adapter, since it's built on `list`. Two `list` caveats carry over to the walk:
 

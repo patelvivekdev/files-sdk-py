@@ -22,7 +22,7 @@ const { transferred, errors } = await transfer(from, to, {
 });
 ```
 
-Both arguments are full [`Files`](/api) instances, not raw adapters, so each leg honors its own instance's `prefix`, retries, timeouts, and [hooks](/features/onaction). Each object is streamed download-to-upload, so the destination never sees a buffered copy of a large file.
+Both arguments are full [`Files`](/api) instances, not raw adapters, so each leg honors its own instance's `prefix`, retries, timeouts, and [hooks](/api/onaction). Each object is streamed download-to-upload, so the destination never sees a buffered copy of a large file.
 
 `transfer` is a one-shot copy. For an incremental, optionally-pruning mirror — skip-unchanged, delete extraneous keys, dry-run the plan — reach for [`sync`](/api/sync) instead.
 
@@ -32,7 +32,7 @@ The body, content type, and user metadata move with each object. Destination-ass
 
 ## Result shape
 
-Like the [bulk actions](/features/bulk), `transfer` does **not** throw on a partial failure. Successes, skips, and failures come back separated, in walk order:
+Like the [bulk actions](/bulk), `transfer` does **not** throw on a partial failure. Successes, skips, and failures come back separated, in walk order:
 
 ```ts lineNumbers
 const { transferred, skipped, errors } = await transfer(from, to);

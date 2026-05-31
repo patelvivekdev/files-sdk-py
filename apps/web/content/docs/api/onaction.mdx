@@ -29,7 +29,7 @@ const files = new Files({
 - **Array calls** (`upload([…])`, `delete([…])`, …) set `keys` and fire one event for the whole batch - the per-item failures live in `result.errors`, not here.
 - **`copy`** and **`move`** set `from` / `to` instead of `key`.
 
-On success, `result` is the call's resolved value (an `UploadResult`, a `StoredFile`, a `ListResult`, …); on failure, `error` is the same [`FilesError`](/api/errors) delivered to [`onError`](/features/onerror) and then thrown. Keys are always the ones you passed - the client [`prefix`](/features/prefixes) is never leaked.
+On success, `result` is the call's resolved value (an `UploadResult`, a `StoredFile`, a `ListResult`, …); on failure, `error` is the same [`FilesError`](/api/errors) delivered to [`onError`](/api/onerror) and then thrown. Keys are always the ones you passed - the client [`prefix`](/prefixes) is never leaked.
 
 ```ts lineNumbers
 import type { UploadResult } from "files-sdk";

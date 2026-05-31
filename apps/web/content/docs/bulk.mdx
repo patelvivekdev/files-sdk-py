@@ -59,6 +59,6 @@ if (result.errors) {
 
 ## Retries and hooks
 
-Bulk calls are **not** retried — `retries` applies to single-operation calls only — so [`onRetry`](/features/onretry) never fires for them. [`onAction`](/features/onaction) emits one event for the whole call, carrying the caller's `keys` and the aggregated result; the per-item failures inside `errors` are not rejections, so they don't fire [`onError`](/features/onerror).
+Bulk calls are **not** retried — `retries` applies to single-operation calls only — so [`onRetry`](/api/onretry) never fires for them. [`onAction`](/api/onaction) emits one event for the whole call, carrying the caller's `keys` and the aggregated result; the per-item failures inside `errors` are not rejections, so they don't fire [`onError`](/api/onerror).
 
-The client's [`prefix`](/features/prefixes) is honored throughout: keys are resolved under it on the way in and stripped back off on the way out, just as in the single-key forms.
+The client's [`prefix`](/prefixes) is honored throughout: keys are resolved under it on the way in and stripped back off on the way out, just as in the single-key forms.

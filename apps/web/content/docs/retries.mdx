@@ -20,7 +20,7 @@ await files.upload("avatars/abc.png", file, { retries: 0 });
 Only `Provider` failures — transient things like network blips, throttling, and 5xx responses. The classified codes are returned to you immediately, because retrying them can't help:
 
 - `NotFound`, `Unauthorized`, and `Conflict` are deterministic — the same call fails the same way.
-- Aborts and [timeouts](/features/timeouts) are never retried; retrying a cancelled call would defeat the cancellation.
+- Aborts and [timeouts](/timeouts) are never retried; retrying a cancelled call would defeat the cancellation.
 - Uploads from a `ReadableStream` are never retried, because a consumed stream can't be safely replayed. Buffered bodies (`File`, `Blob`, `ArrayBuffer`, `Uint8Array`, `string`) retry normally.
 
 See [Errors](/api/errors) for how codes are assigned.
@@ -43,7 +43,7 @@ new Files({
 });
 ```
 
-Wire [`onRetry`](/features/onretry) to observe each scheduled attempt — its `attempt`, `delayMs`, and the triggering `error`.
+Wire [`onRetry`](/api/onretry) to observe each scheduled attempt — its `attempt`, `delayMs`, and the triggering `error`.
 
 ## Bulk operations
 

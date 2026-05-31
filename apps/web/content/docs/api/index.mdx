@@ -26,7 +26,7 @@ Two **global functions** stand apart from the instance methods — they take two
 
 ## Scoping keys with a prefix
 
-Pass `prefix` to the constructor and every key is resolved relative to it — prepended on the way in, stripped on the way out — so application code works in its own namespace. See [Prefixes](/features/prefixes) for the full behavior, including slash normalization and how `list()` scopes to a path boundary.
+Pass `prefix` to the constructor and every key is resolved relative to it — prepended on the way in, stripped on the way out — so application code works in its own namespace. See [Prefixes](/prefixes) for the full behavior, including slash normalization and how `list()` scopes to a path boundary.
 
 ## Read-only instances
 
@@ -52,7 +52,7 @@ await files.head("avatars/abc.png", { timeout: 2_000 });
   name="OperationOptions"
 />
 
-See [Timeouts](/features/timeouts), [Retries](/features/retries), and [Cancellation](/features/cancellations) for how each behaves, and [Hooks](/usage#hooks) to observe operations as they run.
+See [Timeouts](/timeouts), [Retries](/retries), and [Cancellation](/cancellations) for how each behaves, and [Hooks](/usage#hooks) to observe operations as they run.
 
 ## The StoredFile type
 

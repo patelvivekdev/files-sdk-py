@@ -61,4 +61,4 @@ try {
 
 ## What it does not lock down
 
-Read-only applies to the unified `Files` API only. The [`raw`](/features/escape-hatch) escape hatch still exposes the underlying provider client unchanged, so code that writes through `files.raw` bypasses the guard by design.
+Read-only applies to the unified `Files` API only. The [`raw`](/escape-hatch) escape hatch still exposes the underlying provider client unchanged, so code that writes through `files.raw` bypasses the guard by design.
