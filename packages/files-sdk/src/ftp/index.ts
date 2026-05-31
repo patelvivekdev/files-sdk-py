@@ -151,7 +151,8 @@ const uploadInto = async (
 /* oxlint-disable promise/prefer-await-to-callbacks -- basic-ftp downloads into a Node Writable, whose write API is callback-based. */
 const downloadToBuffer = async (
   client: Client,
-  remote: string
+  remote: string,
+  startAt?: number
 ): Promise<Buffer> => {
   const chunks: Buffer[] = [];
   const sink = new Writable({
@@ -160,7 +161,9 @@ const downloadToBuffer = async (
       cb();
     },
   });
-  await client.downloadTo(sink, remote);
+  // `startAt` issues a REST command so the transfer begins at that byte offset
+  // (used for ranged reads); omitted, it downloads from the start.
+  await client.downloadTo(sink, remote, startAt);
   return Buffer.concat(chunks);
 };
 /* oxlint-enable promise/prefer-await-to-callbacks */
@@ -348,6 +351,36 @@ export const ftp = (opts: FtpAdapterOptions = {}): FtpAdapter => {
     },
     async download(key, downloadOpts?: DownloadOptions): Promise<StoredFile> {
       const remote = keyToRemote(key);
+      const range = downloadOpts?.range;
+      if (range) {
+        // Ranged reads use FTP's REST offset to begin at `range.start`, then
+        // slice to `range.end` client-side: the protocol has no "stop at byte",
+        // so a bounded end reads to EOF and trims the tail (an open-ended range
+        // transfers only the bytes from the offset on). Buffered for both `as`
+        // values — FTP's plain download already buffers — keeping the REST +
+        // slice logic in one place.
+        return run(downloadOpts?.signal, async (client) => {
+          const buf = await downloadToBuffer(client, remote, range.start);
+          let bytes = new Uint8Array(
+            buf.buffer,
+            buf.byteOffset,
+            buf.byteLength
+          );
+          if (range.end !== undefined) {
+            bytes = bytes.subarray(0, range.end - range.start + 1);
+          }
+          const lastModified = await tryLastMod(client, remote);
+          return createStoredFile(
+            {
+              key,
+              ...(lastModified !== undefined && { lastModified }),
+              size: bytes.byteLength,
+              type: inferTypeFromName(key),
+            },
+            { data: bytes, kind: "buffer" }
+          );
+        });
+      }
       if (downloadOpts?.as === "stream") {
         // The stream outlives this method, so we bypass `run`'s finally-close
         // and release the connection when the stream ends, errors, or closes.
@@ -503,6 +536,23 @@ export const ftp = (opts: FtpAdapterOptions = {}): FtpAdapter => {
         };
       });
     },
+    async move(from, to, opts2) {
+      const fromRemote = keyToRemote(from);
+      const toRemote = keyToRemote(to);
+      await run(opts2?.signal, async (client) => {
+        // Native rename — no body round-trip. RNFR/RNTO won't create the
+        // destination's parent, so ensure it first (ensureDir changes cwd, so
+        // restore it) and then rename relative to the login dir like every
+        // other path here.
+        const { dir } = splitRemote(toRemote);
+        if (dir && dir !== "." && dir !== "/") {
+          const savedCwd = await client.pwd();
+          await client.ensureDir(dir);
+          await client.cd(savedCwd);
+        }
+        await client.rename(fromRemote, toRemote);
+      });
+    },
     name: "ftp",
     get raw(): FtpRaw {
       if ("injected" in resolved) {
@@ -529,21 +579,8 @@ export const ftp = (opts: FtpAdapterOptions = {}): FtpAdapter => {
           }
         },
         async begin(): Promise<ResumableUploadSession> {
-          if (
-            resumableOpts.metadata &&
-            Object.keys(resumableOpts.metadata).length > 0
-          ) {
-            throw new FilesError(
-              "Provider",
-              "ftp: `metadata` is not supported."
-            );
-          }
-          if (resumableOpts.cacheControl) {
-            throw new FilesError(
-              "Provider",
-              "ftp: `cacheControl` is not supported."
-            );
-          }
+          // `metadata` / `cacheControl` are rejected centrally by the Files
+          // wrapper before a resumable upload ever reaches here.
           // Clear any stale partial so appended chunks build a fresh file.
           await run(undefined, (client) => client.remove(remote, true));
           return { key, provider: "ftp" };
@@ -599,19 +636,11 @@ export const ftp = (opts: FtpAdapterOptions = {}): FtpAdapter => {
       );
     },
     supportsDelimiter: true,
+    supportsRange: true,
     upload(key, body: Body, options): Promise<UploadResult> {
-      if (options?.metadata && Object.keys(options.metadata).length > 0) {
-        throw new FilesError(
-          "Provider",
-          "ftp: `metadata` is not supported. FTP files have no arbitrary-metadata field."
-        );
-      }
-      if (options?.cacheControl) {
-        throw new FilesError(
-          "Provider",
-          "ftp: `cacheControl` is not supported. FTP does not expose HTTP cache headers."
-        );
-      }
+      // `metadata` / `cacheControl` are rejected centrally by the Files wrapper
+      // (this adapter advertises neither) — FTP files have no arbitrary-metadata
+      // or cache-header field.
       const remote = keyToRemote(key);
       return run(options?.signal, async (client) => {
         const { data, contentType, contentLength } = await normalizeBody(

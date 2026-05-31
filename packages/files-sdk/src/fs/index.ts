@@ -722,7 +722,9 @@ export const fs = (opts: FsAdapterOptions): FsAdapter => {
         url: `${joinPublicUrl(urlBaseUrl, key)}?${params.toString()}`,
       });
     },
+    supportsCacheControl: true,
     supportsDelimiter: true,
+    supportsMetadata: true,
     supportsRange: true,
     async upload(key, body, options) {
       const bodyPath = resolveKeyPath(root, key);

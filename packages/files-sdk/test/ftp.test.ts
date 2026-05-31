@@ -58,12 +58,13 @@ const makeFakeClient = () => {
     close() {
       // no-op for the injected client
     },
-    async downloadTo(dest: Writable, path: string) {
+    async downloadTo(dest: Writable, path: string, startAt?: number) {
       const entry = store.get(resolve(path));
       if (!entry) {
         throw ftpError(550, "550 File not found");
       }
-      dest.end(entry);
+      // `startAt` issues REST: begin the transfer at that byte offset.
+      dest.end(startAt ? entry.subarray(startAt) : entry);
       await once(dest, "finish");
       return { code: 226 };
     },
@@ -134,6 +135,16 @@ const makeFakeClient = () => {
         return Promise.reject(ftpError(550, "550 not found"));
       }
       store.delete(target);
+      return Promise.resolve({ code: 250 });
+    },
+    rename(from: string, to: string) {
+      const src = resolve(from);
+      const entry = store.get(src);
+      if (!entry) {
+        return Promise.reject(ftpError(550, "550 not found"));
+      }
+      store.delete(src);
+      store.set(resolve(to), entry);
       return Promise.resolve({ code: 250 });
     },
     size(path: string) {
@@ -280,6 +291,38 @@ describe("ftp adapter", () => {
     const copied = await files.download("dst/copy.txt");
     expect(await copied.text()).toBe("payload");
     expect(await files.exists("src.txt")).toBe(true);
+  });
+
+  test("move renames natively into a new folder, no body round-trip", async () => {
+    const files = newFiles();
+    await files.upload("src.txt", "payload");
+    await files.move("src.txt", "moved/dest.txt");
+    expect(await files.exists("src.txt")).toBe(false);
+    const moved = await files.download("moved/dest.txt");
+    expect(await moved.text()).toBe("payload");
+  });
+
+  test("move of a missing source throws NotFound", async () => {
+    const files = newFiles();
+    await expect(files.move("nope.txt", "dst.txt")).rejects.toMatchObject({
+      code: "NotFound",
+    });
+  });
+
+  test("download honors an open-ended byte range via REST offset", async () => {
+    const files = newFiles();
+    await files.upload("r.txt", "0123456789");
+    const part = await files.download("r.txt", { range: { start: 4 } });
+    expect(await part.text()).toBe("456789");
+    expect(part.size).toBe(6);
+  });
+
+  test("download honors a bounded byte range (offset + client slice)", async () => {
+    const files = newFiles();
+    await files.upload("r.txt", "0123456789");
+    const part = await files.download("r.txt", { range: { end: 5, start: 2 } });
+    expect(await part.text()).toBe("2345");
+    expect(part.size).toBe(4);
   });
 
   test("deleteMany removes keys idempotently", async () => {

@@ -433,22 +433,22 @@ describe("pocketbase adapter", () => {
   });
 
   test("upload rejects cacheControl", async () => {
-    const adapter = pocketbase({
-      collection: "files",
-      url: "http://pb.test",
+    // Gated centrally by the Files wrapper (the adapter advertises neither
+    // supportsMetadata nor supportsCacheControl).
+    const files = new Files({
+      adapter: pocketbase({ collection: "files", url: "http://pb.test" }),
     });
     await expect(
-      adapter.upload("a.txt", "hello", { cacheControl: "max-age=60" })
+      files.upload("a.txt", "hello", { cacheControl: "max-age=60" })
     ).rejects.toThrow(/cacheControl.*not supported/u);
   });
 
   test("upload rejects non-empty metadata", async () => {
-    const adapter = pocketbase({
-      collection: "files",
-      url: "http://pb.test",
+    const files = new Files({
+      adapter: pocketbase({ collection: "files", url: "http://pb.test" }),
     });
     await expect(
-      adapter.upload("a.txt", "hello", { metadata: { author: "me" } })
+      files.upload("a.txt", "hello", { metadata: { author: "me" } })
     ).rejects.toThrow(/metadata.*not supported/u);
   });
 

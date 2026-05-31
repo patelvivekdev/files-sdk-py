@@ -216,6 +216,37 @@ const getContainerClientMock = mock((_name: string) => ({
   listBlobsFlat: listBlobsFlatMock,
 }));
 
+// Blob Batch API: deleteBlobs returns one sub-response per blob client, in
+// request order. Status is keyed off the blob URL so a test can mix outcomes:
+// "missing" → 404 (idempotent), "denied" → 403 (per-key error), "batchboom" in
+// any key → a batch-level throw. Everything else → 202 (deleted).
+const deleteBlobsMock = mock((blobClients: { url: string }[]) => {
+  if (blobClients.some((c) => c.url.includes("batchboom"))) {
+    return Promise.reject(
+      Object.assign(new Error("batch rejected"), {
+        details: { errorCode: "AuthorizationFailure" },
+        statusCode: 403,
+      })
+    );
+  }
+  const subResponses = blobClients.map((c) => {
+    if (c.url.includes("missing")) {
+      return { errorCode: "BlobNotFound", status: 404 };
+    }
+    if (c.url.includes("denied")) {
+      return { errorCode: "AuthorizationFailure", status: 403 };
+    }
+    return { status: 202 };
+  });
+  return Promise.resolve({
+    subResponses,
+    subResponsesFailedCount: subResponses.filter((s) => s.status >= 300).length,
+    subResponsesSucceededCount: subResponses.filter((s) => s.status < 300)
+      .length,
+  });
+});
+const getBlobBatchClientMock = mock(() => ({ deleteBlobs: deleteBlobsMock }));
+
 const sharedKeyInstances: { accountName: string; accountKey: string }[] = [];
 
 class BlobServiceClientStub {
@@ -251,6 +282,11 @@ class BlobServiceClientStub {
   // oxlint-disable-next-line class-methods-use-this
   getContainerClient(name: string) {
     return getContainerClientMock(name);
+  }
+
+  // oxlint-disable-next-line class-methods-use-this
+  getBlobBatchClient() {
+    return getBlobBatchClientMock();
   }
 }
 
@@ -315,6 +351,8 @@ beforeEach(() => {
   existsMock.mockClear();
   getPropertiesMock.mockClear();
   deleteIfExistsMock.mockClear();
+  deleteBlobsMock.mockClear();
+  getBlobBatchClientMock.mockClear();
   syncCopyFromURLMock.mockClear();
   getBlobClientMock.mockClear();
   getBlockBlobClientMock.mockClear();
@@ -911,6 +949,62 @@ describe("azure adapter", () => {
         }),
       });
       await expect(files.delete("nope.txt")).resolves.toBeUndefined();
+    });
+  });
+
+  describe("deleteMany", () => {
+    const batchFiles = () =>
+      new Files({
+        adapter: azure({
+          accountKey: "k",
+          accountName: ACCOUNT,
+          container: CONTAINER,
+        }),
+      });
+
+    test("uses the Blob Batch API; 2xx and 404 both count as deleted", async () => {
+      const files = batchFiles();
+      const result = await files.delete(["a.txt", "missing.txt", "b.txt"]);
+      expect(deleteBlobsMock).toHaveBeenCalledTimes(1);
+      expect(result.deleted).toEqual(["a.txt", "missing.txt", "b.txt"]);
+      expect(result.errors).toBeUndefined();
+    });
+
+    test("collects a per-key failure from a non-404 sub-response", async () => {
+      const files = batchFiles();
+      const result = await files.delete(["ok.txt", "denied.txt"]);
+      expect(result.deleted).toEqual(["ok.txt"]);
+      expect(result.errors).toEqual([
+        {
+          error: expect.objectContaining({ code: "Unauthorized" }),
+          key: "denied.txt",
+        },
+      ]);
+    });
+
+    test("a batch-level failure fails every key in the chunk", async () => {
+      const files = batchFiles();
+      const result = await files.delete(["x.txt", "batchboom.txt"]);
+      expect(result.deleted).toEqual([]);
+      expect(result.errors).toHaveLength(2);
+      expect(result.errors?.[0]?.error.code).toBe("Unauthorized");
+    });
+
+    test("stopOnError falls back to sequential deleteIfExists", async () => {
+      const files = batchFiles();
+      const result = await files.delete(["a.txt", "b.txt"], {
+        stopOnError: true,
+      });
+      expect(deleteBlobsMock).not.toHaveBeenCalled();
+      expect(deleteIfExistsMock).toHaveBeenCalledTimes(2);
+      expect(result.deleted).toEqual(["a.txt", "b.txt"]);
+    });
+
+    test("empty key list is a no-op", async () => {
+      const files = batchFiles();
+      const result = await files.delete([]);
+      expect(deleteBlobsMock).not.toHaveBeenCalled();
+      expect(result.deleted).toEqual([]);
     });
   });
 

@@ -656,6 +656,10 @@ export const vercelBlob = (
         },
       };
     },
+    // Vercel Blob maps `cacheControl` to its `cacheControlMaxAge`; there is no
+    // arbitrary user-metadata primitive, so `supportsMetadata` stays unset and
+    // a non-empty `metadata` hits the gate's loud throw.
+    supportsCacheControl: true,
     supportsDelimiter: true,
     // Range rides on the standard-HTTP fetch of the public blob URL. Private
     // blobs read through `blob.get`, which has no range primitive, so they

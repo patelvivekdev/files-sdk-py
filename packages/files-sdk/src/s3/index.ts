@@ -790,7 +790,9 @@ export const s3 = (opts: S3AdapterOptions): S3Adapter => {
         throw wrapErr(error);
       }
     },
+    supportsCacheControl: true,
     supportsDelimiter: true,
+    supportsMetadata: true,
     supportsRange: true,
     async upload(key, body, options) {
       const { cacheControl, metadata, multipart, onProgress, signal } =

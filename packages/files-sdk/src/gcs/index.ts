@@ -372,7 +372,9 @@ export const gcs = (opts: GCSAdapterOptions): GCSAdapter => {
         throw mapGCSError(error);
       }
     },
+    supportsCacheControl: true,
     supportsDelimiter: true,
+    supportsMetadata: true,
     supportsRange: true,
     async upload(key, body, options) {
       const { cacheControl, metadata, multipart, onProgress } = options ?? {};

@@ -222,6 +222,10 @@ export const fakeAdapter = (config?: {
     },
     name: "fake",
     raw: store,
+    // The fake store round-trips both, so it advertises support and the Files
+    // wrapper's central gate lets them through.
+    supportsCacheControl: true,
+    supportsMetadata: true,
     ...(config?.supportsDelimiter && { supportsDelimiter: true }),
     ...(config?.supportsRange && { supportsRange: true }),
     signedUploadUrl(

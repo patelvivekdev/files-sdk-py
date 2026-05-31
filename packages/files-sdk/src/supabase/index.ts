@@ -827,7 +827,9 @@ export const supabase = (opts: SupabaseAdapterOptions): SupabaseAdapter => {
         url: signedUrl,
       };
     },
+    supportsCacheControl: true,
     supportsDelimiter: true,
+    supportsMetadata: true,
     async upload(key, body, options) {
       const { data, contentType, contentLength } = await normalizeBody(
         body,

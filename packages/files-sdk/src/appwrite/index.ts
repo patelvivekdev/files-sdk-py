@@ -330,23 +330,10 @@ export const appwrite = (opts: AppwriteAdapterOptions): AppwriteAdapter => {
     },
     name: "appwrite",
     raw: storage,
-    resumableUpload(key, resumableOpts): OffsetResumableDriver {
+    resumableUpload(key, _resumableOpts): OffsetResumableDriver {
       assertAppwriteKey(key);
-      if (resumableOpts.cacheControl) {
-        throw new FilesError(
-          "Provider",
-          "appwrite: `cacheControl` is not supported."
-        );
-      }
-      if (
-        resumableOpts.metadata &&
-        Object.keys(resumableOpts.metadata).length > 0
-      ) {
-        throw new FilesError(
-          "Provider",
-          "appwrite: `metadata` is not supported."
-        );
-      }
+      // `metadata` / `cacheControl` are rejected centrally by the Files wrapper
+      // before a resumable upload ever reaches here.
       let session:
         | Extract<ResumableUploadSession, { provider: "appwrite" }>
         | undefined;
@@ -468,20 +455,11 @@ export const appwrite = (opts: AppwriteAdapterOptions): AppwriteAdapter => {
           "appwrite: signedUploadUrl is not supported. Appwrite has no presigned upload primitive — use a JWT or the client SDK for direct uploads."
         )
       ),
-    upload: async (key: string, body: Body, uploadOpts?: UploadOptions) => {
+    upload: async (key: string, body: Body, _uploadOpts?: UploadOptions) => {
       assertAppwriteKey(key);
-      if (uploadOpts?.cacheControl) {
-        throw new FilesError(
-          "Provider",
-          "appwrite: `cacheControl` is not supported. Appwrite does not expose HTTP cache headers on file content."
-        );
-      }
-      if (uploadOpts?.metadata && Object.keys(uploadOpts.metadata).length > 0) {
-        throw new FilesError(
-          "Provider",
-          "appwrite: `metadata` is not supported. Appwrite's `createFile` has no arbitrary-metadata field; drop to `raw` if you need to attach metadata via a separate API."
-        );
-      }
+      // `metadata` / `cacheControl` are rejected centrally by the Files wrapper
+      // (this adapter advertises neither) — Appwrite's `createFile` has no
+      // arbitrary-metadata or cache-header field.
       try {
         const inputFile = await toInputFile(body, key);
 

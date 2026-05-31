@@ -290,13 +290,17 @@ describe("bun-s3 adapter", () => {
   });
 
   test("unsupported upload options throw instead of being ignored", async () => {
-    const adapter = bunS3({ client: new FakeBunS3Client() });
+    // Gated centrally by the Files wrapper: the adapter advertises neither
+    // supportsMetadata nor supportsCacheControl.
+    const files = new Files({
+      adapter: bunS3({ client: new FakeBunS3Client() }),
+    });
 
     await expect(
-      adapter.upload("m.txt", "x", { metadata: { user: "1" } })
+      files.upload("m.txt", "x", { metadata: { user: "1" } })
     ).rejects.toThrow(/metadata/u);
     await expect(
-      adapter.upload("c.txt", "x", { cacheControl: "max-age=60" })
+      files.upload("c.txt", "x", { cacheControl: "max-age=60" })
     ).rejects.toThrow(/cacheControl/u);
   });
 

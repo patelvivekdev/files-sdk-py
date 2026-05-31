@@ -489,7 +489,9 @@ export const firebaseStorage = (
         throw mapFirebaseStorageError(error);
       }
     },
+    supportsCacheControl: true,
     supportsDelimiter: true,
+    supportsMetadata: true,
     supportsRange: true,
     async upload(key, body, options) {
       const { cacheControl, metadata, multipart, onProgress } = options ?? {};

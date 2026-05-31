@@ -53,7 +53,7 @@ const files = new Files({
 
 ## Limitations
 
-User `metadata` isn't supported by the underlying API, so it round-trips as `undefined`.
+User `metadata` isn't supported by the underlying API, so passing a non-empty `metadata` throws rather than silently dropping it. `cacheControl` is supported (it maps to the blob's `cacheControlMaxAge`).
 
 ## Compatibility
 

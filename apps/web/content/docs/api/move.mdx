@@ -15,12 +15,12 @@ Both keys are validated, and on a client with a [prefix](/features/prefixes) bot
 
 ## How it moves
 
-Where the provider exposes a native rename that's atomic or avoids re-transferring the body, `move` uses it directly: the local filesystem ([`fs`](/adapters/fs)) renames in place, and Cloudinary uses its server-side `rename` (same `asset_id`, no re-upload). Everywhere else it falls back to [`copy`](/api/copy) then [`delete`](/api/delete): the source is copied to the destination and the original is removed.
+Where the provider exposes a native rename that's atomic or avoids re-transferring the body, `move` uses it directly: the local filesystem ([`fs`](/adapters/fs)) renames in place, [FTP](/adapters/ftp) and [SFTP](/adapters/sftp) issue a native rename (`RNFR`/`RNTO` and the SFTP `RENAME` op — no body round-trip), and Cloudinary uses its server-side `rename` (same `asset_id`, no re-upload). Everywhere else it falls back to [`copy`](/api/copy) then [`delete`](/api/delete): the source is copied to the destination and the original is removed.
 
 Object stores (S3, R2, GCS, Azure, …) have no atomic move primitive, so they always take the copy + delete path. Two consequences follow from the fallback:
 
 - **It is not atomic.** A crash or failure between the copy and the delete can leave the object at _both_ keys. Re-running `move` recovers — the copy overwrites and the delete is idempotent — but there is no transactional guarantee in between.
-- **It inherits `copy`'s costs.** On providers whose `copy` is a read + write rather than server-side (UploadThing, Netlify Blobs, Cloudinary, FTP, SFTP, …) the bytes travel through your process once before the source is deleted. See [`copy`](/api/copy#the-read--write-fallback) for the details.
+- **It inherits `copy`'s costs.** On providers whose `copy` is a read + write rather than server-side (UploadThing, Netlify Blobs, …) the bytes travel through your process once before the source is deleted. See [`copy`](/api/copy#the-read--write-fallback) for the details. (FTP and SFTP avoid this for `move` — they rename natively — but their standalone `copy` is still a read + write.)
 
 ## Moving onto the same key
 

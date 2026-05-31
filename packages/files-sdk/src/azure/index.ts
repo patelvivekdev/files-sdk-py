@@ -17,6 +17,9 @@ import type {
 
 import type {
   Adapter,
+  DeleteManyError,
+  DeleteManyOptions,
+  DeleteManyResult,
   ListResult,
   PartMeta,
   PartsResumableDriver,
@@ -28,6 +31,7 @@ import type {
 } from "../index.js";
 import {
   DEFAULT_URL_EXPIRES_IN,
+  deleteManyWithFallback,
   joinPublicUrl,
   makeErrorMapper,
   normalizeBody,
@@ -115,6 +119,8 @@ export type AzureAdapter = Adapter<BlobServiceClient> & {
 };
 
 const COPY_SOURCE_SAS_SECONDS = 300;
+// Azure's Blob Batch API caps a single batch at 256 sub-requests.
+const AZURE_BATCH_DELETE_MAX = 256;
 const USER_DELEGATION_KEY_SLACK_MS = 5 * 60 * 1000;
 // How long a freshly minted key stays reusable beyond the SAS it was first
 // requested for, so back-to-back url()/signedUploadUrl() calls share one key
@@ -657,6 +663,70 @@ export const azure = (opts: AzureAdapterOptions): AzureAdapter => {
         throw mapAzureError(error);
       }
     },
+    async deleteMany(
+      keys,
+      deleteOpts?: DeleteManyOptions
+    ): Promise<DeleteManyResult> {
+      if (keys.length === 0) {
+        return { deleted: [] };
+      }
+      // `stopOnError` wants to stop at the first failure, but a batch attempts
+      // every key in the chunk regardless — so honor that mode through the
+      // sequential fallback (matching supabase's stance).
+      if (deleteOpts?.stopOnError) {
+        return deleteManyWithFallback(
+          keys,
+          async (key) => {
+            await containerClient.getBlobClient(key).deleteIfExists();
+          },
+          deleteOpts,
+          mapAzureError
+        );
+      }
+      const batchClient = client.getBlobBatchClient();
+      const deleted: string[] = [];
+      const errors: DeleteManyError[] = [];
+      for (let i = 0; i < keys.length; i += AZURE_BATCH_DELETE_MAX) {
+        const chunk = keys.slice(i, i + AZURE_BATCH_DELETE_MAX);
+        const blobClients = chunk.map((key) =>
+          containerClient.getBlobClient(key)
+        );
+        let response: Awaited<ReturnType<typeof batchClient.deleteBlobs>>;
+        try {
+          response = await batchClient.deleteBlobs(blobClients);
+        } catch (error) {
+          // A batch-level failure (auth, transport, malformed batch) fails
+          // every key in this chunk.
+          const mapped = mapAzureError(error);
+          for (const key of chunk) {
+            errors.push({ error: mapped, key });
+          }
+          continue;
+        }
+        // Sub-responses come back in request order. 2xx = deleted now; 404 =
+        // already gone, which stays idempotent like `delete()`; anything else
+        // (or a missing sub-response) is a real per-key failure.
+        for (const [idx, key] of chunk.entries()) {
+          const sub = response.subResponses[idx];
+          const status = sub?.status;
+          if (status === 404 || (status !== undefined && status < 300)) {
+            deleted.push(key);
+            continue;
+          }
+          errors.push({
+            error: mapAzureError({
+              ...(sub?.errorCode && { details: { errorCode: sub.errorCode } }),
+              message:
+                sub?.errorCode ??
+                `Azure batch delete failed (HTTP ${status ?? "unknown"})`,
+              ...(status !== undefined && { statusCode: status }),
+            }),
+            key,
+          });
+        }
+      }
+      return errors.length === 0 ? { deleted } : { deleted, errors };
+    },
     async download(key, downloadOpts) {
       try {
         const blobClient = containerClient.getBlobClient(key);
@@ -906,7 +976,9 @@ export const azure = (opts: AzureAdapterOptions): AzureAdapter => {
         throw mapAzureError(error);
       }
     },
+    supportsCacheControl: true,
     supportsDelimiter: true,
+    supportsMetadata: true,
     supportsRange: true,
     async upload(key, body, options) {
       const { cacheControl, metadata, multipart, onProgress, signal } =

@@ -935,7 +935,9 @@ export const googleDrive = (
         }),
       };
     },
+    supportsCacheControl: true,
     supportsDelimiter: true,
+    supportsMetadata: true,
     supportsRange: true,
     async upload(key, body, options): Promise<UploadResult> {
       assertNoReservedMetadata(options?.metadata);

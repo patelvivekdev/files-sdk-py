@@ -413,18 +413,8 @@ export const bunS3 = (opts: BunS3AdapterOptions = {}): BunS3Adapter => {
     name: "bun-s3",
     raw: client,
     resumableUpload(key, resumableOpts): OffsetResumableDriver {
-      if (resumableOpts.cacheControl) {
-        throw new FilesError(
-          "Provider",
-          "bun-s3 adapter: `cacheControl` is not supported by Bun.s3."
-        );
-      }
-      if (resumableOpts.metadata) {
-        throw new FilesError(
-          "Provider",
-          "bun-s3 adapter: `metadata` is not supported by Bun.s3."
-        );
-      }
+      // `metadata` / `cacheControl` are rejected centrally by the Files wrapper
+      // before a resumable upload reaches here — Bun.s3 exposes neither.
       let uploadId: string | undefined;
       let contentType = "application/octet-stream";
       const requirePending = () => {
@@ -541,18 +531,8 @@ export const bunS3 = (opts: BunS3AdapterOptions = {}): BunS3Adapter => {
     },
     supportsRange: true,
     async upload(key, body, options) {
-      if (options?.cacheControl) {
-        throw new FilesError(
-          "Provider",
-          "bun-s3 adapter: `cacheControl` is not supported by Bun.s3. Use `raw` if Bun adds this option."
-        );
-      }
-      if (options?.metadata) {
-        throw new FilesError(
-          "Provider",
-          "bun-s3 adapter: `metadata` is not supported by Bun.s3. Use `raw` if Bun adds this option."
-        );
-      }
+      // `metadata` / `cacheControl` are rejected centrally by the Files wrapper
+      // (this adapter advertises neither) — Bun.s3 exposes no API for either.
 
       let contentType = options?.contentType;
       if (!contentType) {

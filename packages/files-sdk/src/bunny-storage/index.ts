@@ -6,7 +6,6 @@ import type {
   ListResult,
   SignedUpload,
   StoredFile,
-  UploadOptions,
   UploadResult,
   UrlOptions,
 } from "../index.js";
@@ -225,21 +224,6 @@ const _mapBunnyStorageError = makeErrorMapper({
 export const mapBunnyStorageError = (err: unknown): FilesError =>
   _mapBunnyStorageError(err);
 
-const assertSupportedUploadOptions = (options: UploadOptions | undefined) => {
-  if (options?.cacheControl) {
-    throw new FilesError(
-      "Provider",
-      "bunnyStorage: `cacheControl` is not supported by the Bunny Storage SDK. Configure cache behavior on the Pull Zone/CDN instead."
-    );
-  }
-  if (options?.metadata && Object.keys(options.metadata).length > 0) {
-    throw new FilesError(
-      "Provider",
-      "bunnyStorage: custom `metadata` is not supported by the Bunny Storage SDK."
-    );
-  }
-};
-
 const parseRegion = (
   region: string | undefined
 ): BunnyStorageRegion | undefined => {
@@ -396,7 +380,9 @@ export const bunnyStorage = (
       );
     },
     async upload(key, body: Body, options): Promise<UploadResult> {
-      assertSupportedUploadOptions(options);
+      // `metadata` / `cacheControl` are rejected centrally by the Files wrapper
+      // (this adapter advertises neither) — the Bunny Storage SDK has no
+      // arbitrary-metadata or cache-header field.
       try {
         const normalized = await normalizeBody(body, options?.contentType);
         const path = toBunnyPath(key);

@@ -900,21 +900,8 @@ export const dropbox = (opts: DropboxAdapterOptions): DropboxAdapter => {
         ({ contentType } = adopted);
       },
       async begin(meta): Promise<ResumableUploadSession> {
-        if (
-          resumableOpts.metadata &&
-          Object.keys(resumableOpts.metadata).length > 0
-        ) {
-          throw new FilesError(
-            "Provider",
-            "dropbox: `metadata` is not supported."
-          );
-        }
-        if (resumableOpts.cacheControl) {
-          throw new FilesError(
-            "Provider",
-            "dropbox: `cacheControl` is not supported."
-          );
-        }
+        // `metadata` / `cacheControl` are rejected centrally by the Files
+        // wrapper before a resumable upload ever reaches here.
         try {
           await authHandle.ensureAccessToken();
           ({ contentType } = meta);
@@ -1208,18 +1195,9 @@ export const dropbox = (opts: DropboxAdapterOptions): DropboxAdapter => {
     supportsDelimiter: true,
     supportsRange: true,
     async upload(key, body, options): Promise<UploadResult> {
-      if (options?.metadata && Object.keys(options.metadata).length > 0) {
-        throw new FilesError(
-          "Provider",
-          "dropbox: `metadata` is not supported. Dropbox files have no native arbitrary-metadata field; use `raw` with `property_groups` (requires a registered template) if you need it."
-        );
-      }
-      if (options?.cacheControl) {
-        throw new FilesError(
-          "Provider",
-          "dropbox: `cacheControl` is not supported. Dropbox does not expose HTTP cache headers on file content."
-        );
-      }
+      // `metadata` / `cacheControl` are rejected centrally by the Files wrapper
+      // (this adapter advertises neither) — Dropbox files have no native
+      // arbitrary-metadata or cache-header field.
       try {
         await authHandle.ensureAccessToken();
         const path = keyToPath(key);

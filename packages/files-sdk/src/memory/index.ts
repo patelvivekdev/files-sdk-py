@@ -450,7 +450,9 @@ export const memory = (opts?: MemoryAdapterOptions): MemoryAdapter => {
         url: `memory://${key}?expires=${signOpts.expiresIn}`,
       });
     },
+    supportsCacheControl: true,
     supportsDelimiter: true,
+    supportsMetadata: true,
     supportsRange: true,
     async upload(key, body, options) {
       const bytes = await bodyToBytes(body);

@@ -509,7 +509,9 @@ export const netlifyBlobs = (
         "netlify-blobs: signed upload URLs are not available. Netlify Blobs has no presigned upload primitive — upload via the SDK or proxy through your application."
       );
     },
+    supportsCacheControl: true,
     supportsDelimiter: true,
+    supportsMetadata: true,
     async upload(key, body, options): Promise<UploadResult> {
       const contentType = options?.contentType ?? "application/octet-stream";
       let storable: Awaited<ReturnType<typeof bodyToStorable>>;

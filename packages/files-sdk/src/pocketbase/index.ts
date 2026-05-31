@@ -190,21 +190,6 @@ const sendOpts = (
   signal: AbortSignal | undefined
 ): { signal: AbortSignal } | undefined => (signal ? { signal } : undefined);
 
-const assertSupportedUploadOptions = (options?: UploadOptions): void => {
-  if (options?.cacheControl) {
-    throw new FilesError(
-      "Provider",
-      "pocketbase: `cacheControl` is not supported. PocketBase does not expose HTTP cache headers on file content."
-    );
-  }
-  if (options?.metadata && Object.keys(options.metadata).length > 0) {
-    throw new FilesError(
-      "Provider",
-      "pocketbase: `metadata` is not supported. PocketBase record fields are typed and not arbitrary; drop to `raw` if you need additional fields on the record."
-    );
-  }
-};
-
 export const pocketbase = (
   opts: PocketBaseAdapterOptions
 ): PocketBaseAdapter => {
@@ -485,7 +470,9 @@ export const pocketbase = (
       body: Body,
       uploadOpts?: UploadOptions
     ): Promise<UploadResult> {
-      assertSupportedUploadOptions(uploadOpts);
+      // `metadata` / `cacheControl` are rejected centrally by the Files wrapper
+      // (this adapter advertises neither) — PocketBase record fields are typed,
+      // not arbitrary, and it exposes no cache-header field.
       try {
         const { blob, contentType, size } = await toUploadBlob(
           body,

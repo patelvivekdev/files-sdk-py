@@ -3,7 +3,6 @@ import type {
   ListResult,
   SignedUpload,
   StoredFile,
-  UploadOptions,
   UploadResult,
   UrlOptions,
 } from "../index.js";
@@ -117,21 +116,6 @@ const mapConvexError = (err: unknown): FilesError => {
     return new FilesError("NotFound", message, err);
   }
   return new FilesError("Provider", message, err);
-};
-
-const assertSupportedUploadOptions = (options: UploadOptions | undefined) => {
-  if (options?.cacheControl) {
-    throw new FilesError(
-      "Provider",
-      "convex: `cacheControl` is not supported. Convex storage has no cache-header field; cache behavior is controlled by the URL it serves."
-    );
-  }
-  if (options?.metadata && Object.keys(options.metadata).length > 0) {
-    throw new FilesError(
-      "Provider",
-      "convex: custom `metadata` is not supported. Convex's _storage table is fixed to contentType/sha256/size; store extra fields in your own table keyed by the storage id."
-    );
-  }
 };
 
 const REQUIRES_ACTION =
@@ -380,7 +364,9 @@ export const convex = (opts: ConvexAdapterOptions): ConvexAdapter => {
     },
 
     async upload(key, body, options): Promise<UploadResult> {
-      assertSupportedUploadOptions(options);
+      // `metadata` / `cacheControl` are rejected centrally by the Files wrapper
+      // (this adapter sets neither `supportsMetadata` nor `supportsCacheControl`)
+      // — Convex's _storage table is fixed to contentType/sha256/size.
       if (typeof storage.store !== "function") {
         throw new FilesError("Provider", `convex: upload() ${REQUIRES_ACTION}`);
       }

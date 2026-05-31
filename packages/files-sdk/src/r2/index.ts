@@ -437,7 +437,9 @@ const r2FromBinding = (opts: R2BindingOptions): R2Adapter => {
       assertNoMaxSize(signOpts);
       return signer.signedUploadUrl(key, signOpts);
     },
+    supportsCacheControl: true,
     supportsDelimiter: true,
+    supportsMetadata: true,
     supportsRange: true,
     async upload(key, body, options) {
       const { data, contentType, contentLength } = await normalizeForR2(
@@ -656,9 +658,14 @@ const r2FromHttp = (opts: R2HttpOptions): R2Adapter => {
       const adapter = await ensure();
       return adapter.signedUploadUrl(key, signOpts);
     },
-    // `list` delegates to the inner S3 adapter, whose ListObjectsV2 honors
-    // `Delimiter` against R2's S3-compatible API.
+    // Upload/list/download all delegate to the inner S3 adapter, which honors
+    // `metadata`, `cacheControl`, ListObjectsV2 `Delimiter`, and `Range`
+    // against R2's S3-compatible API — so advertise the same capabilities the
+    // binding does (the binding sets these directly).
+    supportsCacheControl: true,
     supportsDelimiter: true,
+    supportsMetadata: true,
+    supportsRange: true,
     async upload(key, body, uploadOpts) {
       const adapter = await ensure();
       return adapter.upload(key, body, uploadOpts);

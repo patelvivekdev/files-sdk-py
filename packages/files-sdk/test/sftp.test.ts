@@ -61,12 +61,25 @@ const makeFakeClient = () =>
       store.set(remote, { bytes: Buffer.concat([existing, chunk]) });
       return "ok";
     },
-    createReadStream(remote: string) {
+    createReadStream(
+      remote: string,
+      options?: { start?: number; end?: number }
+    ) {
       const entry = store.get(remote);
       if (!entry) {
         throw sftpError(2, "No such file");
       }
-      return Readable.from(entry.bytes);
+      let { bytes } = entry;
+      // ssh2 read streams honor inclusive start/end byte offsets.
+      if (
+        options &&
+        (options.start !== undefined || options.end !== undefined)
+      ) {
+        const start = options.start ?? 0;
+        const end = options.end === undefined ? bytes.length - 1 : options.end;
+        bytes = bytes.subarray(start, end + 1);
+      }
+      return Readable.from(bytes);
     },
     delete(remote: string, noErrorOK?: boolean) {
       if (remote.includes("boom")) {
@@ -268,6 +281,34 @@ describe("sftp adapter", () => {
     const copied = await files.download("dst/copy.txt");
     expect(await copied.text()).toBe("payload");
     expect(await files.exists("src.txt")).toBe(true);
+  });
+
+  test("move renames natively into a new folder, no body round-trip", async () => {
+    const files = newFiles();
+    await files.upload("src.txt", "payload");
+    await files.move("src.txt", "moved/dest.txt");
+    expect(await files.exists("src.txt")).toBe(false);
+    const moved = await files.download("moved/dest.txt");
+    expect(await moved.text()).toBe("payload");
+  });
+
+  test("download honors a bounded byte range (buffer path)", async () => {
+    const files = newFiles();
+    await files.upload("r.txt", "0123456789");
+    const part = await files.download("r.txt", { range: { end: 5, start: 2 } });
+    expect(await part.text()).toBe("2345");
+    expect(part.size).toBe(4);
+  });
+
+  test("download honors an open-ended range as a stream", async () => {
+    const files = newFiles();
+    await files.upload("r.txt", "0123456789");
+    const part = await files.download("r.txt", {
+      as: "stream",
+      range: { start: 4 },
+    });
+    expect(await part.text()).toBe("456789");
+    expect(part.size).toBe(6);
   });
 
   test("deleteMany removes keys and collects errors", async () => {

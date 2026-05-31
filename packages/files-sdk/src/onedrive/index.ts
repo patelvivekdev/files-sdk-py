@@ -832,21 +832,8 @@ export const onedrive = (
         ({ uploadUrl } = session);
       },
       async begin(): Promise<ResumableUploadSession> {
-        if (
-          resumableOpts.metadata &&
-          Object.keys(resumableOpts.metadata).length > 0
-        ) {
-          throw new FilesError(
-            "Provider",
-            "onedrive: `metadata` is not supported."
-          );
-        }
-        if (resumableOpts.cacheControl) {
-          throw new FilesError(
-            "Provider",
-            "onedrive: `cacheControl` is not supported."
-          );
-        }
+        // `metadata` / `cacheControl` are rejected centrally by the Files
+        // wrapper before a resumable upload ever reaches here.
         try {
           const { uploadUrl: created } = (await client
             .api(`${itemApiPath(key)}/createUploadSession`)
@@ -1164,18 +1151,9 @@ export const onedrive = (
     supportsDelimiter: true,
     supportsRange: true,
     async upload(key, body, options): Promise<UploadResult> {
-      if (options?.metadata && Object.keys(options.metadata).length > 0) {
-        throw new FilesError(
-          "Provider",
-          "onedrive: `metadata` is not supported. Drive items have no native arbitrary-metadata field; use `raw` to set Open Extensions if you need it."
-        );
-      }
-      if (options?.cacheControl) {
-        throw new FilesError(
-          "Provider",
-          "onedrive: `cacheControl` is not supported. Graph does not expose HTTP cache headers on drive items."
-        );
-      }
+      // `metadata` / `cacheControl` are rejected centrally by the Files wrapper
+      // (this adapter advertises neither) — Graph drive items have no native
+      // arbitrary-metadata or cache-header field.
       try {
         const normalized = await normalizeBody(body, options?.contentType);
         const total = normalized.data.byteLength;

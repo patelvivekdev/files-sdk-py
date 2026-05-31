@@ -20,10 +20,12 @@ import type {
   UploadResult,
 } from "../index.js";
 import {
+  collectStream,
   existsByProbe,
   joinPublicUrl,
   makeErrorMapper,
   normalizeBody,
+  rangedSize,
 } from "../internal/core.js";
 import { readEnv } from "../internal/env.js";
 import { FilesError } from "../internal/errors.js";
@@ -316,6 +318,17 @@ export const sftp = (opts: SftpAdapterOptions = {}): SftpAdapter => {
     },
     async download(key, downloadOpts?: DownloadOptions): Promise<StoredFile> {
       const remote = keyToRemote(key);
+      const range = downloadOpts?.range;
+      // SFTP read streams take native `start`/`end` byte offsets (both
+      // inclusive, like Node's fs streams and our ByteRange), so a range maps
+      // straight through with no client-side slicing. An omitted `end` reads to
+      // EOF.
+      const readStreamOptions = range
+        ? {
+            start: range.start,
+            ...(range.end !== undefined && { end: range.end }),
+          }
+        : undefined;
       if (downloadOpts?.as === "stream") {
         // Streaming holds the connection open until the stream is consumed, so
         // we bypass `run`'s finally-close and instead release when the stream
@@ -323,7 +336,7 @@ export const sftp = (opts: SftpAdapterOptions = {}): SftpAdapter => {
         const { client, release } = await acquire();
         try {
           const stat = await client.stat(remote);
-          const nodeStream = client.createReadStream(remote);
+          const nodeStream = client.createReadStream(remote, readStreamOptions);
           const cleanup = (): void => {
             void release();
           };
@@ -346,7 +359,7 @@ export const sftp = (opts: SftpAdapterOptions = {}): SftpAdapter => {
               ...(Number.isFinite(stat.modifyTime) && {
                 lastModified: stat.modifyTime,
               }),
-              size: stat.size,
+              size: range ? rangedSize(stat.size, range) : stat.size,
               type: inferTypeFromName(key),
             },
             {
@@ -364,8 +377,21 @@ export const sftp = (opts: SftpAdapterOptions = {}): SftpAdapter => {
       }
       return run(downloadOpts?.signal, async (client) => {
         const stat = await client.stat(remote);
-        const buf = (await client.get(remote)) as Buffer;
-        const bytes = bufferToUint8(buf);
+        let bytes: Uint8Array;
+        if (readStreamOptions) {
+          // Ranged read: `createReadStream` carries the native start/end byte
+          // offsets (the `get()` options type doesn't surface them). Drain it
+          // into a buffer for the non-stream response.
+          const nodeStream = client.createReadStream(remote, readStreamOptions);
+          bytes = await collectStream(
+            Readable.toWeb(
+              nodeStream as unknown as Readable
+            ) as unknown as ReadableStream<Uint8Array>
+          );
+        } else {
+          const buf = (await client.get(remote)) as Buffer;
+          bytes = bufferToUint8(buf);
+        }
         return createStoredFile(
           {
             key,
@@ -478,6 +504,19 @@ export const sftp = (opts: SftpAdapterOptions = {}): SftpAdapter => {
         };
       });
     },
+    async move(from, to, opts2) {
+      const fromRemote = keyToRemote(from);
+      const toRemote = keyToRemote(to);
+      await run(opts2?.signal, async (client) => {
+        // Native rename — no body round-trip. Ensure the destination's parent
+        // exists first (rename won't create it). Base SFTP `rename` fails if
+        // the destination already exists on many servers; that's the move
+        // contract here (the caller deletes/overwrites the target first if
+        // needed) and keeps the rename atomic.
+        await ensureParentDir(client, toRemote);
+        await client.rename(fromRemote, toRemote);
+      });
+    },
     name: "sftp",
     get raw(): SftpRaw {
       return "injected" in resolved
@@ -502,21 +541,8 @@ export const sftp = (opts: SftpAdapterOptions = {}): SftpAdapter => {
           }
         },
         async begin(): Promise<ResumableUploadSession> {
-          if (
-            resumableOpts.metadata &&
-            Object.keys(resumableOpts.metadata).length > 0
-          ) {
-            throw new FilesError(
-              "Provider",
-              "sftp: `metadata` is not supported."
-            );
-          }
-          if (resumableOpts.cacheControl) {
-            throw new FilesError(
-              "Provider",
-              "sftp: `cacheControl` is not supported."
-            );
-          }
+          // `metadata` / `cacheControl` are rejected centrally by the Files
+          // wrapper before a resumable upload ever reaches here.
           await run(undefined, async (client) => {
             await ensureParentDir(client, remote);
             // Clear any stale partial so appended chunks build a fresh file.
@@ -577,19 +603,18 @@ export const sftp = (opts: SftpAdapterOptions = {}): SftpAdapter => {
       );
     },
     supportsDelimiter: true,
+    supportsRange: true,
     upload(key, body: Body, options): Promise<UploadResult> {
-      if (options?.metadata && Object.keys(options.metadata).length > 0) {
-        throw new FilesError(
-          "Provider",
-          "sftp: `metadata` is not supported. SFTP files have no arbitrary-metadata field."
-        );
-      }
-      if (options?.cacheControl) {
-        throw new FilesError(
-          "Provider",
-          "sftp: `cacheControl` is not supported. SFTP does not expose HTTP cache headers."
-        );
-      }
+      // `metadata` / `cacheControl` are rejected centrally by the Files wrapper
+      // (this adapter advertises neither) — SFTP files have no
+      // arbitrary-metadata or cache-header field.
+      //
+      // No `reportsUploadProgress`: ssh2-sftp-client's `step` byte-progress
+      // callback is only wired into `fastPut`/`fastGet` (local-file paths). The
+      // `put` form we use for Buffer/stream bodies pipes through a write stream
+      // with no progress hook, so rather than fake granular progress we leave it
+      // unset and let the Files wrapper report generically (byte-level for
+      // stream bodies, start/finish for buffered ones).
       const remote = keyToRemote(key);
       return run(options?.signal, async (client) => {
         const { data, contentType, contentLength } = await normalizeBody(

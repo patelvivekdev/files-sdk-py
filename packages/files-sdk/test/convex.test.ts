@@ -245,12 +245,14 @@ describe("convex adapter", () => {
 
     test("rejects unsupported metadata and cacheControl", async () => {
       const { actionCtx } = makeBackend();
-      const adapter = convex({ ctx: actionCtx });
+      // The Files wrapper gates centrally on supportsMetadata/supportsCacheControl,
+      // which this adapter leaves unset.
+      const files = new Files({ adapter: convex({ ctx: actionCtx }) });
       await expect(
-        adapter.upload("k", "x", { metadata: { a: "b" } })
+        files.upload("k", "x", { metadata: { a: "b" } })
       ).rejects.toMatchObject({ code: "Provider" });
       await expect(
-        adapter.upload("k", "x", { cacheControl: "max-age=60" })
+        files.upload("k", "x", { cacheControl: "max-age=60" })
       ).rejects.toMatchObject({ code: "Provider" });
     });
   });

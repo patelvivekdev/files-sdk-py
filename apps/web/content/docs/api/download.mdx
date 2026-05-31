@@ -42,10 +42,11 @@ const chunk = await files.download("video.mp4", {
 
 - **Native byte ranges** — AWS S3 and every S3-compatible adapter (Cloudflare R2 over HTTP, MinIO, DigitalOcean Spaces, Wasabi, Tigris, Backblaze B2, Storj, Hetzner, Akamai, Scaleway, OVHcloud, iDrive e2, Vultr, Filebase, Exoscale, Oracle Cloud, IBM COS, Tencent COS, Alibaba OSS, Yandex), Bun S3, Google Cloud Storage, Firebase Storage, Azure Blob, the **R2 Workers binding** (native `range` option), the local `fs` adapter, and the in-memory adapter.
 - **HTTP `Range` header** — UploadThing, Box, Vercel Blob (public), Cloudinary, PocketBase, Dropbox (via its temporary link), OneDrive, SharePoint, and Google Drive issue a `Range` request against the underlying URL/content endpoint.
+- **Native read offsets** — SFTP threads the range through ssh2 read-stream `start`/`end` byte offsets. FTP begins the transfer at the `REST` start offset and trims a bounded `end` client-side, so an open-ended `{ start }` range transfers only the bytes from the offset on (a bounded `end` still reads to EOF before trimming the tail).
 
 For the HTTP-header adapters the SDK verifies the response came back `206 Partial Content` and **throws if the host answered `200`** (i.e. ignored the range and sent the whole object), so a ranged read never silently transfers — and bills you for — the full file.
 
-**Throws** a [`FilesError`](/api/errors) on adapters whose provider has no range primitive at all — Supabase, Appwrite, Netlify Blobs, Bunny Storage, Convex, FTP, SFTP, and Vercel Blob **private** blobs (read through the SDK, which can't range). The SDK fails loudly rather than downloading the whole object and slicing it client-side, so the bandwidth saving is never quietly lost. Branch on the adapter's `supportsRange` flag to handle both at runtime:
+**Throws** a [`FilesError`](/api/errors) on adapters whose provider has no range primitive at all — Supabase, Appwrite, Netlify Blobs, Bunny Storage, Convex, and Vercel Blob **private** blobs (read through the SDK, which can't range). The SDK fails loudly rather than downloading the whole object and slicing it client-side, so the bandwidth saving is never quietly lost. Branch on the adapter's `supportsRange` flag to handle both at runtime:
 
 ```ts lineNumbers
 const opts = files.adapter.supportsRange ? { range: { start, end } } : {};

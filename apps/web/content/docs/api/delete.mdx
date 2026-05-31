@@ -15,7 +15,7 @@ await files.delete("avatars/abc.png");
 
 ## Many keys
 
-Returns a structured result instead of throwing on partial failure. Adapters with a native bulk primitive (S3 `DeleteObjects`, Supabase, UploadThing) delete in a single request — the S3 path chunks into batches of 1000, the provider limit — while the rest fan out to single deletes with bounded concurrency. Like the single form, it honors the client's `prefix` and is no-op friendly on providers that treat a missing key as success.
+Returns a structured result instead of throwing on partial failure. Adapters with a native bulk primitive (S3 `DeleteObjects`, Azure's Blob Batch API, Supabase, UploadThing) delete in a single request — the S3 path chunks into batches of 1000 and Azure into batches of 256, the respective provider limits — while the rest fan out to single deletes with bounded concurrency (FTP and SFTP reuse one connection for the sequence). Like the single form, it honors the client's `prefix` and is no-op friendly on providers that treat a missing key as success.
 
 ```ts lineNumbers
 const result = await files.delete(

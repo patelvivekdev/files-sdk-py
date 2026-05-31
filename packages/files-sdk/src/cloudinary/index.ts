@@ -502,21 +502,8 @@ export const cloudinaryAdapter = (
     raw: sdk,
     resourceType,
     resumableUpload(key, resumableOpts): OffsetResumableDriver {
-      if (resumableOpts.cacheControl) {
-        throw new FilesError(
-          "Provider",
-          "cloudinary: `cacheControl` is not supported."
-        );
-      }
-      if (
-        resumableOpts.metadata &&
-        Object.keys(resumableOpts.metadata).length > 0
-      ) {
-        throw new FilesError(
-          "Provider",
-          "cloudinary: `metadata` is not supported."
-        );
-      }
+      // `metadata` / `cacheControl` are rejected centrally by the Files wrapper
+      // before a resumable upload ever reaches here.
       if (!(apiKey && apiSecret)) {
         throw new FilesError(
           "Provider",
@@ -700,18 +687,9 @@ export const cloudinaryAdapter = (
       body: Body,
       uploadOpts?: UploadOptions
     ): Promise<UploadResult> {
-      if (uploadOpts?.cacheControl) {
-        throw new FilesError(
-          "Provider",
-          "cloudinary: `cacheControl` is not supported. Cloudinary does not expose HTTP cache headers on asset content — configure cache policies at the cloud level instead."
-        );
-      }
-      if (uploadOpts?.metadata && Object.keys(uploadOpts.metadata).length > 0) {
-        throw new FilesError(
-          "Provider",
-          "cloudinary: `metadata` is not supported. Drop to `raw` and use `context`/`metadata` parameters via the underlying uploader if you need structured metadata."
-        );
-      }
+      // `metadata` / `cacheControl` are rejected centrally by the Files wrapper
+      // (this adapter advertises neither) — Cloudinary exposes no HTTP
+      // cache-header or arbitrary-metadata field on asset content.
       try {
         const buf = await toBuffer(body);
         const response = await uploadBuffer(buf, {

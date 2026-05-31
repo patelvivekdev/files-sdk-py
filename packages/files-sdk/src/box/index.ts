@@ -759,18 +759,9 @@ export const box = (opts: BoxAdapterOptions = {}): BoxAdapter => {
     body: Body,
     options?: UploadOptions
   ): Promise<UploadResult> => {
-    if (options?.metadata && Object.keys(options.metadata).length > 0) {
-      throw new FilesError(
-        "Provider",
-        "box: `metadata` is not supported on the unified API. Box exposes file metadata via classifications and metadata templates; use `raw` with `client.fileMetadata.*` if you need it."
-      );
-    }
-    if (options?.cacheControl) {
-      throw new FilesError(
-        "Provider",
-        "box: `cacheControl` is not supported. Box does not expose HTTP cache headers on file content."
-      );
-    }
+    // `metadata` / `cacheControl` are rejected centrally by the Files wrapper
+    // (this adapter advertises neither) — Box's unified API exposes no
+    // arbitrary-metadata or cache-header field.
     try {
       await authHandle.ensureReady();
       const normalized = await normalizeBody(body, options?.contentType);
@@ -1046,15 +1037,8 @@ export const box = (opts: BoxAdapterOptions = {}): BoxAdapter => {
           ({ contentType } = session);
         },
         begin(meta): Promise<ResumableUploadSession> {
-          if (
-            resumableOpts.metadata &&
-            Object.keys(resumableOpts.metadata).length > 0
-          ) {
-            throw new FilesError(
-              "Provider",
-              "box: `metadata` is not supported on the unified API."
-            );
-          }
+          // `metadata` / `cacheControl` are rejected centrally by the Files
+          // wrapper before a resumable upload ever reaches here.
           uploadSeq += 1;
           uploadId = `box-${uploadSeq}`;
           ({ contentType } = meta);

@@ -146,15 +146,24 @@ export interface UploadOptions extends OperationOptions {
    * `Cache-Control` header stored on the object. Sent verbatim to the
    * provider; controls how downstream caches and browsers cache reads of
    * this key.
+   *
+   * **Throws** a {@link FilesError} on adapters with no cache-control field
+   * (FTP, SFTP, Dropbox, Box, OneDrive, SharePoint, Cloudinary, Appwrite,
+   * PocketBase, Bunny Storage, Convex, UploadThing, Bun's S3) rather than
+   * silently dropping it — check {@link Adapter.supportsCacheControl} to branch
+   * at runtime.
    */
   cacheControl?: string;
   /**
    * Arbitrary user metadata stored alongside the object. Returned by
-   * `head()` and `list()` where the provider supports it. Vercel Blob and
-   * UploadThing have no user-metadata primitive, so it round-trips as
-   * `undefined` there. Bunny Storage, Appwrite, and PocketBase have no
-   * arbitrary metadata primitive, so those adapters throw when this option
-   * is passed.
+   * `head()` and `list()` where the provider supports it.
+   *
+   * **Throws** a {@link FilesError} on adapters with no user-metadata primitive
+   * (Vercel Blob, UploadThing, FTP, SFTP, Dropbox, Box, OneDrive, SharePoint,
+   * Cloudinary, Appwrite, PocketBase, Bunny Storage, Convex, Bun's S3) rather
+   * than silently dropping it, mirroring the {@link DownloadOptions.range} gate.
+   * An empty object is treated as "no metadata" and never throws. Check
+   * {@link Adapter.supportsMetadata} to branch at runtime.
    */
   metadata?: Record<string, string>;
   /**
@@ -260,7 +269,10 @@ export interface DownloadOptions extends OperationOptions {
    * the S3-compatible adapters (R2 over HTTP, MinIO, DigitalOcean Spaces,
    * Wasabi, Tigris, Backblaze B2, Storj, Hetzner, Akamai, and the rest of the
    * `s3()` family), Bun's S3, Google Cloud Storage, Firebase Storage, Azure
-   * Blob, the local `fs` adapter, and the in-memory adapter.
+   * Blob, the local `fs` adapter, the in-memory adapter, and SFTP / FTP. SFTP
+   * uses native read-stream offsets; FTP begins the transfer at the REST start
+   * offset and trims a bounded `end` client-side (an open-ended range transfers
+   * only what's needed).
    *
    * **Throws** a {@link FilesError} on adapters with no range primitive
    * (most SaaS/document providers) rather than silently downloading the whole
@@ -557,6 +569,23 @@ export interface Adapter<Raw = unknown> {
    * Leave unset for adapters whose provider has no folder/prefix concept.
    */
   readonly supportsDelimiter?: boolean;
+  /**
+   * Set `true` when `upload` persists {@link UploadOptions.metadata} (arbitrary
+   * user metadata) on the stored object. The {@link Files} wrapper gates on
+   * this exactly like {@link Adapter.supportsRange}: a non-empty `metadata`
+   * passed to an adapter without it throws before any provider call, rather
+   * than silently dropping it. Leave unset for adapters whose provider has no
+   * arbitrary-metadata field.
+   */
+  readonly supportsMetadata?: boolean;
+  /**
+   * Set `true` when `upload` honors {@link UploadOptions.cacheControl} by
+   * storing it on the object. The {@link Files} wrapper gates on this exactly
+   * like {@link Adapter.supportsRange}: a `cacheControl` passed to an adapter
+   * without it throws before any provider call, rather than silently dropping
+   * it. Leave unset for adapters whose provider has no cache-control field.
+   */
+  readonly supportsCacheControl?: boolean;
   upload(key: string, body: Body, opts?: UploadOptions): Promise<UploadResult>;
   /**
    * Download an object's body and metadata. When {@link DownloadOptions.range}
@@ -997,6 +1026,7 @@ export class Files<A extends Adapter = Adapter> {
     opts?: UploadOptions,
     ctx?: ActionContext
   ): Promise<UploadResult> {
+    this.#assertUploadOptionsSupported(opts);
     const path = this.#path(key);
     if (opts?.control) {
       return this.#runResumable(path, body, opts, opts.control);
@@ -1204,6 +1234,35 @@ export class Files<A extends Adapter = Adapter> {
       throw new FilesError(
         "Provider",
         `${this.#adapter.name}: range downloads are not supported by this adapter`
+      );
+    }
+  }
+
+  /**
+   * Reject upload options the adapter can't honor, before any provider call —
+   * the metadata/cacheControl analogue of {@link Files.#assertRangeSupported}.
+   * An adapter advertises support via {@link Adapter.supportsMetadata} /
+   * {@link Adapter.supportsCacheControl}; without it, passing the option throws
+   * rather than silently dropping the caller's metadata. An empty `metadata`
+   * object is treated as "none" so callers can pass `{}` unconditionally. Runs
+   * for both the single and bulk upload paths and ahead of the resumable
+   * branch, so it is the one place every adapter is gated.
+   */
+  #assertUploadOptionsSupported(opts?: UploadOptions): void {
+    if (
+      opts?.metadata &&
+      Object.keys(opts.metadata).length > 0 &&
+      !this.#adapter.supportsMetadata
+    ) {
+      throw new FilesError(
+        "Provider",
+        `${this.#adapter.name}: \`metadata\` is not supported by this adapter`
+      );
+    }
+    if (opts?.cacheControl && !this.#adapter.supportsCacheControl) {
+      throw new FilesError(
+        "Provider",
+        `${this.#adapter.name}: \`cacheControl\` is not supported by this adapter`
       );
     }
   }
