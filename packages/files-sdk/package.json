@@ -38,6 +38,10 @@
       "types": "./dist/content-type/index.d.ts",
       "import": "./dist/content-type/index.js"
     },
+    "./dedup": {
+      "types": "./dist/dedup/index.d.ts",
+      "import": "./dist/dedup/index.js"
+    },
     "./encryption": {
       "types": "./dist/encryption/index.d.ts",
       "import": "./dist/encryption/index.js"

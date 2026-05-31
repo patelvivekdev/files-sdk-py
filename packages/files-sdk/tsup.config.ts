@@ -8,6 +8,7 @@ export default defineConfig({
     "src/cli/index.ts",
     "src/compression/index.ts",
     "src/content-type/index.ts",
+    "src/dedup/index.ts",
     "src/encryption/index.ts",
     "src/validation/index.ts",
     "src/versioning/index.ts",

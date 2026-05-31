@@ -1127,8 +1127,10 @@ export class Files<A extends Adapter = Adapter> {
    * `#path` prefixing, capability gating, `#run` retry, and result
    * prefix-stripping. Centralizing it (rather than passing each method's
    * closure) lets a raw `wrap` re-route by calling `next` with a different
-   * `kind`. The array forms route their per-item closures through `#dispatch`
-   * directly, not here, to preserve their (intentionally retry-free) semantics.
+   * `kind`. The array forms keep their own per-item closure for the item's own
+   * verb (retry-free, no per-item hooks) but fall back here for any verb a
+   * plugin re-routes to, so a cross-kind sub-op behaves the same inside a bulk
+   * call as in a single one.
    */
   #perform(op: FilesOperation): Promise<unknown> {
     switch (op.kind) {
@@ -1544,8 +1546,9 @@ export class Files<A extends Adapter = Adapter> {
           }),
         };
         // Route each item through the onion (so a transform/veto sees bulk
-        // uploads too) with #runUpload as the base — no `ctx`, so bulk items
-        // retry the buffered body without firing `onRetry`, exactly as before.
+        // uploads too). The item's own upload uses #runUpload as the base —
+        // no `ctx`, so bulk items retry the buffered body without firing
+        // `onRetry`, exactly as before.
         return this.#dispatch(
           {
             body: item.body,
@@ -1555,8 +1558,13 @@ export class Files<A extends Adapter = Adapter> {
             options: itemOpts,
           },
           (op) => {
-            const u = op as Extract<FilesOperation, { kind: "upload" }>;
-            return this.#runUpload(u.key, u.body, u.options);
+            // A plugin may re-route to a different verb (e.g. an `exists`
+            // probe); those sub-ops take the full single-op path. Only the
+            // item's own `upload` stays on the retry-free, hook-quiet base.
+            if (op.kind !== "upload") {
+              return this.#perform(op);
+            }
+            return this.#runUpload(op.key, op.body, op.options);
           }
         );
       },
@@ -1686,9 +1694,13 @@ export class Files<A extends Adapter = Adapter> {
             options: as ? { as } : undefined,
           },
           async (op) => {
-            const d = op as Extract<FilesOperation, { kind: "download" }>;
+            // A plugin re-routing to another verb takes the full single-op
+            // path; only the item's own `download` stays on this base.
+            if (op.kind !== "download") {
+              return this.#perform(op);
+            }
             return this.#storedFile(
-              await this.#adapter.download(this.#path(d.key), d.options)
+              await this.#adapter.download(this.#path(op.key), op.options)
             );
           }
         ),
@@ -1743,9 +1755,13 @@ export class Files<A extends Adapter = Adapter> {
         this.#dispatch(
           { bulk: true, key, kind: "head", options: undefined },
           async (op) => {
-            const h = op as Extract<FilesOperation, { kind: "head" }>;
+            // A plugin re-routing to another verb takes the full single-op
+            // path; only the item's own `head` stays on this base.
+            if (op.kind !== "head") {
+              return this.#perform(op);
+            }
             return this.#storedFile(
-              await this.#adapter.head(this.#path(h.key), h.options)
+              await this.#adapter.head(this.#path(op.key), op.options)
             );
           }
         ),
@@ -1804,8 +1820,12 @@ export class Files<A extends Adapter = Adapter> {
         exists: await this.#dispatch(
           { bulk: true, key, kind: "exists", options: undefined },
           (op) => {
-            const e = op as Extract<FilesOperation, { kind: "exists" }>;
-            return this.#adapter.exists(this.#path(e.key), e.options);
+            // A plugin re-routing to another verb takes the full single-op
+            // path; only the item's own `exists` stays on this base.
+            if (op.kind !== "exists") {
+              return this.#perform(op);
+            }
+            return this.#adapter.exists(this.#path(op.key), op.options);
           }
         ),
         key,
@@ -1882,8 +1902,13 @@ export class Files<A extends Adapter = Adapter> {
           this.#dispatch(
             { bulk: true, key, kind: "delete", options: undefined },
             (op) => {
-              const d = op as Extract<FilesOperation, { kind: "delete" }>;
-              return this.#adapter.delete(this.#path(d.key), d.options);
+              // A plugin re-routing to another verb (e.g. a snapshot `head` +
+              // `copy`) takes the full single-op path; only the item's own
+              // `delete` stays on this base.
+              if (op.kind !== "delete") {
+                return this.#perform(op);
+              }
+              return this.#adapter.delete(this.#path(op.key), op.options);
             }
           ),
         opts

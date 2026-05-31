@@ -301,6 +301,33 @@ describe("versioning plugin — paginated history", () => {
   });
 });
 
+describe("versioning plugin — bulk operations", () => {
+  test("snapshots before a bulk-upload overwrite", async () => {
+    // The snapshot re-routes to `head` + `copy` via `next`; this exercises that
+    // a cross-kind sub-op works inside a bulk upload, not just a single one.
+    const files = withVersioning();
+    await files.upload("a.txt", "v1");
+    const result = await files.upload([{ body: "v2", key: "a.txt" }]);
+
+    expect(result.uploaded).toHaveLength(1);
+    expect(await bodyOf(files, "a.txt")).toBe("v2");
+    const versions = await files.versions("a.txt");
+    expect(versions).toHaveLength(1);
+    expect(await bodyOf(files, versions[0]?.key ?? "")).toBe("v1");
+  });
+
+  test("snapshots before a bulk delete so it can be restored", async () => {
+    const files = withVersioning();
+    await files.upload("gone.txt", "bye");
+    const result = await files.delete(["gone.txt"]);
+
+    expect(result.deleted).toEqual(["gone.txt"]);
+    expect(await files.exists("gone.txt")).toBe(false);
+    await files.restore("gone.txt");
+    expect(await bodyOf(files, "gone.txt")).toBe("bye");
+  });
+});
+
 describe("versioning plugin — error propagation", () => {
   test("surfaces a non-NotFound error from the snapshot head", async () => {
     const inner = fakeAdapter();

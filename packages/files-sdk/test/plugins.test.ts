@@ -160,6 +160,61 @@ describe("plugin onion — bulk ops", () => {
     ]);
   });
 
+  test("a cross-kind sub-op re-routes correctly inside every bulk verb", async () => {
+    // For each primary verb the plugin first issues a sub-op of a *different*
+    // kind via `next`. The bulk bases used to be locked to their own verb, so
+    // a foreign-kind sub-op misrouted (e.g. `body.getReader` on undefined);
+    // they now delegate it to the single-op path.
+    const probed: string[] = [];
+    const probe: FilesPlugin = {
+      name: "probe",
+      wrap: async (op, next) => {
+        if (
+          op.kind === "upload" ||
+          op.kind === "download" ||
+          op.kind === "head" ||
+          op.kind === "delete"
+        ) {
+          await next({ key: op.key, kind: "exists" });
+          probed.push(`${op.kind}->exists`);
+        } else if (op.kind === "exists") {
+          await next({ key: op.key, kind: "head" });
+          probed.push("exists->head");
+        }
+        return next(op);
+      },
+    };
+    const files = new Files({ adapter: fakeAdapter(), plugins: [probe] });
+    await files.upload("a", "1");
+    await files.upload("b", "2");
+    probed.length = 0;
+
+    // None of these throw now that foreign-kind sub-ops take the single path.
+    await files.upload([
+      { body: "x", key: "a" },
+      { body: "y", key: "b" },
+    ]);
+    const dl = await files.download(["a", "b"]);
+    expect(dl.downloaded).toHaveLength(2);
+    const hd = await files.head(["a", "b"]);
+    expect(hd.files).toHaveLength(2);
+    const ex = await files.exists(["a", "b"]);
+    expect(ex.existing).toEqual(["a", "b"]);
+    const del = await files.delete(["a", "b"]);
+    expect(del.deleted).toEqual(["a", "b"]);
+
+    // Each bulk verb drove its cross-kind probe once per item (two items).
+    for (const tag of [
+      "upload->exists",
+      "download->exists",
+      "head->exists",
+      "exists->head",
+      "delete->exists",
+    ]) {
+      expect(probed.filter((entry) => entry === tag)).toHaveLength(2);
+    }
+  });
+
   test("delete(array) uses the native batch when no plugin wraps", async () => {
     const base = fakeAdapter();
     const deleteMany = mock(base.deleteMany?.bind(base));
