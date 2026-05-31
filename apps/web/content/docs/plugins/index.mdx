@@ -97,6 +97,12 @@ const encryption = (key: CryptoKey): FilesPlugin => ({
 });
 ```
 
+<Callout>
+  You don't have to write this one yourself - a production-ready
+  [`encryption()`](/plugins/encryption) plugin ships in `files-sdk/encryption`,
+  with real envelope encryption over the Web Crypto API.
+</Callout>
+
 ## extend: new methods
 
 `extend(files)` returns an object of methods grafted onto the instance. It runs once at construction against the **fully-wrapped** instance, so an extension method that calls back into `files.upload(...)` also passes through every plugin.
