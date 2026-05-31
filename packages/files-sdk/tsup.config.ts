@@ -9,6 +9,7 @@ export default defineConfig({
     "src/compression/index.ts",
     "src/encryption/index.ts",
     "src/validation/index.ts",
+    "src/versioning/index.ts",
     "src/s3/index.ts",
     "src/bun-s3/index.ts",
     "src/r2/index.ts",

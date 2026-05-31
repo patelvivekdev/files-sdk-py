@@ -100,11 +100,12 @@ const encryption = (key: CryptoKey): FilesPlugin => ({
 <Callout>
   You don't have to write these yourself - production-ready
   [`validation()`](/plugins/validation),
-  [`compression()`](/plugins/compression), and
-  [`encryption()`](/plugins/encryption) plugins ship in the box. They form a
-  natural pipeline, run in order: vet the upload, compress what's left, then
-  encrypt it - `plugins: [validation({maxSize}), compression(),
-  encryption(key)]`.
+  [`compression()`](/plugins/compression),
+  [`encryption()`](/plugins/encryption), and
+  [`versioning()`](/plugins/versioning) plugins ship in the box. They form a
+  natural pipeline, run in order: snapshot the prior bytes, vet the upload,
+  compress what's left, then encrypt it - `plugins: [versioning(), validation(
+  {maxSize}), compression(), encryption(key)]`.
 </Callout>
 
 ## extend: new methods
@@ -144,6 +145,8 @@ const files = createFiles({
 
 files.usage(); // ✅ typed
 ```
+
+The built-in [`versioning()`](/plugins/versioning) plugin is a real example of this - it uses `extend` to add `files.versions()` and `files.restore()`, so you construct it with `createFiles`.
 
 ## Things to keep in mind
 
