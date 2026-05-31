@@ -774,6 +774,12 @@ export interface FilesOptions<A extends Adapter> extends OperationOptions {
   readonly?: boolean;
   /** Observability callbacks — see {@link FilesHooks}. */
   hooks?: FilesHooks;
+  /**
+   * Ordered list of {@link FilesPlugin}s wrapping this instance. `plugins[0]`
+   * is the outermost layer of the onion. For plugins that add methods via
+   * `extend`, use {@link createFiles} so the new surface shows up on the type.
+   */
+  plugins?: readonly FilesPlugin[];
 }
 
 export interface FileHandle {
@@ -792,6 +798,145 @@ export interface FileHandle {
   /** Move `sourceKey` onto this key. See {@link Files.move}. */
   moveFrom(sourceKey: string, opts?: OperationOptions): Promise<void>;
 }
+
+/**
+ * A single in-flight operation handed to a {@link FilesPlugin}. One variant per
+ * public verb (mirroring {@link FilesActionType}), carrying the caller-facing,
+ * **un-prefixed** inputs — a plugin never sees the internal prefixed path, the
+ * same rule {@link FilesHooks} follow.
+ *
+ * The array form of `upload` / `download` / `head` / `exists` / `delete` fans
+ * out to one op per item, each marked `bulk: true`, so a plugin can tell a
+ * single call from one element of a batch. `copy`, `move`, `list`, `url`, and
+ * `signedUploadUrl` have no array form and are always single.
+ */
+export type FilesOperation =
+  | {
+      kind: "upload";
+      key: string;
+      body: Body;
+      options?: UploadOptions;
+      bulk?: true;
+    }
+  | { kind: "download"; key: string; options?: DownloadOptions; bulk?: true }
+  | { kind: "head"; key: string; options?: OperationOptions; bulk?: true }
+  | { kind: "exists"; key: string; options?: OperationOptions; bulk?: true }
+  | { kind: "delete"; key: string; options?: OperationOptions; bulk?: true }
+  | { kind: "copy"; from: string; to: string; options?: OperationOptions }
+  | { kind: "move"; from: string; to: string; options?: OperationOptions }
+  | { kind: "list"; options?: ListOptions }
+  | { kind: "url"; key: string; options?: UrlOptions }
+  | { kind: "signedUploadUrl"; key: string; options?: SignUploadOptions };
+
+/**
+ * The value a given {@link FilesOperation} resolves to — the result map that
+ * keeps a plugin's `wrap` / `next` fully typed per verb. Mirrors the return
+ * type of the matching {@link Files} method; `delete` / `copy` / `move` resolve
+ * to no value (`undefined`).
+ */
+export type OperationResult<O extends FilesOperation> = O extends {
+  kind: "upload";
+}
+  ? UploadResult
+  : O extends { kind: "download" | "head" }
+    ? StoredFile
+    : O extends { kind: "exists" }
+      ? boolean
+      : O extends { kind: "list" }
+        ? ListResult
+        : O extends { kind: "url" }
+          ? string
+          : O extends { kind: "signedUploadUrl" }
+            ? SignedUpload
+            : undefined;
+
+/**
+ * Continue inward through the plugin onion. Call it from a `wrap` to run the
+ * next plugin (and ultimately the real operation), optionally passing a
+ * transformed op. For a single operation `next` is retry-wrapped, so calling it
+ * more than once re-enters the retry loop.
+ */
+export type PluginNext = <O extends FilesOperation>(
+  op: O
+) => Promise<OperationResult<O>>;
+
+/**
+ * An opt-in extension to a {@link Files} instance, passed as
+ * `new Files({ plugins: [...] })`. Plugins compose as an **ordered onion** —
+ * `plugins[0]` is outermost — and offer two independent capabilities:
+ *
+ * - `wrap` intercepts every operation: transform the op, veto it by throwing,
+ *   or observe it. This is the interceptable superset of {@link FilesHooks},
+ *   which can only observe. Reach for {@link handlers} to author a per-verb
+ *   `wrap` with auto-passthrough instead of a raw one.
+ * - `extend` contributes new namespaced surface (e.g. `files.usage()`). It runs
+ *   once at construction against the fully-wrapped instance, so an extension
+ *   method that calls back into `files.upload(...)` also goes through the onion.
+ *   Use {@link createFiles} to surface the added methods on the static type.
+ *
+ * Plugins run **inside** the `onAction` / `onError` hooks but **outside** retry
+ * and prefixing: a `wrap` runs once on caller-facing keys, and retries resend
+ * whatever body it produced.
+ */
+export interface FilesPlugin<
+  Ext extends Record<string, unknown> = Record<never, never>,
+> {
+  /** Identifies the plugin in collision errors and diagnostics. */
+  readonly name: string;
+  /** Tier A/B: wrap any operation. Call `next` to continue inward. */
+  wrap?: <O extends FilesOperation>(
+    op: O,
+    next: PluginNext
+  ) => Promise<OperationResult<O>>;
+  /** Tier C: contribute namespaced surface. The only part that changes the type. */
+  extend?: (files: Files) => Ext;
+}
+
+/**
+ * A per-verb handler map for {@link handlers}: list only the operations you
+ * care about, each typed to its own op and `next`. Verbs you omit pass straight
+ * through untouched.
+ */
+export type PluginHandlers = {
+  [K in FilesOperation["kind"]]?: (
+    op: Extract<FilesOperation, { kind: K }>,
+    next: (
+      op: Extract<FilesOperation, { kind: K }>
+    ) => Promise<OperationResult<Extract<FilesOperation, { kind: K }>>>
+  ) => Promise<OperationResult<Extract<FilesOperation, { kind: K }>>>;
+};
+
+// Internal, non-generic working types for folding the onion. The public
+// `wrap` / `PluginNext` are generic for authoring ergonomics, but a generic
+// function can't be stored in an array or folded without per-call type
+// parameters, so we erase to these inside the engine and cast at the boundary.
+type InternalNext = (op: FilesOperation) => Promise<unknown>;
+type InternalWrap = (
+  op: FilesOperation,
+  next: InternalNext
+) => Promise<unknown>;
+
+/** Distribute a union into the intersection of its members. */
+type UnionToIntersection<U> = (
+  U extends unknown ? (k: U) => void : never
+) extends (k: infer I) => void
+  ? I
+  : never;
+
+/**
+ * The combined surface every plugin's `extend` contributes, as one
+ * intersection — what {@link createFiles} grafts onto the {@link Files} type.
+ */
+export type ExtensionsOf<P extends readonly FilesPlugin[]> =
+  UnionToIntersection<
+    {
+      [K in keyof P]: NonNullable<P[K]["extend"]> extends (
+        files: Files
+      ) => infer E
+        ? E
+        : unknown;
+    }[number]
+  >;
 
 // Catch the obviously-broken cases at the SDK boundary so callers get a
 // useful error from us instead of an opaque provider 400. We deliberately
@@ -876,14 +1021,250 @@ export class Files<A extends Adapter = Adapter> {
   readonly #hooks: FilesHooks | undefined;
   readonly #isReadOnly: boolean;
   readonly #prefix: string;
+  /** The plugin list as supplied, carried verbatim into {@link Files.readonly}. */
+  readonly #plugins: readonly FilesPlugin[] | undefined;
+  /**
+   * The `wrap` functions of {@link Files.#plugins}, in order, type-erased for
+   * folding. Empty when no plugin wraps — the hot path {@link Files.#dispatch}
+   * short-circuits on its length so a plugin-free instance is byte-identical.
+   */
+  readonly #wraps: InternalWrap[];
 
   constructor(opts: FilesOptions<A>) {
-    const { adapter, hooks, prefix, readonly: readOnly, ...defaults } = opts;
+    const {
+      adapter,
+      hooks,
+      prefix,
+      readonly: readOnly,
+      plugins,
+      ...defaults
+    } = opts;
     this.#adapter = adapter;
     this.#hooks = hooks;
     this.#isReadOnly = readOnly === true;
     this.#prefix = normalizePrefix(prefix);
     this.#defaults = defaults;
+    this.#plugins = plugins;
+    // A generic `wrap` can't be folded without per-call type parameters, so
+    // erase to the internal signature here; the typed boundary is restored in
+    // `#dispatch`. The double cast is required — `unknown`'s return type isn't
+    // assignable to the generic `OperationResult<O>` the contravariant `next`
+    // demands. Plugin authors never see this; their `(op, next)` stays typed.
+    this.#wraps = (plugins ?? []).flatMap((plugin) =>
+      plugin.wrap ? [plugin.wrap as unknown as InternalWrap] : []
+    );
+    // `extend` runs against the fully-wrapped instance (fields + `#wraps` are
+    // already set), so an extension method that calls back into `this.upload()`
+    // goes through the onion too.
+    if (plugins) {
+      this.#applyExtensions(plugins);
+    }
+  }
+
+  /**
+   * Graft each plugin's `extend` surface onto this instance, failing closed on
+   * any collision. A new own property would shadow a real method (`#private`
+   * fields are unreachable by `Object.assign`, so methods are the only hazard),
+   * so we throw at construction rather than let a plugin silently break
+   * `upload` / `download` / etc. — or make the instance thenable via a `then`
+   * key, which would corrupt `await files`.
+   */
+  #applyExtensions(plugins: readonly FilesPlugin[]): void {
+    const contributed = new Set<string>();
+    for (const plugin of plugins) {
+      if (!plugin.extend) {
+        continue;
+      }
+      const surface = plugin.extend(this as Files);
+      for (const key of Object.keys(surface)) {
+        // A new own property would shadow a real method or getter (every one
+        // lives on the prototype, including inherited `Object` members), and a
+        // `then` key would make the instance thenable and corrupt `await files`.
+        if (key === "then" || key in Files.prototype) {
+          throw new FilesError(
+            "Provider",
+            `plugin "${plugin.name}": extension "${key}" collides with an existing Files member`
+          );
+        }
+        if (contributed.has(key)) {
+          throw new FilesError(
+            "Provider",
+            `plugin "${plugin.name}": extension "${key}" collides with another plugin's extension`
+          );
+        }
+        contributed.add(key);
+      }
+      Object.assign(this, surface);
+    }
+  }
+
+  /**
+   * Run `op` through the plugin onion, then `base` (the real operation).
+   * `plugins[0]` is outermost. Short-circuits straight to `base` when nothing
+   * wraps, so the no-plugin path costs nothing. Lives **inside** the
+   * `#action` / `#writeAction` hooks but **outside** `#run` retry and `#path`
+   * prefixing — plugins see caller-facing keys and run once per logical op.
+   */
+  #dispatch<O extends FilesOperation>(
+    op: O,
+    base: InternalNext
+  ): Promise<OperationResult<O>> {
+    if (this.#wraps.length === 0) {
+      return base(op) as Promise<OperationResult<O>>;
+    }
+    // Fold from the innermost wrap outward so `plugins[0]` ends up outermost.
+    let chain: InternalNext = base;
+    for (const wrap of this.#wraps.toReversed()) {
+      const next = chain;
+      chain = (nextOp) => wrap(nextOp, next);
+    }
+    return chain(op) as Promise<OperationResult<O>>;
+  }
+
+  /**
+   * The real operation behind a single {@link FilesOperation} — the innermost
+   * layer of the onion, and the one place every single-key verb does its
+   * `#path` prefixing, capability gating, `#run` retry, and result
+   * prefix-stripping. Centralizing it (rather than passing each method's
+   * closure) lets a raw `wrap` re-route by calling `next` with a different
+   * `kind`. The array forms route their per-item closures through `#dispatch`
+   * directly, not here, to preserve their (intentionally retry-free) semantics.
+   */
+  #perform(op: FilesOperation): Promise<unknown> {
+    switch (op.kind) {
+      case "upload": {
+        return this.#runUpload(op.key, op.body, op.options, {
+          key: op.key,
+          type: "upload",
+        });
+      }
+      case "download": {
+        const ctx: ActionContext = { key: op.key, type: "download" };
+        const path = this.#path(op.key);
+        if (op.options?.range) {
+          this.#assertRangeSupported(op.options.range);
+        }
+        return this.#run(
+          op.options,
+          async (attemptOpts) =>
+            this.#storedFile(await this.#adapter.download(path, attemptOpts)),
+          true,
+          ctx
+        );
+      }
+      case "head": {
+        const ctx: ActionContext = { key: op.key, type: "head" };
+        const path = this.#path(op.key);
+        return this.#run(
+          op.options,
+          async (attemptOpts) =>
+            this.#storedFile(await this.#adapter.head(path, attemptOpts)),
+          true,
+          ctx
+        );
+      }
+      case "exists": {
+        const ctx: ActionContext = { key: op.key, type: "exists" };
+        const path = this.#path(op.key);
+        return this.#run(
+          op.options,
+          (attemptOpts) => this.#adapter.exists(path, attemptOpts),
+          true,
+          ctx
+        );
+      }
+      case "delete": {
+        const ctx: ActionContext = { key: op.key, type: "delete" };
+        const path = this.#path(op.key);
+        return this.#run(
+          op.options,
+          (attemptOpts) => this.#adapter.delete(path, attemptOpts),
+          true,
+          ctx
+        );
+      }
+      case "copy": {
+        const ctx: ActionContext = { from: op.from, to: op.to, type: "copy" };
+        const fromPath = this.#path(op.from, "copy source");
+        const toPath = this.#path(op.to, "copy destination");
+        return this.#run(
+          op.options,
+          (attemptOpts) => this.#adapter.copy(fromPath, toPath, attemptOpts),
+          true,
+          ctx
+        );
+      }
+      case "move": {
+        const ctx: ActionContext = { from: op.from, to: op.to, type: "move" };
+        const fromPath = this.#path(op.from, "move source");
+        const toPath = this.#path(op.to, "move destination");
+        return this.#run(
+          op.options,
+          (attemptOpts) => this.#move(fromPath, toPath, attemptOpts),
+          true,
+          ctx
+        );
+      }
+      case "list": {
+        return this.#performList(op.options);
+      }
+      case "url": {
+        const ctx: ActionContext = { key: op.key, type: "url" };
+        const path = this.#path(op.key);
+        return this.#run(
+          op.options,
+          (attemptOpts) => this.#adapter.url(path, attemptOpts),
+          true,
+          ctx
+        );
+      }
+      default: {
+        const ctx: ActionContext = { key: op.key, type: "signedUploadUrl" };
+        const path = this.#path(op.key);
+        return this.#run(
+          op.options,
+          (attemptOpts) =>
+            this.#adapter.signedUploadUrl(
+              path,
+              attemptOpts as SignUploadOptions
+            ),
+          true,
+          ctx
+        );
+      }
+    }
+  }
+
+  /** The prefix-aware `list` body, extracted so {@link Files.#perform} stays flat. */
+  #performList(opts?: ListOptions): Promise<ListResult> {
+    const ctx: ActionContext = { type: "list" };
+    this.#assertDelimiterSupported(opts);
+    if (!this.#prefix) {
+      return this.#run(
+        opts,
+        (attemptOpts) => this.#adapter.list(attemptOpts),
+        true,
+        ctx
+      );
+    }
+    const prefix = opts?.prefix
+      ? `${this.#prefix}/${opts.prefix.replace(/^\/+/u, "")}`
+      : `${this.#prefix}/`;
+    return this.#run(
+      opts,
+      async (attemptOpts) => {
+        const result = await this.#adapter.list({ ...attemptOpts, prefix });
+        return {
+          ...result,
+          items: result.items.map((item) => this.#storedFile(item)),
+          ...(result.prefixes && {
+            prefixes: result.prefixes.map((p) => this.#stripPrefix(p)),
+          }),
+        };
+      },
+      true,
+      ctx
+    );
   }
 
   /**
@@ -936,6 +1317,9 @@ export class Files<A extends Adapter = Adapter> {
       hooks: this.#hooks,
       prefix: this.#prefix || undefined,
       readonly: true,
+      // Carry plugins so the read-only clone keeps the same onion and surface;
+      // `extend` re-runs in the clone's constructor.
+      ...(this.#plugins && { plugins: this.#plugins }),
     });
   }
 
@@ -1007,7 +1391,10 @@ export class Files<A extends Adapter = Adapter> {
       type: "upload",
     };
     return this.#writeAction(ctx, () =>
-      this.#runUpload(keyOrItems, body, opts, ctx)
+      this.#dispatch(
+        { body, key: keyOrItems, kind: "upload", options: opts },
+        (op) => this.#perform(op)
+      )
     );
   }
 
@@ -1145,8 +1532,8 @@ export class Files<A extends Adapter = Adapter> {
     const { errors, results } = await mapMany(
       items,
       (item) => item.key,
-      (item) =>
-        this.#runUpload(item.key, item.body, {
+      (item) => {
+        const itemOpts: UploadOptions = {
           cacheControl: item.cacheControl,
           contentType: item.contentType,
           metadata: item.metadata,
@@ -1155,7 +1542,24 @@ export class Files<A extends Adapter = Adapter> {
             onProgress: (progress: UploadProgress) =>
               onProgress({ ...progress, key: item.key }),
           }),
-        }),
+        };
+        // Route each item through the onion (so a transform/veto sees bulk
+        // uploads too) with #runUpload as the base — no `ctx`, so bulk items
+        // retry the buffered body without firing `onRetry`, exactly as before.
+        return this.#dispatch(
+          {
+            body: item.body,
+            bulk: true,
+            key: item.key,
+            kind: "upload",
+            options: itemOpts,
+          },
+          (op) => {
+            const u = op as Extract<FilesOperation, { kind: "upload" }>;
+            return this.#runUpload(u.key, u.body, u.options);
+          }
+        );
+      },
       opts
     );
     return errors.length === 0
@@ -1192,20 +1596,16 @@ export class Files<A extends Adapter = Adapter> {
       );
     }
     const ctx: ActionContext = { key: keyOrKeys, type: "download" };
-    return this.#action(ctx, () => {
-      const path = this.#path(keyOrKeys);
-      const downloadOpts = opts as DownloadOptions | undefined;
-      if (downloadOpts?.range) {
-        this.#assertRangeSupported(downloadOpts.range);
-      }
-      return this.#run(
-        downloadOpts,
-        async (attemptOpts) =>
-          this.#storedFile(await this.#adapter.download(path, attemptOpts)),
-        true,
-        ctx
-      );
-    });
+    return this.#action(ctx, () =>
+      this.#dispatch(
+        {
+          key: keyOrKeys,
+          kind: "download",
+          options: opts as DownloadOptions | undefined,
+        },
+        (op) => this.#perform(op)
+      )
+    );
   }
 
   /**
@@ -1275,9 +1675,22 @@ export class Files<A extends Adapter = Adapter> {
     const { errors, results } = await mapMany(
       keys,
       (key) => key,
-      async (key) =>
-        this.#storedFile(
-          await this.#adapter.download(this.#path(key), as ? { as } : undefined)
+      (key) =>
+        // Per-item onion with the existing adapter call as the base — no #run,
+        // so bulk reads stay retry-free, as documented.
+        this.#dispatch(
+          {
+            bulk: true,
+            key,
+            kind: "download",
+            options: as ? { as } : undefined,
+          },
+          async (op) => {
+            const d = op as Extract<FilesOperation, { kind: "download" }>;
+            return this.#storedFile(
+              await this.#adapter.download(this.#path(d.key), d.options)
+            );
+          }
         ),
       opts
     );
@@ -1310,24 +1723,32 @@ export class Files<A extends Adapter = Adapter> {
       );
     }
     const ctx: ActionContext = { key: keyOrKeys, type: "head" };
-    return this.#action(ctx, () => {
-      const path = this.#path(keyOrKeys);
-      return this.#run(
-        opts as OperationOptions | undefined,
-        async (attemptOpts) =>
-          this.#storedFile(await this.#adapter.head(path, attemptOpts)),
-        true,
-        ctx
-      );
-    });
+    return this.#action(ctx, () =>
+      this.#dispatch(
+        {
+          key: keyOrKeys,
+          kind: "head",
+          options: opts as OperationOptions | undefined,
+        },
+        (op) => this.#perform(op)
+      )
+    );
   }
 
   async #headMany(keys: string[], opts?: BulkOptions): Promise<HeadManyResult> {
     const { errors, results } = await mapMany(
       keys,
       (key) => key,
-      async (key) =>
-        this.#storedFile(await this.#adapter.head(this.#path(key))),
+      (key) =>
+        this.#dispatch(
+          { bulk: true, key, kind: "head", options: undefined },
+          async (op) => {
+            const h = op as Extract<FilesOperation, { kind: "head" }>;
+            return this.#storedFile(
+              await this.#adapter.head(this.#path(h.key), h.options)
+            );
+          }
+        ),
       opts
     );
     return errors.length === 0
@@ -1360,15 +1781,16 @@ export class Files<A extends Adapter = Adapter> {
       );
     }
     const ctx: ActionContext = { key: keyOrKeys, type: "exists" };
-    return this.#action(ctx, () => {
-      const path = this.#path(keyOrKeys);
-      return this.#run(
-        opts as OperationOptions | undefined,
-        (attemptOpts) => this.#adapter.exists(path, attemptOpts),
-        true,
-        ctx
-      );
-    });
+    return this.#action(ctx, () =>
+      this.#dispatch(
+        {
+          key: keyOrKeys,
+          kind: "exists",
+          options: opts as OperationOptions | undefined,
+        },
+        (op) => this.#perform(op)
+      )
+    );
   }
 
   async #existsMany(
@@ -1379,7 +1801,13 @@ export class Files<A extends Adapter = Adapter> {
       keys,
       (key) => key,
       async (key) => ({
-        exists: await this.#adapter.exists(this.#path(key)),
+        exists: await this.#dispatch(
+          { bulk: true, key, kind: "exists", options: undefined },
+          (op) => {
+            const e = op as Extract<FilesOperation, { kind: "exists" }>;
+            return this.#adapter.exists(this.#path(e.key), e.options);
+          }
+        ),
         key,
       }),
       opts
@@ -1425,21 +1853,42 @@ export class Files<A extends Adapter = Adapter> {
       );
     }
     const ctx: ActionContext & { type: "delete" } = { key, type: "delete" };
-    return this.#writeAction(ctx, () => {
-      const path = this.#path(key);
-      return this.#run(
-        opts as OperationOptions | undefined,
-        (attemptOpts) => this.#adapter.delete(path, attemptOpts),
-        true,
-        ctx
-      );
-    });
+    return this.#writeAction(ctx, () =>
+      this.#dispatch(
+        {
+          key,
+          kind: "delete",
+          options: opts as OperationOptions | undefined,
+        },
+        (op) => this.#perform(op)
+      )
+    );
   }
 
   async #deleteMany(
     keys: string[],
     opts?: DeleteManyOptions
   ): Promise<DeleteManyResult> {
+    // With a wrapping plugin installed, the native batch primitive would delete
+    // many keys in one call no plugin could intercept, so fan out per key
+    // through the onion instead — at the cost of the batch round-trip.
+    // `deleteManyWithFallback` gives the same input-order errors, `stopOnError`,
+    // and bounded `concurrency`; an invalid key throws in `#path` inside the
+    // per-key call and is collected like any other failure.
+    if (this.#wraps.length > 0) {
+      return deleteManyWithFallback(
+        keys,
+        (key) =>
+          this.#dispatch(
+            { bulk: true, key, kind: "delete", options: undefined },
+            (op) => {
+              const d = op as Extract<FilesOperation, { kind: "delete" }>;
+              return this.#adapter.delete(this.#path(d.key), d.options);
+            }
+          ),
+        opts
+      );
+    }
     // Track each error's position in the caller's array so the final
     // `errors` list stays in input order, even when invalid keys (caught
     // here) interleave with provider failures (reported by the adapter).
@@ -1507,16 +1956,11 @@ export class Files<A extends Adapter = Adapter> {
       to,
       type: "copy",
     };
-    return this.#writeAction(ctx, () => {
-      const fromPath = this.#path(from, "copy source");
-      const toPath = this.#path(to, "copy destination");
-      return this.#run(
-        opts,
-        (attemptOpts) => this.#adapter.copy(fromPath, toPath, attemptOpts),
-        true,
-        ctx
-      );
-    });
+    return this.#writeAction(ctx, () =>
+      this.#dispatch({ from, kind: "copy", options: opts, to }, (op) =>
+        this.#perform(op)
+      )
+    );
   }
 
   /**
@@ -1542,16 +1986,11 @@ export class Files<A extends Adapter = Adapter> {
       to,
       type: "move",
     };
-    return this.#writeAction(ctx, () => {
-      const fromPath = this.#path(from, "move source");
-      const toPath = this.#path(to, "move destination");
-      return this.#run(
-        opts,
-        (attemptOpts) => this.#move(fromPath, toPath, attemptOpts),
-        true,
-        ctx
-      );
-    });
+    return this.#writeAction(ctx, () =>
+      this.#dispatch({ from, kind: "move", options: opts, to }, (op) =>
+        this.#perform(op)
+      )
+    );
   }
 
   async #move(
@@ -1572,35 +2011,9 @@ export class Files<A extends Adapter = Adapter> {
 
   list(opts?: ListOptions): Promise<ListResult> {
     const ctx: ActionContext = { type: "list" };
-    return this.#action(ctx, () => {
-      this.#assertDelimiterSupported(opts);
-      if (!this.#prefix) {
-        return this.#run(
-          opts,
-          (attemptOpts) => this.#adapter.list(attemptOpts),
-          true,
-          ctx
-        );
-      }
-      const prefix = opts?.prefix
-        ? `${this.#prefix}/${opts.prefix.replace(/^\/+/u, "")}`
-        : `${this.#prefix}/`;
-      return this.#run(
-        opts,
-        async (attemptOpts) => {
-          const result = await this.#adapter.list({ ...attemptOpts, prefix });
-          return {
-            ...result,
-            items: result.items.map((item) => this.#storedFile(item)),
-            ...(result.prefixes && {
-              prefixes: result.prefixes.map((p) => this.#stripPrefix(p)),
-            }),
-          };
-        },
-        true,
-        ctx
-      );
-    });
+    return this.#action(ctx, () =>
+      this.#dispatch({ kind: "list", options: opts }, (op) => this.#perform(op))
+    );
   }
 
   /**
@@ -1656,15 +2069,11 @@ export class Files<A extends Adapter = Adapter> {
    */
   url(key: string, opts?: UrlOptions): Promise<string> {
     const ctx: ActionContext = { key, type: "url" };
-    return this.#action(ctx, () => {
-      const path = this.#path(key);
-      return this.#run(
-        opts,
-        (attemptOpts) => this.#adapter.url(path, attemptOpts),
-        true,
-        ctx
-      );
-    });
+    return this.#action(ctx, () =>
+      this.#dispatch({ key, kind: "url", options: opts }, (op) =>
+        this.#perform(op)
+      )
+    );
   }
 
   signedUploadUrl(key: string, opts: SignUploadOptions): Promise<SignedUpload> {
@@ -1672,16 +2081,11 @@ export class Files<A extends Adapter = Adapter> {
       key,
       type: "signedUploadUrl",
     };
-    return this.#writeAction(ctx, () => {
-      const path = this.#path(key);
-      return this.#run(
-        opts,
-        (attemptOpts) =>
-          this.#adapter.signedUploadUrl(path, attemptOpts as SignUploadOptions),
-        true,
-        ctx
-      );
-    });
+    return this.#writeAction(ctx, () =>
+      this.#dispatch({ key, kind: "signedUploadUrl", options: opts }, (op) =>
+        this.#perform(op)
+      )
+    );
   }
 
   async #run<O extends OperationOptions, T>(
@@ -1799,3 +2203,59 @@ export class Files<A extends Adapter = Adapter> {
     return key.startsWith(scoped) ? key.slice(scoped.length) : key;
   }
 }
+
+/**
+ * Author a {@link FilesPlugin.wrap} as a per-verb map instead of a single
+ * function over the whole {@link FilesOperation} union. List only the verbs you
+ * care about — each handler is typed to its own op and a same-kind `next` — and
+ * every other verb passes straight through untouched.
+ *
+ * ```ts
+ * const encryption = (key: CryptoKey): FilesPlugin => ({
+ *   name: "encryption",
+ *   wrap: handlers({
+ *     upload: (op, next) =>
+ *       seal(op.body, key).then(({ body, iv }) =>
+ *         next({ ...op, body, options: { ...op.options, metadata: { ...op.options?.metadata, iv } } })
+ *       ),
+ *     download: (op, next) => next(op).then((file) => unseal(file, key)),
+ *   }),
+ * });
+ * ```
+ *
+ * The internal casts are confined here so plugin authors never write one.
+ */
+export const handlers = (
+  map: PluginHandlers
+): NonNullable<FilesPlugin["wrap"]> => {
+  const wrap = (op: FilesOperation, next: InternalNext): Promise<unknown> => {
+    const handler = map[op.kind] as InternalWrap | undefined;
+    return handler ? handler(op, next) : next(op);
+  };
+  return wrap as unknown as NonNullable<FilesPlugin["wrap"]>;
+};
+
+/**
+ * Construct a {@link Files} instance whose static type includes the methods
+ * contributed by each plugin's `extend`. Identical to `new Files(opts)` at
+ * runtime — a class constructor can't return `this & Ext` keyed off its
+ * arguments, so this factory is the seam that surfaces e.g. `files.usage()` or
+ * `files.image.resize(...)` on the type.
+ *
+ * ```ts
+ * const files = createFiles({
+ *   adapter: s3({ bucket: "uploads" }),
+ *   plugins: [usage()],
+ * });
+ * files.usage(); // typed, from usage().extend
+ * ```
+ *
+ * Plugins that only `wrap` (no `extend`) work with plain `new Files({ plugins })`
+ * — they add no surface, so there is nothing extra to type.
+ */
+export const createFiles = <
+  A extends Adapter,
+  const P extends readonly FilesPlugin[],
+>(
+  opts: FilesOptions<A> & { plugins?: P }
+): Files<A> & ExtensionsOf<P> => new Files(opts) as Files<A> & ExtensionsOf<P>;

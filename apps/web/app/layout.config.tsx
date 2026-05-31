@@ -29,6 +29,7 @@ export const baseOptions: BaseLayoutProps = {
     { text: "API", url: "/api" },
     { text: "CLI", url: "/cli" },
     { text: "Features", url: "/features" },
+    { text: "Plugins", url: "/plugins" },
   ],
   nav: {
     title: (
