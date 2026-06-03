@@ -2159,7 +2159,7 @@ export class Files<A extends Adapter = Adapter> {
    * `list` hook per page. Stop early by `break`ing out of the loop; no further
    * pages are fetched.
    *
-   * @yields each stored object, one page at a time, following the cursor.
+   * @yields {StoredFile} each stored object, one page at a time, following the cursor.
    */
   async *listAll(opts?: ListOptions): AsyncGenerator<StoredFile, void> {
     // `delimiter` would collapse nested keys into folders, so `listAll` would
@@ -2201,7 +2201,7 @@ export class Files<A extends Adapter = Adapter> {
    * as {@link listAll}, so retries/timeouts and the `onAction` `list` hook apply
    * per page.
    *
-   * @yields each matching object, following the cursor across pages.
+   * @yields {StoredFile} each matching object, following the cursor across pages.
    */
   async *search(
     pattern: string | RegExp,
