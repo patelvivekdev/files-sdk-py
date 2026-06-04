@@ -15,8 +15,8 @@
   },
   "dependencies": {
     "@remotion/cli": "4.0.471",
-    "@remotion/google-fonts": "^4.0.465",
-    "@remotion/sfx": "^4.0.465",
+    "@remotion/google-fonts": "^4.0.471",
+    "@remotion/sfx": "^4.0.471",
     "@remotion/tailwind-v4": "4.0.471",
     "react": "19.2.7",
     "react-dom": "19.2.7",
@@ -25,7 +25,7 @@
   },
   "devDependencies": {
     "@types/react": "19.2.16",
-    "@types/web": "0.0.349",
+    "@types/web": "0.0.350",
     "typescript": "6.0.3"
   }
 }
