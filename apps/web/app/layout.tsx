@@ -85,7 +85,7 @@ const RootLayout = ({ children }: RootLayoutProps) => (
         // biome-ignore lint/security/noDangerouslySetInnerHtml: JSON-LD is the standard pattern for structured data
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
-      <RootProvider>
+      <RootProvider search={{ options: { api: "/search" } }}>
         <TooltipProvider>
           <MotionProvider>{children}</MotionProvider>
         </TooltipProvider>
