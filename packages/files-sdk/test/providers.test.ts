@@ -26,6 +26,7 @@ const CATALOG_SLUGS: string[] = [...PROVIDER_NAMES];
 const NON_PROVIDER_EXPORTS = new Set([
   ".",
   "./ai-sdk",
+  "./audit",
   "./claude",
   "./compression",
   "./content-type",
