@@ -78,6 +78,10 @@
       "types": "./dist/soft-delete/index.d.ts",
       "import": "./dist/soft-delete/index.js"
     },
+    "./tiering": {
+      "types": "./dist/tiering/index.d.ts",
+      "import": "./dist/tiering/index.js"
+    },
     "./s3": {
       "types": "./dist/s3/index.d.ts",
       "import": "./dist/s3/index.js"
