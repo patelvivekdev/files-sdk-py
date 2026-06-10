@@ -203,6 +203,7 @@ describe("cli/program", () => {
     const program = buildProgram();
     const names = program.commands.map((c) => c.name()).toSorted();
     expect(names).toEqual([
+      "capabilities",
       "copy",
       "delete",
       "download",

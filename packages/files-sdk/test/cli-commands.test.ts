@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import {
+  runCapabilities,
   runCopy,
   runDelete,
   runDownload,
@@ -516,6 +517,17 @@ describe("cli/commands real (fs adapter)", () => {
     const out = lastJson(cap.stdout) as { key: string; url: string };
     expect(out.key).toBe("u.txt");
     expect(out.url.startsWith("file://")).toBe(true);
+  });
+
+  test("capabilities prints the fs adapter's capability snapshot", async () => {
+    await runCapabilities(baseOpts());
+    // fs copies locally and reads ranges, but file:// URLs aren't signed.
+    expect(lastJson(cap.stdout)).toMatchObject({
+      rangeRead: true,
+      serverSideCopy: true,
+      signedUrl: { supported: false },
+      uploadProgress: false,
+    });
   });
 
   test("sign-upload returns method/url/headers", async () => {

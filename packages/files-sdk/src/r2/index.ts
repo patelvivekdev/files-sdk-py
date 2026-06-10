@@ -437,10 +437,16 @@ const r2FromBinding = (opts: R2BindingOptions): R2Adapter => {
       assertNoMaxSize(signOpts);
       return signer.signedUploadUrl(key, signOpts);
     },
+    // A Workers binding can't sign on its own: `url()` signs only in hybrid
+    // mode (HTTP credentials also passed); a bare `publicBaseUrl` is a
+    // permanent public link, not a signed one.
+    signedUrl: { supported: Boolean(hybrid) },
     supportsCacheControl: true,
     supportsDelimiter: true,
     supportsMetadata: true,
     supportsRange: true,
+    // Bindings have no server-side copy — `copy()` streams get→put.
+    supportsServerSideCopy: false,
     async upload(key, body, options) {
       const { data, contentType, contentLength } = await normalizeForR2(
         body,
@@ -662,10 +668,14 @@ const r2FromHttp = (opts: R2HttpOptions): R2Adapter => {
     // `metadata`, `cacheControl`, ListObjectsV2 `Delimiter`, and `Range`
     // against R2's S3-compatible API — so advertise the same capabilities the
     // binding does (the binding sets these directly).
+    // HTTP mode signs via the underlying S3 signer (SigV4 GetObject).
+    signedUrl: { supported: true },
     supportsCacheControl: true,
     supportsDelimiter: true,
     supportsMetadata: true,
     supportsRange: true,
+    // `copy()` delegates to the S3 adapter's server-side CopyObject.
+    supportsServerSideCopy: true,
     async upload(key, body, uploadOpts) {
       const adapter = await ensure();
       return adapter.upload(key, body, uploadOpts);

@@ -5,20 +5,21 @@ description: Each CLI command maps to an SDK method - upload, download, head, ex
 
 Each command maps to a `Files` method. Same semantics, same `FilesError` codes, same `StoredFile` fields on the way out (emitted as flat JSON).
 
-| Command       | SDK method                                  | What it does                                          |
-| ------------- | ------------------------------------------- | ----------------------------------------------------- |
-| `upload`      | [`upload`](/api/upload)                     | Write a file or piped stdin to a key                  |
-| `download`    | [`download`](/api/download)                 | Read a key to disk or stream it to stdout             |
-| `head`        | [`head`](/api/head)                         | Fetch metadata without the body                       |
-| `exists`      | [`exists`](/api/exists)                     | Test a key — prints `{ exists, key }`, sets exit code |
-| `list`        | [`list`](/api/list)                         | Page through keys under a prefix                      |
-| `copy`        | [`copy`](/api/copy)                         | Copy a key to a new key                               |
-| `move`        | [`move`](/api/move)                         | Move (rename) a key                                   |
-| `delete`      | [`delete`](/api/delete)                     | Delete one or more keys                               |
-| `url`         | [`url`](/api/url)                           | Get a read URL — presigned or public                  |
-| `sign-upload` | [`signedUploadUrl`](/api/signed-upload-url) | Mint a browser-direct upload policy                   |
-| `transfer`    | [`transfer`](/api/transfer)                 | Stream every object to another provider               |
-| `sync`        | [`sync`](/api/sync)                         | Mirror onto another provider (skip-unchanged, prune)  |
+| Command        | SDK method                                  | What it does                                          |
+| -------------- | ------------------------------------------- | ----------------------------------------------------- |
+| `upload`       | [`upload`](/api/upload)                     | Write a file or piped stdin to a key                  |
+| `download`     | [`download`](/api/download)                 | Read a key to disk or stream it to stdout             |
+| `head`         | [`head`](/api/head)                         | Fetch metadata without the body                       |
+| `exists`       | [`exists`](/api/exists)                     | Test a key — prints `{ exists, key }`, sets exit code |
+| `list`         | [`list`](/api/list)                         | Page through keys under a prefix                      |
+| `copy`         | [`copy`](/api/copy)                         | Copy a key to a new key                               |
+| `move`         | [`move`](/api/move)                         | Move (rename) a key                                   |
+| `delete`       | [`delete`](/api/delete)                     | Delete one or more keys                               |
+| `url`          | [`url`](/api/url)                           | Get a read URL — presigned or public                  |
+| `sign-upload`  | [`signedUploadUrl`](/api/signed-upload-url) | Mint a browser-direct upload policy                   |
+| `transfer`     | [`transfer`](/api/transfer)                 | Stream every object to another provider               |
+| `sync`         | [`sync`](/api/sync)                         | Mirror onto another provider (skip-unchanged, prune)  |
+| `capabilities` | [`capabilities`](/docs/capabilities)        | Print what the configured adapter can do, as JSON     |
 
 All examples use `--provider s3 --bucket uploads`; swap in any [provider](/providers) and its flags.
 
@@ -129,6 +130,14 @@ Mint a presigned POST policy for browser-direct uploads. `--max-size` is enforce
 ```bash lineNumbers
 files --provider s3 --bucket uploads sign-upload uploads/avatar.png \
   --expires-in 600 --max-size 5242880 --content-type image/png
+```
+
+### capabilities
+
+Print the configured adapter's [capability snapshot](/docs/capabilities) as JSON — range reads, native upload progress, list delimiters, metadata, cache-control, multipart, server-side copy, and signed URLs. Pure introspection; it makes no provider call.
+
+```bash lineNumbers
+files --provider s3 --bucket uploads capabilities
 ```
 
 ### transfer

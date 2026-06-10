@@ -619,8 +619,13 @@ export const sftp = (opts: SftpAdapterOptions = {}): SftpAdapter => {
         )
       );
     },
+    // SFTP serves no HTTP and has no signing primitive — `url()` returns a
+    // `publicBaseUrl` front URL when configured, else throws.
+    signedUrl: { supported: false },
     supportsDelimiter: true,
     supportsRange: true,
+    // No server-side copy — `copy()` round-trips the bytes through the client.
+    supportsServerSideCopy: false,
     upload(key, body: Body, options): Promise<UploadResult> {
       // `metadata` / `cacheControl` are rejected centrally by the Files wrapper
       // (this adapter advertises neither) — SFTP files have no

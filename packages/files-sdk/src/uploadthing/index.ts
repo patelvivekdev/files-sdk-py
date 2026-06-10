@@ -607,7 +607,12 @@ export const uploadthing = (
         url: url.toString(),
       };
     },
+    // `url()` mints a `generateSignedURL` for private files (public-read
+    // returns the CDN URL).
+    signedUrl: { supported: true },
     supportsRange: true,
+    // No server-side copy — `copy()` downloads then re-uploads (buffered).
+    supportsServerSideCopy: false,
     async upload(key, body, options): Promise<UploadResult> {
       const contentType = options?.contentType;
       const blob = await bodyToBlob(body, contentType);

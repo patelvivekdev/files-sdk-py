@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { Command, Option } from "commander";
 
 import {
+  runCapabilities,
   runCopy,
   runDelete,
   runDownload,
@@ -464,6 +465,18 @@ export const buildProgram = (
         const [from, to] = args as [string, string];
         return { ...common, from, to } as CommonRunOpts;
       })
+    );
+
+  program
+    .command("capabilities")
+    .description(
+      "print what the configured adapter can do (range reads, signed URLs, server-side copy, multipart, …) as JSON"
+    )
+    .action(
+      wrap(
+        runCapabilities as (opts: never) => Promise<void>,
+        (_args, common) => common
+      )
     );
 
   program

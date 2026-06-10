@@ -679,8 +679,13 @@ export const cloudinaryAdapter = (
         url,
       });
     },
+    // `private` / `authenticated` delivery types sign URLs; the default
+    // `upload` (public) delivery type returns an unsigned, permanent CDN URL.
+    signedUrl: { supported: type !== "upload" },
     supportsDelimiter: true,
     supportsRange: true,
+    // No native copy — `copy()` re-uploads by URL into a new asset.
+    supportsServerSideCopy: false,
     type,
     async upload(
       key: string,

@@ -272,6 +272,17 @@ describe("cli/program parseAsync (fs end-to-end)", () => {
     }
   });
 
+  test("capabilities goes through its action builder and prints the snapshot", async () => {
+    // No dry-run path — it's pure introspection, so it runs against the fs
+    // adapter and emits its capability snapshot.
+    await run("--provider", "fs", "--root", root, "capabilities");
+    expect(lastJson(cap.stdout)).toMatchObject({
+      rangeRead: true,
+      serverSideCopy: true,
+      signedUrl: { supported: false },
+    });
+  });
+
   test("move <from> <to> renames the key through its action builder", async () => {
     const local = path.join(root, "in.txt");
     await fsp.writeFile(local, "moved body");

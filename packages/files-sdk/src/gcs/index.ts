@@ -372,10 +372,14 @@ export const gcs = (opts: GCSAdapterOptions): GCSAdapter => {
         throw mapGCSError(error);
       }
     },
+    // `url()` returns a V4 signed URL (or `publicBaseUrl` when set).
+    signedUrl: { supported: true },
     supportsCacheControl: true,
     supportsDelimiter: true,
     supportsMetadata: true,
     supportsRange: true,
+    // `copy()` is a server-side GCS object copy.
+    supportsServerSideCopy: true,
     async upload(key, body, options) {
       const { cacheControl, metadata, multipart, onProgress } = options ?? {};
       const { data, contentType, contentLength } = await normalizeBody(

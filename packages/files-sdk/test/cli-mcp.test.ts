@@ -161,6 +161,16 @@ describe("cli/mcp tools (write-enabled)", () => {
     );
   });
 
+  test("capabilities reports the fs adapter's snapshot", async () => {
+    const res = await call(h.client, "capabilities");
+    expect(res.isError).toBe(false);
+    expect(res.data).toMatchObject({
+      rangeRead: true,
+      serverSideCopy: true,
+      signedUrl: { supported: false },
+    });
+  });
+
   test("upload rejects ambiguous and empty bodies", async () => {
     const both = await call(h.client, "upload", {
       base64: "AA==",
@@ -543,6 +553,7 @@ describe("cli/mcp read-only server", () => {
       const names = await toolNames(h.client);
       expect(names).toEqual(
         expect.arrayContaining([
+          "capabilities",
           "download",
           "head",
           "exists",

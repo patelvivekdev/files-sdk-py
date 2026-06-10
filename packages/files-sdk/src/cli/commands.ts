@@ -571,6 +571,13 @@ export const runUrl = async (opts: UrlCmdOpts): Promise<void> => {
   emit({ key: opts.key, url }, opts);
 };
 
+export const runCapabilities = async (opts: CommonRunOpts): Promise<void> => {
+  // Pure introspection of the configured adapter — no provider round-trip, so
+  // there's nothing to dry-run.
+  const { files } = await loadFiles(opts.global);
+  emit(files.capabilities, opts);
+};
+
 export interface SignUploadCmdOpts extends CommonRunOpts {
   key: string;
   expiresIn: number;

@@ -1371,6 +1371,54 @@ describe("Files class", () => {
     expect(files.adapter).toBe(adapter);
   });
 
+  test("capabilities derives flags from the adapter, defaulting conservatively", () => {
+    // The fake advertises metadata + cacheControl and nothing else: no range,
+    // no progress, no resumable/multipart, no declared signedUrl / copy flags.
+    const files = new Files({ adapter: fakeAdapter() });
+    expect(files.capabilities).toEqual({
+      cacheControl: true,
+      delimiter: false,
+      metadata: true,
+      multipart: false,
+      rangeRead: false,
+      serverSideCopy: false,
+      signedUrl: { supported: false },
+      uploadProgress: false,
+    });
+  });
+
+  test("capabilities reflects range + delimiter when the adapter advertises them", () => {
+    const files = new Files({
+      adapter: fakeAdapter({ supportsDelimiter: true, supportsRange: true }),
+    });
+    expect(files.capabilities.rangeRead).toBe(true);
+    expect(files.capabilities.delimiter).toBe(true);
+  });
+
+  test("capabilities surfaces multipart, progress, copy, and signed-url declarations", () => {
+    const base = fakeAdapter();
+    const adapter: Adapter = {
+      ...base,
+      reportsUploadProgress: true,
+      resumableUpload: () => {
+        throw new Error("unused");
+      },
+      signedUrl: { maxExpiresIn: 604_800, supported: true },
+      supportsServerSideCopy: true,
+    };
+    const files = new Files({ adapter });
+    expect(files.capabilities).toEqual({
+      cacheControl: true,
+      delimiter: false,
+      metadata: true,
+      multipart: true,
+      rangeRead: false,
+      serverSideCopy: true,
+      signedUrl: { maxExpiresIn: 604_800, supported: true },
+      uploadProgress: true,
+    });
+  });
+
   test("url returns a string with the configured expiry", async () => {
     const files = new Files({ adapter: fakeAdapter() });
     await files.upload("k.txt", "v");

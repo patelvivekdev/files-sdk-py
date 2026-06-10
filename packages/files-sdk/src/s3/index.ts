@@ -790,10 +790,17 @@ export const s3 = (opts: S3AdapterOptions): S3Adapter => {
         throw wrapErr(error);
       }
     },
+    // `url()` SigV4-signs a GetObject request. AWS caps presigned-URL lifetime
+    // at 604800s, but that is a soft infra limit AWS rejects at request time —
+    // not enforced here, and S3-compatible providers (MinIO, Wasabi, …) differ
+    // — so no `maxExpiresIn`; the AWS limit lives in the provider-gaps page.
+    signedUrl: { supported: true },
     supportsCacheControl: true,
     supportsDelimiter: true,
     supportsMetadata: true,
     supportsRange: true,
+    // `copy()` issues a CopyObject — server-side, no body round-trip.
+    supportsServerSideCopy: true,
     async upload(key, body, options) {
       const { cacheControl, metadata, multipart, onProgress, signal } =
         options ?? {};

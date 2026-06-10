@@ -1148,8 +1148,13 @@ export const onedrive = (
         throw mapGraphError(error);
       }
     },
+    // Graph has no signed-URL primitive: `url()` throws unless built with
+    // `publicByDefault`, and even then returns an anonymous (permanent) link.
+    signedUrl: { supported: false },
     supportsDelimiter: true,
     supportsRange: true,
+    // `copy()` is a server-side Graph `/copy`.
+    supportsServerSideCopy: true,
     async upload(key, body, options): Promise<UploadResult> {
       // `metadata` / `cacheControl` are rejected centrally by the Files wrapper
       // (this adapter advertises neither) — Graph drive items have no native

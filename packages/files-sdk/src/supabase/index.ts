@@ -833,9 +833,13 @@ export const supabase = (opts: SupabaseAdapterOptions): SupabaseAdapter => {
         url: signedUrl,
       };
     },
+    // `url()` mints a `createSignedUrl` (or a public URL when configured).
+    signedUrl: { supported: true },
     supportsCacheControl: true,
     supportsDelimiter: true,
     supportsMetadata: true,
+    // `copy()` is a server-side Storage copy.
+    supportsServerSideCopy: true,
     async upload(key, body, options) {
       const { data, contentType, contentLength } = await normalizeBody(
         body,

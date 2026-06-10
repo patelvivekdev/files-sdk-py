@@ -992,10 +992,15 @@ export const googleDrive = (
         }),
       };
     },
+    // Drive has no signed-URL primitive: `url()` throws unless the adapter was
+    // built with `publicByDefault`, and even then returns a permanent link.
+    signedUrl: { supported: false },
     supportsCacheControl: true,
     supportsDelimiter: true,
     supportsMetadata: true,
     supportsRange: true,
+    // `copy()` is a server-side `files.copy`.
+    supportsServerSideCopy: true,
     async upload(key, body, options): Promise<UploadResult> {
       assertNoReservedMetadata(options?.metadata);
       try {

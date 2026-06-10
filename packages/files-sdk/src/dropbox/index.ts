@@ -1196,8 +1196,13 @@ export const dropbox = (opts: DropboxAdapterOptions): DropboxAdapter => {
         )
       );
     },
+    // `url()` returns a temporary link — time-limited, but capped at 4h
+    // (`MAX_TEMPORARY_LINK_DURATION`); `url()` throws above that.
+    signedUrl: { maxExpiresIn: MAX_TEMPORARY_LINK_DURATION, supported: true },
     supportsDelimiter: true,
     supportsRange: true,
+    // `copy()` is a server-side `filesCopyV2`.
+    supportsServerSideCopy: true,
     async upload(key, body, options): Promise<UploadResult> {
       // `metadata` / `cacheControl` are rejected centrally by the Files wrapper
       // (this adapter advertises neither) — Dropbox files have no native

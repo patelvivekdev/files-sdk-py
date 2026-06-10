@@ -597,6 +597,66 @@ export type SignedUpload =
       fields: Record<string, string>;
     };
 
+/** How an adapter's {@link Adapter.url} produces a download URL. */
+export interface SignedUrlCapability {
+  /**
+   * `true` when `url()` mints a signed or tokenized download URL that grants
+   * access without the caller's own credentials and is more than a permanent
+   * public link (an S3 SigV4 URL, an Azure SAS, a GCS signed URL, a Box or
+   * PocketBase access-token URL, …). Whether such a URL honors
+   * {@link UrlOptions.expiresIn} exactly is a separate, per-provider detail —
+   * some providers pin the lifetime server-side and ignore the request; see the
+   * provider-gaps page. `false` when the adapter has no signing primitive: it
+   * returns only a permanent public URL and ignores `expiresIn` (Vercel Blob,
+   * Appwrite, Convex), or throws because it cannot mint a URL at all (the
+   * filesystem, FTP/SFTP, OneDrive / Google Drive outside their public-link
+   * mode). When `false`, prefer `download()`.
+   */
+  supported: boolean;
+  /**
+   * Hard upper bound on `expiresIn`, in seconds, when the provider enforces one
+   * in code (e.g. Azure clamps user-delegation SAS to 7 days; Dropbox temporary
+   * links are a fixed 4 hours). Omitted when there is no code-enforced cap —
+   * note this is distinct from soft infra limits the SDK passes through without
+   * checking (AWS SigV4's 604800-second ceiling is documented, not enforced
+   * here; see the provider-gaps page).
+   */
+  maxExpiresIn?: number;
+}
+
+/**
+ * A queryable snapshot of what the underlying adapter can do, exposed via
+ * {@link Files.capabilities}. Lets callers, AI tool wrappers, and validators
+ * branch on capability up front instead of relying on a throw at call time
+ * (e.g. skip `range` planning when `rangeRead` is `false`, or fall back to
+ * `download()` when `signedUrl.supported` is `false`).
+ *
+ * Every flag mirrors an operation the unified API actually exposes. The first
+ * six are derived from the same per-adapter flags / optional methods the
+ * {@link Files} wrapper already gates on, so they can never drift from the
+ * runtime behavior. `serverSideCopy` and `signedUrl` are declared per-adapter
+ * (no operation-level flag carries them) and default to the conservative value
+ * when an adapter does not advertise them.
+ */
+export interface AdapterCapabilities {
+  /** `download({ range })` returns only the requested bytes. From {@link Adapter.supportsRange}. */
+  rangeRead: boolean;
+  /** `upload({ onProgress })` reports byte-level progress natively. From {@link Adapter.reportsUploadProgress}. */
+  uploadProgress: boolean;
+  /** `list({ delimiter })` returns common prefixes. From {@link Adapter.supportsDelimiter}. */
+  delimiter: boolean;
+  /** `upload({ metadata })` persists arbitrary user metadata. From {@link Adapter.supportsMetadata}. */
+  metadata: boolean;
+  /** `upload({ cacheControl })` stores a Cache-Control header. From {@link Adapter.supportsCacheControl}. */
+  cacheControl: boolean;
+  /** `upload({ control })` resumable / multipart uploads. From {@link Adapter.resumableUpload}. */
+  multipart: boolean;
+  /** `copy()` runs server-side with no body re-transfer. From {@link Adapter.supportsServerSideCopy}. */
+  serverSideCopy: boolean;
+  /** How `url()` produces a download URL. From {@link Adapter.signedUrl}. */
+  signedUrl: SignedUrlCapability;
+}
+
 export interface Adapter<Raw = unknown> {
   readonly name: string;
   readonly raw: Raw;
@@ -641,6 +701,26 @@ export interface Adapter<Raw = unknown> {
    * it. Leave unset for adapters whose provider has no cache-control field.
    */
   readonly supportsCacheControl?: boolean;
+  /**
+   * Set `true` when `copy` runs server-side — a provider copy API call that
+   * never re-transfers the body through this process (S3 `CopyObject`, Azure
+   * `syncCopyFromURL`, a native filesystem rename, …). Leave unset for adapters
+   * whose only copy path streams or buffers the bytes client-side
+   * (download-then-reupload). Purely advisory — surfaced via
+   * {@link Files.capabilities} as {@link AdapterCapabilities.serverSideCopy} so
+   * callers can reason about the cost of a large `copy()`; it does not gate the
+   * operation (every adapter's `copy` works regardless).
+   */
+  readonly supportsServerSideCopy?: boolean;
+  /**
+   * Describes how `url` produces a download URL, surfaced via
+   * {@link Files.capabilities} as {@link AdapterCapabilities.signedUrl}. Leave
+   * unset for adapters that cannot mint a usable URL — it defaults to
+   * `{ supported: false }`, the conservative value, so a caller that doesn't
+   * advertise still reads as "no signed URL" rather than a wrong `true`.
+   * Advisory only; it does not gate `url()`.
+   */
+  readonly signedUrl?: SignedUrlCapability;
   upload(key: string, body: Body, opts?: UploadOptions): Promise<UploadResult>;
   /**
    * Download an object's body and metadata. When {@link DownloadOptions.range}
@@ -1419,6 +1499,34 @@ export class Files<A extends Adapter = Adapter> {
    */
   get prefix(): string {
     return this.#prefix;
+  }
+
+  /**
+   * A queryable snapshot of what the underlying adapter can do — see
+   * {@link AdapterCapabilities}. Lets callers branch on capability up front
+   * (e.g. skip a `range` request when `rangeRead` is `false`, or fall back to
+   * `download()` when `signedUrl.supported` is `false`) instead of discovering
+   * the limit by catching a throw at call time.
+   *
+   * Derived live from the adapter on each read, so a plugin that swaps
+   * behaviors is always reflected. The derived flags read the exact per-adapter
+   * flags / optional methods the wrapper gates on, so they cannot drift from
+   * runtime behavior; `serverSideCopy` and `signedUrl` come from what the
+   * adapter declares, defaulting to the conservative value when it declares
+   * nothing.
+   */
+  get capabilities(): AdapterCapabilities {
+    const a = this.#adapter;
+    return {
+      cacheControl: a.supportsCacheControl === true,
+      delimiter: a.supportsDelimiter === true,
+      metadata: a.supportsMetadata === true,
+      multipart: typeof a.resumableUpload === "function",
+      rangeRead: a.supportsRange === true,
+      serverSideCopy: a.supportsServerSideCopy === true,
+      signedUrl: a.signedUrl ?? { supported: false },
+      uploadProgress: a.reportsUploadProgress === true,
+    };
   }
 
   readonly(): Files<A> {

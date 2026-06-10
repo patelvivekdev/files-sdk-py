@@ -529,7 +529,12 @@ export const bunS3 = (opts: BunS3AdapterOptions = {}): BunS3Adapter => {
         return Promise.reject(mapBunS3Error(error));
       }
     },
+    // `url()` presigns a GET via Bun's S3 client (or `publicBaseUrl`).
+    signedUrl: { supported: true },
     supportsRange: true,
+    // Bun's S3 client has no CopyObject helper — `copy()` streams source→dest
+    // through this process, so it's not a server-side copy.
+    supportsServerSideCopy: false,
     async upload(key, body, options) {
       // `metadata` / `cacheControl` are rejected centrally by the Files wrapper
       // (this adapter advertises neither) — Bun.s3 exposes no API for either.

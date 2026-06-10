@@ -671,6 +671,11 @@ export const vercelBlob = (
         "vercel-blob: signed upload URLs are not available. Use Vercel's `handleUpload()` route handler with the `@vercel/blob/client` package for browser uploads."
       );
     },
+    // Vercel Blob has no signing primitive: `url()` returns the permanent
+    // public CDN URL and ignores `expiresIn` (and throws for private blobs).
+    signedUrl: { supported: false },
+    // `copy()` is a server-side `blob.copy` — no body round-trip.
+    supportsServerSideCopy: true,
     async upload(key, body, options) {
       try {
         const result = await blob.put(key, body as Blob | string, {

@@ -455,6 +455,11 @@ export const appwrite = (opts: AppwriteAdapterOptions): AppwriteAdapter => {
           "appwrite: signedUploadUrl is not supported. Appwrite has no presigned upload primitive — use a JWT or the client SDK for direct uploads."
         )
       ),
+    // Appwrite SDKs can't mint signed read URLs with API keys — `url()` returns
+    // a permanent view URL under `{ public: true }`, else throws.
+    signedUrl: { supported: false },
+    // No native copy — `copy()` downloads the source and creates a new file.
+    supportsServerSideCopy: false,
     upload: async (key: string, body: Body, _uploadOpts?: UploadOptions) => {
       assertAppwriteKey(key);
       // `metadata` / `cacheControl` are rejected centrally by the Files wrapper

@@ -464,7 +464,12 @@ export const pocketbase = (
         )
       );
     },
+    // `url()` returns a file-token URL for protected collections (the token's
+    // TTL is server-controlled, so `expiresIn` is ignored — see provider-gaps).
+    signedUrl: { supported: true },
     supportsRange: true,
+    // No server-side copy — `copy()` downloads then re-uploads as a new record.
+    supportsServerSideCopy: false,
     async upload(
       key: string,
       body: Body,

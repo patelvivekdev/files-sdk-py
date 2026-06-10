@@ -379,6 +379,11 @@ export const bunnyStorage = (
         )
       );
     },
+    // `url()` needs `publicBaseUrl` (a Pull Zone / CDN host); the Storage API
+    // URL requires an AccessKey header and can't be handed out, so no signing.
+    signedUrl: { supported: false },
+    // No native copy — `copy()` reads the source and re-uploads the body.
+    supportsServerSideCopy: false,
     async upload(key, body: Body, options): Promise<UploadResult> {
       // `metadata` / `cacheControl` are rejected centrally by the Files wrapper
       // (this adapter advertises neither) — the Bunny Storage SDK has no

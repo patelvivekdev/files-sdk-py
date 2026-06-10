@@ -1,0 +1,65 @@
+---
+title: Capabilities
+description: Query what an adapter can do up front with files.capabilities — branch on range reads, signed URLs, server-side copy, and more instead of waiting for a throw at call time.
+---
+
+The unified surface is the common subset every adapter implements, but adapters differ at the edges: some honor byte-range reads, some can mint a signed URL, some copy server-side. The wrapper already gates on these per-adapter — pass a `range` to an adapter that has no range primitive and it throws _before_ any provider call. `files.capabilities` turns that implicit knowledge into a queryable surface, so you can branch up front instead of discovering a limit by catching an error.
+
+```ts
+const files = new Files({ adapter: s3({ bucket: "uploads" }) });
+
+if (files.capabilities.rangeRead) {
+  // Safe to stream a byte range — the adapter has a range primitive.
+  const clip = await files.download(key, { range: { start: 0, end: 1023 } });
+}
+
+if (files.capabilities.signedUrl.supported) {
+  return files.url(key, { expiresIn: 600 });
+}
+// No signing primitive — stream the bytes through the SDK instead.
+return files.download(key);
+```
+
+## The shape
+
+```ts
+interface AdapterCapabilities {
+  rangeRead: boolean;
+  uploadProgress: boolean;
+  delimiter: boolean;
+  metadata: boolean;
+  cacheControl: boolean;
+  multipart: boolean;
+  serverSideCopy: boolean;
+  signedUrl: { supported: boolean; maxExpiresIn?: number };
+}
+```
+
+| Field            | `true` means                                                             | Maps to               |
+| ---------------- | ------------------------------------------------------------------------ | --------------------- |
+| `rangeRead`      | `download({ range })` returns only the requested bytes                   | `download`            |
+| `uploadProgress` | `upload({ onProgress })` reports byte-level progress natively            | `upload`              |
+| `delimiter`      | `list({ delimiter })` returns S3-style common prefixes                   | `list`                |
+| `metadata`       | `upload({ metadata })` persists arbitrary user metadata                  | `upload`              |
+| `cacheControl`   | `upload({ cacheControl })` stores a `Cache-Control` header               | `upload`              |
+| `multipart`      | the adapter exposes a resumable / multipart upload primitive             | `upload({ control })` |
+| `serverSideCopy` | `copy()` runs server-side, with no body re-transfer through your process | `copy`                |
+| `signedUrl`      | `url()` can mint a signed or tokenized URL — see below                   | `url`                 |
+
+Every field mirrors an operation the unified API actually has. There are deliberately no flags for `raw`-only territory (object versioning, checksums, conditional writes, POST policies) — advertising a flag for a non-operation would turn the matrix into a back-door spec, where a wrong flag is worse than no flag.
+
+### `signedUrl`
+
+```ts
+signedUrl: { supported: boolean; maxExpiresIn?: number }
+```
+
+`supported` is `true` when `url()` mints a signed or tokenized download URL that grants access without the caller's own credentials and is more than a permanent public link — an S3 SigV4 URL, an Azure SAS, a GCS signed URL, a Box or PocketBase access-token URL. It's `false` when the adapter has no signing primitive: it returns only a permanent public URL (Vercel Blob, Appwrite, Convex) or throws because it can't mint one at all (the filesystem, FTP/SFTP, OneDrive / Google Drive outside their public-link mode). When `false`, prefer `download()`.
+
+`maxExpiresIn` is set only when the provider enforces a hard ceiling on `expiresIn` **in code** — for example Dropbox temporary links cap at 4 hours and `url()` throws above that. It is deliberately _not_ set for soft or config-dependent limits: AWS SigV4's 604800-second ceiling is an infra limit the SDK passes through without checking, and Azure's 7-day cap only applies to user-delegation SAS (account-key SAS has no such limit). Those live in [Provider gaps](/docs/provider-gaps), not here. Whether a supported URL honors `expiresIn` exactly is also per-provider — some pin the lifetime server-side (Box, PocketBase) and ignore the request.
+
+## How it's derived
+
+`capabilities` is computed live from the adapter on every read, so a plugin that swaps behavior is always reflected. The first six fields read the exact per-adapter flags and optional methods the wrapper already gates on (`supportsRange`, `reportsUploadProgress`, `supportsDelimiter`, `supportsMetadata`, `supportsCacheControl`, and the presence of `resumableUpload`), so they can never drift from runtime behavior. `serverSideCopy` and `signedUrl` are declared by each adapter and default to the conservative value (`false`) when an adapter declares nothing — a caller that doesn't advertise reads as "no", never a wrong "yes".
+
+If you're writing a custom adapter, set `supportsServerSideCopy` and `signedUrl` alongside the existing `supports*` flags to make your adapter introspectable; both are optional and advisory (they don't gate any operation).

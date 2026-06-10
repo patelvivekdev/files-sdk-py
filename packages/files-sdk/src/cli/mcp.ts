@@ -381,6 +381,19 @@ export const buildMcpServer = async (
   }
 
   server.registerTool(
+    "capabilities",
+    {
+      description:
+        "Report what the configured adapter can do — range reads, native upload progress, list delimiters, user metadata, cache-control, multipart/resumable uploads, server-side copy, and signed URLs (`supported` plus any `maxExpiresIn` cap). Pure introspection; makes no provider call. Branch on this instead of catching an unsupported-operation error.",
+      inputSchema: {},
+      title: "Adapter capabilities",
+    },
+    // Pure property read with conservative defaults — it can't throw, so there's
+    // no provider error to map here.
+    () => ok(files.capabilities)
+  );
+
+  server.registerTool(
     "list",
     {
       description:

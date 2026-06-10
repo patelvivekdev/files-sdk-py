@@ -362,7 +362,11 @@ export const convex = (opts: ConvexAdapterOptions): ConvexAdapter => {
       // controlled by Convex and ignored here.
       return { fields: {}, method: "POST", url };
     },
-
+    // `url()` returns a permanent Convex serving URL — unsigned and
+    // non-expiring (`expiresIn` is ignored), so not a signed URL.
+    signedUrl: { supported: false },
+    // Convex storage ids are immutable — `copy()` is unsupported (throws).
+    supportsServerSideCopy: false,
     async upload(key, body, options): Promise<UploadResult> {
       // `metadata` / `cacheControl` are rejected centrally by the Files wrapper
       // (this adapter sets neither `supportsMetadata` nor `supportsCacheControl`)

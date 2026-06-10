@@ -1099,8 +1099,14 @@ export const box = (opts: BoxAdapterOptions = {}): BoxAdapter => {
         )
       );
     },
+    // `url()` returns a tokenized download URL (or a shared link under
+    // `publicByDefault`). It's time-limited, but Box controls the TTL
+    // server-side, so `expiresIn` is accepted and ignored — see provider-gaps.
+    signedUrl: { supported: true },
     supportsDelimiter: true,
     supportsRange: true,
+    // `copy()` is a server-side `copyFile`.
+    supportsServerSideCopy: true,
     upload(key, body, options): Promise<UploadResult> {
       return runUpload(key, body, options);
     },

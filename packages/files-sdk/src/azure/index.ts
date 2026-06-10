@@ -981,10 +981,17 @@ export const azure = (opts: AzureAdapterOptions): AzureAdapter => {
         throw mapAzureError(error);
       }
     },
+    // `url()` mints a SAS (or returns `publicBaseUrl` when set). Azure caps
+    // user-delegation SAS at 7 days, but account-key SAS has no such limit, so
+    // the cap is config-dependent — documented in the provider-gaps page rather
+    // than asserted as a `maxExpiresIn` that would be wrong in shared-key mode.
+    signedUrl: { supported: true },
     supportsCacheControl: true,
     supportsDelimiter: true,
     supportsMetadata: true,
     supportsRange: true,
+    // `copy()` is a server-side `syncCopyFromURL`.
+    supportsServerSideCopy: true,
     async upload(key, body, options) {
       const { cacheControl, metadata, multipart, onProgress, signal } =
         options ?? {};
