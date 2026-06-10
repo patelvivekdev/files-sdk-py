@@ -527,6 +527,59 @@ describe("resumable orchestrator (parts mode)", () => {
 });
 
 describe("resumable orchestrator (offset mode)", () => {
+  test("resuming an already-finalized session reports sane progress", async () => {
+    // A probe can report a past-the-end sentinel offset (the HTTP driver uses
+    // MAX_SAFE_INTEGER for "the session finalized server-side"). Progress
+    // must clamp to the body size, not surface the sentinel to onProgress.
+    const driver: OffsetResumableDriver = {
+      adopt: () => {
+        // The token is accepted as-is for this fake.
+      },
+      begin: () => Promise.reject(new Error("not a fresh upload")),
+      complete: () =>
+        Promise.resolve({
+          contentType: "application/octet-stream",
+          key: "done.bin",
+          size: 8,
+        }),
+      discard: () => Promise.resolve(),
+      mode: "offset",
+      partSize: 4,
+      probe: () => Promise.resolve({ nextOffset: Number.MAX_SAFE_INTEGER }),
+      uploadAt: () => Promise.reject(new Error("nothing left to upload")),
+    };
+    const adapter: Adapter = {
+      copy: unsupported,
+      delete: unsupported,
+      download: unsupported,
+      exists: unsupported,
+      head: unsupported,
+      list: unsupported,
+      name: "fake-finalized",
+      raw: {},
+      resumableUpload: () => driver,
+      signedUploadUrl: unsupported,
+      upload: unsupported,
+      url: unsupported,
+    };
+    const files = new Files({ adapter });
+    const loads: number[] = [];
+    const uploaded = await files.upload("done.bin", new Uint8Array(8), {
+      control: UploadControl.from({
+        bucket: "b",
+        key: "done.bin",
+        provider: "gcs",
+        uri: "uri-finalized",
+      }),
+      multipart: { partSize: 4 },
+      onProgress: ({ loaded }) => {
+        loads.push(loaded);
+      },
+    });
+    expect(uploaded.size).toBe(8);
+    expect(Math.max(...loads)).toBe(8);
+  });
+
   test("fresh sequential upload completes", async () => {
     const server = newServer();
     const files = makeFiles(server, "offset");

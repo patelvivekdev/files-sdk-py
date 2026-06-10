@@ -126,11 +126,20 @@ export const createOffsetHttpDriver = (params: {
             `chunk upload failed (HTTP ${res.status}).`
           );
         }
+        const range = res.headers.get("range");
+        if (range === null) {
+          // In this protocol a 308 *without* a Range header means the server
+          // has persisted no bytes (it's the same answer probe() maps to
+          // offset 0). Optimistically advancing past the chunk here would
+          // silently skip its bytes; throw instead — the per-chunk retry
+          // re-sends it, and a token resume re-probes the true offset.
+          throw new FilesError(
+            "Provider",
+            "chunk acknowledged without a Range header — the server reports no bytes persisted."
+          );
+        }
         return {
-          nextOffset: nextFromRange(
-            res.headers.get("range"),
-            offset + data.byteLength
-          ),
+          nextOffset: nextFromRange(range, offset + data.byteLength),
         };
       } catch (error) {
         throw wrapErr(error);

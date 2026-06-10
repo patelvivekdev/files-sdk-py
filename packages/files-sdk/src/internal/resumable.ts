@@ -606,7 +606,10 @@ const runOffset = async (
     return driver.complete([]);
   }
 
-  let offset = startOffset;
+  // Clamp: a probe of a session that already finalized server-side reports a
+  // sentinel offset past the end (the HTTP driver uses MAX_SAFE_INTEGER), and
+  // progress must never report more than `total` loaded.
+  let offset = Math.min(startOffset, total);
   state.loaded = offset;
   reportProgress(opts.onProgress, { loaded: offset, total });
   while (offset < total) {
