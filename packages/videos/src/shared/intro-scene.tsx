@@ -22,8 +22,10 @@ export const IntroScene: React.FC<{
   command: string;
   version: string;
   tagline: string;
-}> = ({ command, version, tagline }) => {
+  durationInFrames?: number;
+}> = ({ command, version, tagline, durationInFrames = 90 }) => {
   const frame = useCurrentFrame();
+  const exitStart = durationInFrames - 12;
 
   const reveal = interpolate(frame, [0, 18], [0, 1], {
     easing: Easing.bezier(0.16, 1, 0.3, 1),
@@ -34,12 +36,12 @@ export const IntroScene: React.FC<{
     extrapolateRight: "clamp",
   });
 
-  const exit = interpolate(frame, [78, 90], [1, 0], {
+  const exit = interpolate(frame, [exitStart, durationInFrames], [1, 0], {
     easing: Easing.bezier(0.4, 0, 1, 1),
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  const exitLift = interpolate(frame, [78, 90], [0, -16], {
+  const exitLift = interpolate(frame, [exitStart, durationInFrames], [0, -16], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
