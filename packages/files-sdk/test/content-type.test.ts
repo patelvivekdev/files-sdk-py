@@ -243,6 +243,28 @@ describe("contentType plugin — streams", () => {
     await files.upload("img", source);
     expect(sourceCancelled).toBe(true);
   });
+
+  test("a rejected stream upload cancels the source stream", async () => {
+    // onMismatch: "reject" throws before next() ever consumes the replay
+    // body — the peeked source (a request body, an fd) must be cancelled,
+    // not left locked and open.
+    let sourceCancelled = false;
+    const source = new ReadableStream<Uint8Array>({
+      cancel() {
+        sourceCancelled = true;
+      },
+      start(controller) {
+        const chunk = new Uint8Array(600);
+        chunk.set(ascii("<html><body>hi</body></html>"), 0);
+        controller.enqueue(chunk);
+      },
+    });
+    const files = withContentType({ onMismatch: "reject" });
+    await expect(
+      files.upload("avatar.png", source, { contentType: "image/png" })
+    ).rejects.toThrow(/declared "image\/png"/u);
+    expect(sourceCancelled).toBe(true);
+  });
 });
 
 describe("contentType plugin — pass-through verbs", () => {

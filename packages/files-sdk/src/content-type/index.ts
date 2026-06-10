@@ -396,7 +396,22 @@ export const contentType = (options: ContentTypeOptions = {}): FilesPlugin => {
       upload: async (op, next) => {
         if (op.body instanceof ReadableStream) {
           const { head, body } = await peekStream(op.body, SNIFF_BYTES);
-          return next(reconcile(op, head, body));
+          try {
+            return await next(reconcile(op, head, body));
+          } catch (error) {
+            // A rejecting reconcile() (onMismatch/onUnknown: "reject") — or a
+            // downstream failure before the replay body was consumed — would
+            // otherwise leave the caller's source stream locked by the peek
+            // reader and never cancelled, leaking its underlying request
+            // body / file handle. A locked replay body is owned by whoever
+            // locked it; cancelling here is best-effort.
+            if (!body.locked) {
+              await body.cancel().catch(() => {
+                // The upload error below is what matters.
+              });
+            }
+            throw error;
+          }
         }
         const head = await headBytes(op.body, SNIFF_BYTES);
         return next(reconcile(op, head, op.body));
