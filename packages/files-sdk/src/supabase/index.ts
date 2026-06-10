@@ -226,6 +226,40 @@ const normalizeBody = async (
   };
 };
 
+/**
+ * Map a full `Content-Disposition` header value (the SDK-wide
+ * `responseContentDisposition` contract) onto Supabase's `download` option.
+ * Supabase's `download: string` means "attachment **named** this", not a raw
+ * header — passing the header value through verbatim served a file literally
+ * named `attachment` (or a garbled name embedding the whole header). Bare
+ * `attachment` maps to `download: true` (server-chosen filename), a
+ * `filename=` parameter maps to that name, and anything else (e.g. `inline`)
+ * throws — Supabase cannot express it, and silently dropping a disposition
+ * override would be a stored-XSS hazard on user-uploaded content.
+ */
+const downloadOptionFor = (disposition: string): true | string => {
+  const [typePart, ...params] = disposition.split(";");
+  if ((typePart ?? "").trim().toLowerCase() !== "attachment") {
+    throw new FilesError(
+      "Provider",
+      `supabase: responseContentDisposition "${disposition}" is not supported — Supabase signed URLs can only force an attachment ("attachment" or 'attachment; filename="…"').`
+    );
+  }
+  for (const param of params) {
+    const eq = param.indexOf("=");
+    if (eq === -1) {
+      continue;
+    }
+    if (param.slice(0, eq).trim().toLowerCase() === "filename") {
+      const raw = param.slice(eq + 1).trim();
+      return raw.startsWith('"') && raw.endsWith('"') && raw.length >= 2
+        ? raw.slice(1, -1)
+        : raw;
+    }
+  }
+  return true;
+};
+
 const isStorageClientLike = (
   candidate: unknown
 ): candidate is { storage: StorageClient } =>
@@ -862,7 +896,7 @@ export const supabase = (opts: SupabaseAdapterOptions): SupabaseAdapter => {
         urlOpts?.expiresIn ?? defaultUrlExpiresIn,
         {
           ...(urlOpts?.responseContentDisposition && {
-            download: urlOpts.responseContentDisposition,
+            download: downloadOptionFor(urlOpts.responseContentDisposition),
           }),
         }
       );

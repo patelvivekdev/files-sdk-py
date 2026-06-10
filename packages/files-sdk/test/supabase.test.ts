@@ -759,7 +759,41 @@ describe("supabase adapter", () => {
       if (!signCall) {
         throw new Error("expected createSignedUrl");
       }
-      expect(signCall[2]?.download).toBe("attachment");
+      // Supabase's `download: string` means "attachment *named* this" — a
+      // bare "attachment" header value maps to `true` (server-chosen name),
+      // not to a file literally named "attachment".
+      expect(signCall[2]?.download).toBe(true);
+    });
+
+    test("responseContentDisposition with a filename maps it to download", async () => {
+      const adapter = makeAdapter();
+      await adapter.url("a.txt", {
+        responseContentDisposition: 'attachment; filename="report.pdf"',
+      });
+      const [signCall] = createSignedUrlMock.mock.calls;
+      if (!signCall) {
+        throw new Error("expected createSignedUrl");
+      }
+      expect(signCall[2]?.download).toBe("report.pdf");
+    });
+
+    test("responseContentDisposition with an unquoted filename works too", async () => {
+      const adapter = makeAdapter();
+      await adapter.url("a.txt", {
+        responseContentDisposition: "attachment; filename=report.pdf",
+      });
+      const [signCall] = createSignedUrlMock.mock.calls;
+      if (!signCall) {
+        throw new Error("expected createSignedUrl");
+      }
+      expect(signCall[2]?.download).toBe("report.pdf");
+    });
+
+    test("an inline responseContentDisposition is rejected", async () => {
+      const adapter = makeAdapter();
+      await expect(
+        adapter.url("a.txt", { responseContentDisposition: "inline" })
+      ).rejects.toThrow(/only force an attachment/u);
     });
 
     test("responseContentDisposition forces signing even when publicBaseUrl set", async () => {
