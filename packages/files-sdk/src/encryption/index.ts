@@ -195,6 +195,19 @@ export const generateEncryptionKey = (): Promise<CryptoKey> =>
  * - Objects without this plugin's marker (pre-existing or written elsewhere)
  *   **pass through** on read, so it's safe to enable on a mixed bucket.
  *
+ * Threat model: this protects **confidentiality at rest** — a party who reads
+ * raw provider bytes (or metadata) learns nothing about the plaintext beyond
+ * its length, and any tampering with the ciphertext, the wrapped DEK, the
+ * IVs, or the declared size fails loudly at decrypt time. It is **not**
+ * integrity binding between an envelope and its key: an attacker with raw
+ * provider *write* access can copy one object's whole envelope (ciphertext +
+ * `fsenc_*` metadata) onto another key, and a later download of that key will
+ * decrypt cleanly to the other object's plaintext. Binding envelopes to keys
+ * (à la KMS encryption context) would break the server-side `copy`/`move`
+ * and key-aliasing plugin compositions above by design — if cross-object
+ * splicing is in your threat model, isolate tenants with separate KEKs and
+ * lock down provider write access.
+ *
  * @param key the master key — a {@link CryptoKey} or raw 16/24/32 key bytes.
  * @example
  * ```ts
@@ -242,6 +255,20 @@ export const encryption = (key: EncryptionKey): FilesPlugin => {
             "Provider",
             `encryption: failed to decrypt "${op.key}" (wrong key or corrupted data)`,
             error
+          );
+        }
+        // GCM authenticates the body and the wrapped DEK, but `fsenc_size`
+        // is plain metadata — the one envelope field an attacker with raw
+        // provider write access could forge (head/list report it without
+        // decrypting). Where decryption *does* happen, verify it.
+        const declaredSize = Number.parseInt(metadata[META.size] ?? "", RADIX);
+        if (
+          !Number.isNaN(declaredSize) &&
+          declaredSize !== plaintext.byteLength
+        ) {
+          throw new FilesError(
+            "Provider",
+            `encryption: "${op.key}" decrypted to ${plaintext.byteLength} bytes but its envelope declares ${declaredSize} — the metadata has been tampered with`
           );
         }
         return createStoredFile(

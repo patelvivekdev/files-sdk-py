@@ -142,6 +142,30 @@ describe("encryption plugin — passthrough + failure", () => {
     });
     await expect(other.download("a.txt")).rejects.toThrow(/failed to decrypt/u);
   });
+
+  test("a forged fsenc_size is detected at download time", async () => {
+    // GCM authenticates the body and the wrapped DEK; `fsenc_size` is the one
+    // envelope field plain metadata tampering can forge. head()/list() can't
+    // verify it (they never decrypt), but a download must.
+    const adapter = fakeAdapter();
+    const files = new Files({
+      adapter,
+      plugins: [encryption(await generateEncryptionKey())],
+    });
+    await files.upload("a.txt", "hello");
+
+    // Tamper with the stored metadata directly against the provider.
+    const raw = new Files({ adapter });
+    const stored = await raw.download("a.txt");
+    await raw.upload("a.txt", new Uint8Array(await stored.arrayBuffer()), {
+      contentType: stored.type,
+      metadata: { ...stored.metadata, fsenc_size: "9999" },
+    });
+
+    await expect(files.download("a.txt")).rejects.toThrow(
+      /metadata has been tampered with/u
+    );
+  });
 });
 
 describe("encryption plugin — refused operations", () => {
