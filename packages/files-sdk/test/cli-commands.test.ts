@@ -43,6 +43,7 @@ const capture = (): Capture => {
   const origOut = process.stdout.write.bind(process.stdout) as WriteFn;
   const origErr = process.stderr.write.bind(process.stderr) as WriteFn;
   const origExit = process.exit.bind(process) as ExitFn;
+  const origExitCode = process.exitCode;
   (process.stdout as { write: WriteFn }).write = ((chunk: unknown) => {
     stdout.push(toStr(chunk));
     return true;
@@ -61,10 +62,22 @@ const capture = (): Capture => {
       (process.stdout as { write: WriteFn }).write = origOut;
       (process.stderr as { write: WriteFn }).write = origErr;
       (process as { exit: ExitFn }).exit = origExit;
+      // Commands signal failure via process.exitCode (so stdout can drain);
+      // reset it or a test's failure code would leak into the runner's own.
+      // Bun ignores assigning `undefined` here, so reset to 0 explicitly.
+      process.exitCode = origExitCode ?? 0;
     },
     stderr,
     stdout,
   };
+};
+
+/** The exit code a command signalled via `process.exitCode`, then reset. */
+const takeExitCode = (): number => {
+  const code = typeof process.exitCode === "number" ? process.exitCode : 0;
+  // Bun ignores assigning `undefined` to process.exitCode; reset with 0.
+  process.exitCode = 0;
+  return code;
 };
 
 const lastJson = (chunks: string[]): Record<string, unknown> => {
@@ -337,17 +350,16 @@ describe("cli/commands real (fs adapter)", () => {
     const local = path.join(root, "in.txt");
     await uploadFile("hp.txt", "x", local);
     cap.stdout.length = 0;
-    await expect(
-      runHead({ ...baseOpts(), keys: ["hp.txt", "nope.txt"] })
-    ).rejects.toThrow("__exit:1");
+    await runHead({ ...baseOpts(), keys: ["hp.txt", "nope.txt"] });
     const out = lastJson(cap.stdout) as {
       files: { key: string }[];
       errors: { key: string }[];
     };
     expect(out.files.map((f) => f.key)).toEqual(["hp.txt"]);
     expect(out.errors.map((e) => e.key)).toEqual(["nope.txt"]);
-    // NotFound maps to exit code 1.
-    expect(cap.exits).toEqual([1]);
+    // NotFound maps to exit code 1, signalled via process.exitCode so
+    // stdout can drain before the process ends.
+    expect(takeExitCode()).toBe(1);
   });
 
   test("exists prints true for present key and does not exit", async () => {
@@ -360,10 +372,8 @@ describe("cli/commands real (fs adapter)", () => {
   });
 
   test("exists exits 1 when key is missing", async () => {
-    await expect(
-      runExists({ ...baseOpts(), keys: ["missing"] })
-    ).rejects.toThrow("__exit:1");
-    expect(cap.exits).toEqual([1]);
+    await runExists({ ...baseOpts(), keys: ["missing"] });
+    expect(takeExitCode()).toBe(1);
     expect(lastJson(cap.stdout)).toEqual({ exists: false, key: "missing" });
   });
 
@@ -372,14 +382,15 @@ describe("cli/commands real (fs adapter)", () => {
     await uploadFile("ex-a.txt", "a", local);
     await uploadFile("ex-b.txt", "b", local);
     cap.stdout.length = 0;
-    await expect(
-      runExists({ ...baseOpts(), keys: ["ex-a.txt", "gone.txt", "ex-b.txt"] })
-    ).rejects.toThrow("__exit:1");
+    await runExists({
+      ...baseOpts(),
+      keys: ["ex-a.txt", "gone.txt", "ex-b.txt"],
+    });
     expect(lastJson(cap.stdout)).toEqual({
       existing: ["ex-a.txt", "ex-b.txt"],
       missing: ["gone.txt"],
     });
-    expect(cap.exits).toEqual([1]);
+    expect(takeExitCode()).toBe(1);
   });
 
   test("exists (many) exits 0 when every key exists", async () => {
@@ -703,16 +714,14 @@ describe("cli/commands new surface", () => {
     await write("ok.txt", "present");
     const outDir = await fsp.mkdtemp(path.join(os.tmpdir(), "files-sdk-out-"));
     tmpDirs.push(outDir);
-    await expect(
-      runDownload({ ...baseOpts(), keys: ["ok.txt", "gone.txt"], outDir })
-    ).rejects.toThrow("__exit:1");
+    await runDownload({ ...baseOpts(), keys: ["ok.txt", "gone.txt"], outDir });
     const out = lastJson(cap.stdout) as {
       downloaded: { key: string }[];
       errors: { key: string }[];
     };
     expect(out.downloaded.map((d) => d.key)).toEqual(["ok.txt"]);
     expect(out.errors.map((e) => e.key)).toEqual(["gone.txt"]);
-    expect(cap.exits).toEqual([1]);
+    expect(takeExitCode()).toBe(1);
   });
 
   test("download many dry-run echoes keys + outDir", async () => {

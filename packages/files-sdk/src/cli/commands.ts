@@ -127,7 +127,10 @@ const runUploadDir = async (
     opts
   );
   if (result.errors?.length) {
-    process.exit(exitCode(result.errors[0]?.error.code ?? "Provider"));
+    // Set the exit code rather than exiting: process.exit() right after a
+    // large emit() can truncate piped stdout mid-payload (POSIX pipe writes
+    // are asynchronous). The process ends once stdout drains.
+    process.exitCode = exitCode(result.errors[0]?.error.code ?? "Provider");
   }
 };
 
@@ -231,7 +234,10 @@ const runDownloadMany = async (
     opts
   );
   if (result.errors?.length) {
-    process.exit(exitCode(result.errors[0]?.error.code ?? "Provider"));
+    // Set the exit code rather than exiting: process.exit() right after a
+    // large emit() can truncate piped stdout mid-payload (POSIX pipe writes
+    // are asynchronous). The process ends once stdout drains.
+    process.exitCode = exitCode(result.errors[0]?.error.code ?? "Provider");
   }
 };
 
@@ -314,7 +320,10 @@ export const runHead = async (opts: HeadCmdOpts): Promise<void> => {
     opts
   );
   if (result.errors?.length) {
-    process.exit(exitCode(result.errors[0]?.error.code ?? "Provider"));
+    // Set the exit code rather than exiting: process.exit() right after a
+    // large emit() can truncate piped stdout mid-payload (POSIX pipe writes
+    // are asynchronous). The process ends once stdout drains.
+    process.exitCode = exitCode(result.errors[0]?.error.code ?? "Provider");
   }
 };
 
@@ -336,8 +345,9 @@ export const runExists = async (opts: ExistsCmdOpts): Promise<void> => {
     const exists = await files.exists(key);
     emit({ exists, key }, opts);
     if (!exists) {
-      // exit 1 = missing, matches `test -e` convention
-      process.exit(1);
+      // exit 1 = missing, matches `test -e` convention. Set the code rather
+      // than exiting so stdout drains first.
+      process.exitCode = 1;
     }
     return;
   }
@@ -348,10 +358,13 @@ export const runExists = async (opts: ExistsCmdOpts): Promise<void> => {
   const result = await files.exists(opts.keys, buildBulkOptions(opts));
   emit(result, opts);
   if (result.errors?.length) {
-    process.exit(exitCode(result.errors[0]?.error.code ?? "Provider"));
+    // Set the exit code rather than exiting: process.exit() right after a
+    // large emit() can truncate piped stdout mid-payload (POSIX pipe writes
+    // are asynchronous). The process ends once stdout drains.
+    process.exitCode = exitCode(result.errors[0]?.error.code ?? "Provider");
   }
   if (result.missing.length) {
-    process.exit(1);
+    process.exitCode = 1;
   }
 };
 
@@ -381,7 +394,10 @@ export const runDelete = async (opts: DeleteCmdOpts): Promise<void> => {
   const result = await files.delete(opts.keys, buildBulkOptions(opts));
   emit(result, opts);
   if (result.errors?.length) {
-    process.exit(exitCode(result.errors[0]?.error.code ?? "Provider"));
+    // Set the exit code rather than exiting: process.exit() right after a
+    // large emit() can truncate piped stdout mid-payload (POSIX pipe writes
+    // are asynchronous). The process ends once stdout drains.
+    process.exitCode = exitCode(result.errors[0]?.error.code ?? "Provider");
   }
 };
 
@@ -653,7 +669,10 @@ export const runTransfer = async (opts: TransferCmdOpts): Promise<void> => {
 
   emit(result, opts);
   if (result.errors?.length) {
-    process.exit(exitCode(result.errors[0]?.error.code ?? "Provider"));
+    // Set the exit code rather than exiting: process.exit() right after a
+    // large emit() can truncate piped stdout mid-payload (POSIX pipe writes
+    // are asynchronous). The process ends once stdout drains.
+    process.exitCode = exitCode(result.errors[0]?.error.code ?? "Provider");
   }
 };
 
@@ -709,6 +728,9 @@ export const runSync = async (opts: SyncCmdOpts): Promise<void> => {
 
   emit(result, opts);
   if (result.errors?.length) {
-    process.exit(exitCode(result.errors[0]?.error.code ?? "Provider"));
+    // Set the exit code rather than exiting: process.exit() right after a
+    // large emit() can truncate piped stdout mid-payload (POSIX pipe writes
+    // are asynchronous). The process ends once stdout drains.
+    process.exitCode = exitCode(result.errors[0]?.error.code ?? "Provider");
   }
 };

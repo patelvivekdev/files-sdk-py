@@ -35,6 +35,7 @@ const capture = (): Capture => {
   const origOut = process.stdout.write.bind(process.stdout) as WriteFn;
   const origErr = process.stderr.write.bind(process.stderr) as WriteFn;
   const origExit = process.exit.bind(process) as ExitFn;
+  const origExitCode = process.exitCode;
   (process.stdout as { write: WriteFn }).write = ((chunk: unknown) => {
     stdout.push(toStr(chunk));
     return true;
@@ -53,6 +54,10 @@ const capture = (): Capture => {
       (process.stdout as { write: WriteFn }).write = origOut;
       (process.stderr as { write: WriteFn }).write = origErr;
       (process as { exit: ExitFn }).exit = origExit;
+      // Commands may signal failure via process.exitCode; reset it or a
+      // test's failure code would leak into the runner's own exit status.
+      // Bun ignores assigning `undefined` here, so reset to 0 explicitly.
+      process.exitCode = origExitCode ?? 0;
     },
     stderr,
     stdout,
