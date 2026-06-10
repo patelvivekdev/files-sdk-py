@@ -310,7 +310,18 @@ describe("zip plugin — writing archives", () => {
     const files = withZip();
     const keys = Array.from({ length: 65_536 }, (_, i) => `k${i}`);
     await expect(collect(files.zip(keys))).rejects.toThrow(
-      "65536 entries exceed the ZIP format's limit of 65535"
+      "65536 entries reach the ZIP format's limit of 65535"
+    );
+  });
+
+  test("exactly 65535 entries are rejected too (the ZIP64 sentinel)", async () => {
+    // An EOCD count of 0xFFFF is the ZIP64 sentinel — this plugin's own
+    // unzip() (and ZIP64-aware readers) would treat such an archive as
+    // ZIP64 and refuse it, so the writer must not produce it.
+    const files = withZip();
+    const keys = Array.from({ length: 65_535 }, (_, i) => `k${i}`);
+    await expect(collect(files.zip(keys))).rejects.toThrow(
+      "65535 entries reach the ZIP format's limit of 65535"
     );
   });
 

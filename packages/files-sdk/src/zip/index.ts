@@ -119,9 +119,15 @@ const MAX_UINT32 = 0xff_ff_ff_ff;
 const ENCODER = new TextEncoder();
 const DECODER = new TextDecoder();
 
-/** Throw when a size or offset no longer fits the classic 32-bit fields. */
+/**
+ * Throw when a size or offset no longer fits the classic 32-bit fields.
+ * `>=`, not `>`: `0xFFFFFFFF` itself is the ZIP64 sentinel value, which this
+ * plugin's own reader (and any ZIP64-aware tool) treats as "the real value
+ * lives in a ZIP64 extra field" — writing it verbatim would produce an
+ * archive that can't be read back.
+ */
 const assertFits = (value: number, what: string): void => {
-  if (value > MAX_UINT32) {
+  if (value >= MAX_UINT32) {
     throw new FilesError(
       "Provider",
       `zip: ${what} exceeds 4 GiB, which needs ZIP64 — unsupported by this plugin`
@@ -311,10 +317,13 @@ const resolveEntries = async (
       keys.push(file.key);
     }
   }
-  if (keys.length > MAX_UINT16) {
+  // `>=`, not `>`: an entry count of exactly 0xFFFF is the ZIP64 sentinel,
+  // which readers (including this plugin's own unzip) treat as "the real
+  // count lives in a ZIP64 record".
+  if (keys.length >= MAX_UINT16) {
     throw new FilesError(
       "Provider",
-      `zip: ${keys.length} entries exceed the ZIP format's limit of 65535 — ZIP64 is unsupported by this plugin`
+      `zip: ${keys.length} entries reach the ZIP format's limit of 65535 — ZIP64 is unsupported by this plugin`
     );
   }
   const seen = new Set<string>();
