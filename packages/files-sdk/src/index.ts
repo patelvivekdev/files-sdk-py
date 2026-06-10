@@ -1804,12 +1804,18 @@ export class Files<A extends Adapter = Adapter> {
           },
           async (op) => {
             // A plugin re-routing to another verb takes the full single-op
-            // path; only the item's own `download` stays on this base.
+            // path; only the item's own `download` stays on this base —
+            // retry-free, but still under the constructor `signal`/`timeout`
+            // via the non-retryable #run.
             if (op.kind !== "download") {
               return this.#perform(op);
             }
             return this.#storedFile(
-              await this.#adapter.download(this.#path(op.key), op.options)
+              await this.#run(
+                op.options,
+                (o) => this.#adapter.download(this.#path(op.key), o),
+                false
+              )
             );
           }
         ),
@@ -1865,12 +1871,18 @@ export class Files<A extends Adapter = Adapter> {
           { bulk: true, key, kind: "head", options: undefined },
           async (op) => {
             // A plugin re-routing to another verb takes the full single-op
-            // path; only the item's own `head` stays on this base.
+            // path; only the item's own `head` stays on this base —
+            // retry-free, but still under the constructor `signal`/`timeout`
+            // via the non-retryable #run.
             if (op.kind !== "head") {
               return this.#perform(op);
             }
             return this.#storedFile(
-              await this.#adapter.head(this.#path(op.key), op.options)
+              await this.#run(
+                op.options,
+                (o) => this.#adapter.head(this.#path(op.key), o),
+                false
+              )
             );
           }
         ),
@@ -1930,11 +1942,17 @@ export class Files<A extends Adapter = Adapter> {
           { bulk: true, key, kind: "exists", options: undefined },
           (op) => {
             // A plugin re-routing to another verb takes the full single-op
-            // path; only the item's own `exists` stays on this base.
+            // path; only the item's own `exists` stays on this base —
+            // retry-free, but still under the constructor `signal`/`timeout`
+            // via the non-retryable #run.
             if (op.kind !== "exists") {
               return this.#perform(op);
             }
-            return this.#adapter.exists(this.#path(op.key), op.options);
+            return this.#run(
+              op.options,
+              (o) => this.#adapter.exists(this.#path(op.key), o),
+              false
+            );
           }
         ),
         key,
@@ -2013,11 +2031,17 @@ export class Files<A extends Adapter = Adapter> {
             (op) => {
               // A plugin re-routing to another verb (e.g. a snapshot `head` +
               // `copy`) takes the full single-op path; only the item's own
-              // `delete` stays on this base.
+              // `delete` stays on this base — retry-free, but still under
+              // the constructor `signal`/`timeout` via the non-retryable
+              // #run.
               if (op.kind !== "delete") {
                 return this.#perform(op);
               }
-              return this.#adapter.delete(this.#path(op.key), op.options);
+              return this.#run(
+                op.options,
+                (o) => this.#adapter.delete(this.#path(op.key), o),
+                false
+              );
             }
           ),
         opts
@@ -2057,11 +2081,17 @@ export class Files<A extends Adapter = Adapter> {
 
     const toKey = (path: string): string => keyByPath.get(path) ?? path;
 
-    const result = this.#adapter.deleteMany
-      ? await this.#adapter.deleteMany(paths, opts)
+    // Retry-free (as documented for bulk), but still under the constructor
+    // `signal`/`timeout` via the non-retryable #run. The native bulk
+    // primitive takes no per-call signal, so the whole batch runs under one
+    // #run; the fan-out fallback runs one per key.
+    const nativeDeleteMany = this.#adapter.deleteMany?.bind(this.#adapter);
+    const result = nativeDeleteMany
+      ? await this.#run(undefined, () => nativeDeleteMany(paths, opts), false)
       : await deleteManyWithFallback(
           paths,
-          (path) => this.#adapter.delete(path),
+          (path) =>
+            this.#run(undefined, (o) => this.#adapter.delete(path, o), false),
           opts
         );
 

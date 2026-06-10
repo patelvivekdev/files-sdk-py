@@ -1027,6 +1027,60 @@ describe("Files class", () => {
     }
   });
 
+  test("bulk reads honor the constructor signal", async () => {
+    const controller = new AbortController();
+    const files = new Files({
+      adapter: {
+        ...fakeAdapter(),
+        head(_key: string, opts?: OperationOptions): Promise<never> {
+          // oxlint-disable-next-line promise/avoid-new -- test needs a pending adapter call.
+          return new Promise((_resolve, reject) => {
+            opts?.signal?.addEventListener("abort", () => {
+              reject(new Error("adapter saw abort"));
+            });
+          });
+        },
+      },
+      signal: controller.signal,
+    });
+
+    const pending = files.head(["a.txt", "b.txt"]);
+    controller.abort(new Error("bulk stop"));
+
+    const result = await pending;
+    expect(result.files).toHaveLength(0);
+    expect(result.errors).toHaveLength(2);
+    for (const entry of result.errors ?? []) {
+      expect(entry.error.aborted).toBe(true);
+    }
+  });
+
+  test("bulk deletes honor the constructor timeout", async () => {
+    const files = new Files({
+      adapter: {
+        ...fakeAdapter(),
+        delete(_key: string, opts?: OperationOptions): Promise<never> {
+          // oxlint-disable-next-line promise/avoid-new -- test needs a pending adapter call.
+          return new Promise((_resolve, reject) => {
+            opts?.signal?.addEventListener("abort", () => {
+              reject(opts.signal?.reason);
+            });
+          });
+        },
+        // Force the per-key fan-out path past the hanging delete().
+        deleteMany: undefined,
+      },
+      timeout: 20,
+    });
+
+    const result = await files.delete(["slow-1", "slow-2"]);
+    expect(result.deleted).toHaveLength(0);
+    expect(result.errors).toHaveLength(2);
+    for (const entry of result.errors ?? []) {
+      expect(entry.error.timedOut).toBe(true);
+    }
+  });
+
   test("per-call signal aborts a pending operation even with a constructor signal", async () => {
     const constructorController = new AbortController();
     const callController = new AbortController();
