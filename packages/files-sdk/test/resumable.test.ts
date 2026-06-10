@@ -465,6 +465,54 @@ describe("resumable orchestrator (parts mode)", () => {
     expect(control.status).toBe("error");
   });
 
+  test("abort() racing begin() still discards the fresh session", async () => {
+    const server = newServer();
+    const started = Promise.withResolvers<null>();
+    const gate = Promise.withResolvers<null>();
+    const adapter: Adapter = {
+      copy: unsupported,
+      delete: unsupported,
+      download: unsupported,
+      exists: unsupported,
+      head: unsupported,
+      list: unsupported,
+      name: "fake-race",
+      raw: server,
+      resumableUpload: (key, opts) => {
+        const inner = createPartsDriver(server, key, opts);
+        return {
+          ...inner,
+          async begin(meta) {
+            started.resolve(null);
+            await gate.promise;
+            return inner.begin(meta);
+          },
+        };
+      },
+      signedUploadUrl: unsupported,
+      upload: unsupported,
+      url: unsupported,
+    };
+    const files = new Files({ adapter });
+    const control = new UploadControl();
+    const promise = files.upload("race.bin", new Uint8Array(8), {
+      control,
+      multipart: { partSize: 4 },
+    });
+    await started.promise;
+    // begin() is in flight: abort() finds no discard installed and returns.
+    const aborting = control.abort();
+    gate.resolve(null);
+    await expect(promise).rejects.toMatchObject({ aborted: true });
+    await aborting;
+    // The session begin() minted must be discarded, not resurrected onto the
+    // aborted control as a live token.
+    expect(server.drivers[0]?.discarded).toBe(true);
+    expect(control.session).toBeUndefined();
+    expect(server.partSessions.size).toBe(0);
+    expect(control.status).toBe("aborted");
+  });
+
   test("session getter exposes the live token", async () => {
     const server = newServer();
     const files = makeFiles(server, "parts");

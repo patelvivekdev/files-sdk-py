@@ -680,6 +680,23 @@ export const runResumableUpload = async (
     }
 
     state.discard = () => driver.discard();
+    // `abort()` may have raced `begin()`/`probe()`: it found no `state.discard`
+    // installed yet (so nothing was cleaned up) and cleared the session — and
+    // the assignments above just re-populated both on an aborted control,
+    // resurrecting a live token and leaking the provider-side session (e.g. a
+    // billed S3 multipart upload). Honor abort()'s terminal contract here.
+    // (The controller's signal only aborts via `control.abort()`, never via
+    // an external `opts.signals` entry.)
+    if (state.abortController.signal.aborted) {
+      try {
+        await driver.discard();
+      } catch {
+        // Best-effort cleanup — the upload is already cancelled.
+      }
+      state.discard = undefined;
+      state.session = undefined;
+      throw abortError(state.abortController.signal.reason);
+    }
     const signals = [state.abortController.signal, ...opts.signals];
 
     const result =
