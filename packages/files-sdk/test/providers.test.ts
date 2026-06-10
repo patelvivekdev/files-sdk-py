@@ -43,6 +43,7 @@ const NON_PROVIDER_EXPORTS = new Set([
   "./usage",
   "./validation",
   "./versioning",
+  "./zip",
 ]);
 
 const packageJson = JSON.parse(

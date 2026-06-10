@@ -86,6 +86,10 @@
       "types": "./dist/failover/index.d.ts",
       "import": "./dist/failover/index.js"
     },
+    "./zip": {
+      "types": "./dist/zip/index.d.ts",
+      "import": "./dist/zip/index.js"
+    },
     "./s3": {
       "types": "./dist/s3/index.d.ts",
       "import": "./dist/s3/index.js"
