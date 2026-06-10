@@ -5,11 +5,19 @@ import { buildProgram } from "./program.js";
 // Downstream consumers (head, less, piping into another process) close their
 // end of the pipe before we finish writing. The default Node behavior is to
 // throw EPIPE and exit nonzero with a stack trace — unfriendly for what is
-// normal UNIX usage. Treat closed-downstream as success.
+// normal UNIX usage. Treat closed-downstream as success. Any other stdout
+// error (EIO, EBADF, a full disk behind a redirect) is a real failure:
+// registering this handler suppresses the default throw, so it must report
+// and exit non-zero itself rather than silently "succeed" having written
+// nothing.
 process.stdout.on("error", (err: NodeJS.ErrnoException) => {
   if (err.code === "EPIPE") {
     process.exit(0);
   }
+  process.stderr.write(
+    `error (Provider): stdout write failed: ${err.message}\n`
+  );
+  process.exit(2);
 });
 
 // Always run on import — this module is wired up as the package's `bin`
