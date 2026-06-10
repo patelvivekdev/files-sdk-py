@@ -407,6 +407,64 @@ describe("resumable orchestrator (parts mode)", () => {
     ).rejects.toThrow(/transient/u);
   });
 
+  test("a failed part stops sibling workers and pins status at error", async () => {
+    const server = newServer();
+    // Part 2 fails permanently (more failures than any retry budget here).
+    server.fail.set("halt.bin:2", 1000);
+    const files = makeFiles(server, "parts");
+    const control = new UploadControl();
+    // 8 parts of 4 bytes, two workers.
+    await expect(
+      files.upload("halt.bin", new Uint8Array(32), {
+        control,
+        multipart: { concurrency: 2, partSize: 4 },
+        retries: 0,
+      })
+    ).rejects.toThrow(/transient/u);
+
+    expect(control.status).toBe("error");
+    const [stats] = server.drivers;
+    const callsAtRejection = stats?.uploadCalls ?? 0;
+    // The failure latch stops new dispatches: nowhere near all 8 parts were
+    // attempted by the time the upload rejected.
+    expect(callsAtRejection).toBeLessThan(8);
+
+    // Nothing keeps uploading in the background after rejection…
+    await tick();
+    await tick();
+    expect(stats?.uploadCalls ?? 0).toBe(callsAtRejection);
+    // …and resume() can't resurrect the dead run or flip its status back.
+    control.resume();
+    await tick();
+    await tick();
+    expect(stats?.uploadCalls ?? 0).toBe(callsAtRejection);
+    expect(control.status).toBe("error");
+  });
+
+  test("a part failure wakes a worker parked in pause()", async () => {
+    const server = newServer();
+    server.fail.set("parked.bin:2", 1000);
+    const files = makeFiles(server, "parts");
+    const control = new UploadControl();
+    // Worker A parks on the pause gate before picking up part 3; worker B's
+    // part 2 then fails. The run must reject without needing a resume().
+    let paused = false;
+    const promise = files.upload("parked.bin", new Uint8Array(16), {
+      control,
+      multipart: { concurrency: 2, partSize: 4 },
+      onProgress: ({ loaded }) => {
+        // Pause as soon as part 1 lands, so the next dispatch parks.
+        if (loaded >= 4 && !paused) {
+          paused = true;
+          control.pause();
+        }
+      },
+      retries: 0,
+    });
+    await expect(promise).rejects.toThrow(/transient/u);
+    expect(control.status).toBe("error");
+  });
+
   test("session getter exposes the live token", async () => {
     const server = newServer();
     const files = makeFiles(server, "parts");

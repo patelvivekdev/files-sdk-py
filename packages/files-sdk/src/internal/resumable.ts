@@ -432,17 +432,31 @@ const reportProgress = (
   }
 };
 
-/** Block while paused; throw if aborted. Checked before each chunk dispatch. */
-const pauseGate = async (state: ControlInternals): Promise<void> => {
-  while (state.paused && state.status !== "aborted") {
+/**
+ * Block while paused; throw if aborted. Checked before each chunk dispatch.
+ * `runSignal` is the run-scoped failure latch: when a sibling worker's part
+ * fails permanently, parked workers must wake up and bail instead of waiting
+ * for a `resume()` that would march them into a dead run — and must not
+ * clobber the control's terminal status back to `"uploading"` on the way out.
+ */
+const pauseGate = async (
+  state: ControlInternals,
+  runSignal?: AbortSignal
+): Promise<void> => {
+  // oxlint-disable-next-line eslint/no-unmodified-loop-condition -- `runSignal.aborted` flips externally (sibling worker failure), not in the loop body.
+  while (state.paused && state.status !== "aborted" && !runSignal?.aborted) {
     state.status = "paused";
     // oxlint-disable-next-line promise/avoid-new -- resolved by resume()/abort().
     await new Promise<void>((resolve) => {
       state.resumeWaiters.push(resolve);
+      runSignal?.addEventListener("abort", () => resolve(), { once: true });
     });
   }
   if (state.status === "aborted") {
     throw abortError(state.abortController.signal.reason);
+  }
+  if (runSignal?.aborted) {
+    return;
   }
   state.status = "uploading";
 };
@@ -496,6 +510,14 @@ const runParts = async (
   reportProgress(opts.onProgress, { loaded, total });
 
   let next = 1;
+  // The first part to fail permanently fails the whole run. Without a shared
+  // latch, `upload()` would reject while the sibling workers kept slicing and
+  // uploading every remaining part in the background (and a later `resume()`
+  // could wake paused workers into the dead run). The latch stops new
+  // dispatches; the run-scoped abort cancels in-flight sibling attempts.
+  let failure: FilesError | undefined;
+  const runAbort = new AbortController();
+  const workerSignals = [...signals, runAbort.signal];
   const worker = async (): Promise<void> => {
     for (;;) {
       let partNumber: number | undefined;
@@ -510,23 +532,35 @@ const runParts = async (
       if (partNumber === undefined) {
         return;
       }
-      await pauseGate(state);
+      await pauseGate(state, runAbort.signal);
+      if (failure !== undefined) {
+        return;
+      }
       const start = (partNumber - 1) * partSize;
-      const data = await source.slice(start, Math.min(start + partSize, total));
-      const meta = await attempt(
-        (signal) =>
-          driver.uploadPart({
-            data,
-            partNumber: partNumber as number,
-            ...(signal && { signal }),
-          }),
-        opts,
-        signals
-      );
-      results.push(meta);
-      loaded += data.byteLength;
-      state.loaded = loaded;
-      reportProgress(opts.onProgress, { loaded, total });
+      try {
+        const data = await source.slice(
+          start,
+          Math.min(start + partSize, total)
+        );
+        const meta = await attempt(
+          (signal) =>
+            driver.uploadPart({
+              data,
+              partNumber: partNumber as number,
+              ...(signal && { signal }),
+            }),
+          opts,
+          workerSignals
+        );
+        results.push(meta);
+        loaded += data.byteLength;
+        state.loaded = loaded;
+        reportProgress(opts.onProgress, { loaded, total });
+      } catch (error) {
+        failure ??= FilesError.wrap(error);
+        runAbort.abort();
+        return;
+      }
     }
   };
 
@@ -536,6 +570,10 @@ const runParts = async (
       worker
     )
   );
+  if (failure !== undefined) {
+    // oxlint-disable-next-line eslint/no-throw-literal -- always a FilesError, wrapped in the worker catch.
+    throw failure;
+  }
   results.sort((a, b) => a.partNumber - b.partNumber);
   return driver.complete(results);
 };
