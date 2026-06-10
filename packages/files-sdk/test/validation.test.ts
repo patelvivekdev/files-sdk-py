@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
-import { Files } from "../src/index.js";
+import { Files, FilesError } from "../src/index.js";
 import type { Adapter } from "../src/index.js";
-import { validation } from "../src/validation/index.js";
+import { validation, ValidationError } from "../src/validation/index.js";
 import type { ValidationOptions } from "../src/validation/index.js";
 import { fakeAdapter } from "./fake-adapter.js";
 
@@ -18,6 +18,15 @@ const streamOf = (bytes: Uint8Array): ReadableStream<Uint8Array> =>
       controller.close();
     },
   });
+
+const caught = async (promise: Promise<unknown>): Promise<unknown> => {
+  try {
+    await promise;
+  } catch (error) {
+    return error;
+  }
+  throw new Error("expected the operation to throw");
+};
 
 describe("validation plugin — size", () => {
   test("rejects an upload over maxSize", async () => {
@@ -163,6 +172,53 @@ describe("validation plugin — signed uploads", () => {
     ).rejects.toThrow(/not allowed/u);
     const signed = await files.signedUploadUrl("ok.txt", { expiresIn: 60 });
     expect(signed.url).toContain("ok.txt");
+  });
+});
+
+describe("validation plugin — error discrimination", () => {
+  test("an over-maxSize failure has reason size", async () => {
+    const files = withValidation({ maxSize: 10 });
+    const error = await caught(files.upload("big.txt", "x".repeat(20)));
+    expect(error).toBeInstanceOf(ValidationError);
+    expect((error as ValidationError).reason).toBe("size");
+  });
+
+  test("an under-minSize failure has reason size", async () => {
+    const files = withValidation({ minSize: 5 });
+    const error = await caught(files.upload("tiny.txt", "hi"));
+    expect(error).toBeInstanceOf(ValidationError);
+    expect((error as ValidationError).reason).toBe("size");
+  });
+
+  test("a disallowed type has reason type", async () => {
+    const files = withValidation({ allowedTypes: ["image/*"] });
+    const error = await caught(files.upload("notes.txt", "hello"));
+    expect(error).toBeInstanceOf(ValidationError);
+    expect((error as ValidationError).reason).toBe("type");
+  });
+
+  test("a disallowed key has reason key", async () => {
+    const files = withValidation({ key: /^[\w.-]+$/u });
+    const error = await caught(files.upload("bad key.txt", "x"));
+    expect(error).toBeInstanceOf(ValidationError);
+    expect((error as ValidationError).reason).toBe("key");
+  });
+
+  test("stays a FilesError with code Provider for existing catches", async () => {
+    const files = withValidation({ maxSize: 10 });
+    const error = await caught(files.upload("big.txt", "x".repeat(20)));
+    expect(error).toBeInstanceOf(FilesError);
+    expect((error as FilesError).code).toBe("Provider");
+    expect((error as Error).name).toBe("ValidationError");
+  });
+
+  test("the signedUploadUrl fail-closed throw is not a ValidationError", async () => {
+    const files = withValidation({ maxSize: 10 });
+    const error = await caught(
+      files.signedUploadUrl("a.txt", { expiresIn: 60 })
+    );
+    expect(error).toBeInstanceOf(FilesError);
+    expect(error).not.toBeInstanceOf(ValidationError);
   });
 });
 

@@ -11,6 +11,43 @@ import { inferTypeFromName } from "../internal/mime.js";
  */
 export type KeyRule = RegExp | ((key: string) => boolean);
 
+/**
+ * Which rule a {@link ValidationError} failed: the `key` naming rule, the
+ * `size` bounds (`maxSize` / `minSize` — the message says which), or the
+ * `allowedTypes` list (`type`).
+ */
+export type ValidationReason = "key" | "size" | "type";
+
+/**
+ * Thrown by {@link validation} when a write fails one of its rules. A regular
+ * {@link FilesError} (`code: "Provider"`) with a {@link ValidationReason}
+ * discriminant, so callers can branch on *which* rule failed without parsing
+ * the message:
+ *
+ * ```ts
+ * try {
+ *   await files.upload(key, body);
+ * } catch (e) {
+ *   if (e instanceof ValidationError && e.reason === "type") {
+ *     // reject with "unsupported file type"
+ *   }
+ * }
+ * ```
+ *
+ * Note the `signedUploadUrl()` fail-closed throw is **not** a
+ * `ValidationError` — that's the plugin refusing an unenforceable operation,
+ * not the file failing a rule.
+ */
+export class ValidationError extends FilesError {
+  readonly reason: ValidationReason;
+
+  constructor(reason: ValidationReason, message: string) {
+    super("Provider", message);
+    this.name = "ValidationError";
+    this.reason = reason;
+  }
+}
+
 export interface ValidationOptions {
   /** Reject uploads larger than this many bytes. */
   maxSize?: number;
@@ -75,8 +112,9 @@ const resolveUploadType = (
 /**
  * A fail-closed guard that vets writes **before they happen** — a max/min size,
  * an allowed-MIME-type list, and a key-naming rule. It rejects a bad `upload`
- * (and a `copy` / `move` to a disallowed key) by throwing, so no bytes ever
- * reach the adapter.
+ * (and a `copy` / `move` to a disallowed key) by throwing a
+ * {@link ValidationError} — its `reason` says which rule failed — so no bytes
+ * ever reach the adapter.
  *
  * Unlike `compression()` / `encryption()`, it never transforms the body or
  * writes metadata, so **reads, `url()`, `copy`, and `move` pass straight
@@ -130,8 +168,8 @@ export const validation = (options: ValidationOptions = {}): FilesPlugin => {
     const ok =
       typeof keyRule === "function" ? keyRule(value) : keyRule.test(value);
     if (!ok) {
-      throw new FilesError(
-        "Provider",
+      throw new ValidationError(
+        "key",
         `validation: key "${value}" is not allowed`
       );
     }
@@ -139,14 +177,14 @@ export const validation = (options: ValidationOptions = {}): FilesPlugin => {
 
   const assertSize = (size: number, key: string): void => {
     if (maxSize !== undefined && size > maxSize) {
-      throw new FilesError(
-        "Provider",
+      throw new ValidationError(
+        "size",
         `validation: "${key}" is ${size} bytes, over the ${maxSize}-byte limit`
       );
     }
     if (minSize !== undefined && size < minSize) {
-      throw new FilesError(
-        "Provider",
+      throw new ValidationError(
+        "size",
         `validation: "${key}" is ${size} bytes, under the ${minSize}-byte minimum`
       );
     }
@@ -182,8 +220,8 @@ export const validation = (options: ValidationOptions = {}): FilesPlugin => {
             op.key
           );
           if (!typeIsAllowed(type, allowedTypes)) {
-            throw new FilesError(
-              "Provider",
+            throw new ValidationError(
+              "type",
               `validation: "${op.key}" has type "${baseType(type)}", which is not one of the allowed types (${allowedTypes.join(", ")})`
             );
           }

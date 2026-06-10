@@ -61,6 +61,28 @@ await files.upload("doc.pdf", bytes); // throws - application/pdf not allowed
 validation({ key: (key) => key.startsWith(`${tenantId}/`) });
 ```
 
+## Telling failures apart
+
+Every rejection is a `ValidationError` - a regular `FilesError` (`code: "Provider"`) with a `reason` discriminant of `"size"`, `"type"`, or `"key"` - so you can branch on which rule failed without parsing the message:
+
+```ts lineNumbers
+import { ValidationError } from "files-sdk/validation";
+
+try {
+  await files.upload(key, body);
+} catch (error) {
+  if (error instanceof ValidationError && error.reason === "type") {
+    return reply(415, "unsupported file type");
+  }
+  if (error instanceof ValidationError && error.reason === "size") {
+    return reply(413, "file too large or too small");
+  }
+  throw error;
+}
+```
+
+`maxSize` and `minSize` share `reason: "size"` - the message says which bound was crossed. The `signedUploadUrl()` fail-closed throw (below) is a plain `FilesError`, **not** a `ValidationError`: that's the plugin refusing an unenforceable operation, not your file failing a rule.
+
 ## Ordering
 
 Put `validation()` **first** so it vets the caller's original key and bytes before anything downstream transforms them:
