@@ -166,5 +166,11 @@ describe("retry math", () => {
       aborted: true,
     });
     expect(canRetry(aborted, 0, 2)).toBe(false);
+    // Deterministic failures (range ignored, bad delimiter) opt out of the
+    // Provider-implies-transient presumption.
+    const permanent = new FilesError("Provider", "x", undefined, {
+      permanent: true,
+    });
+    expect(canRetry(permanent, 0, 2)).toBe(false);
   });
 });

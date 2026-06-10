@@ -139,9 +139,14 @@ export const assertRangeHonored = (
   providerLabel: string
 ): void => {
   if (status !== 206) {
+    // `permanent`: this throws from inside the retryable adapter call, but a
+    // host that ignores Range will ignore it on every retry too — re-issuing
+    // the GET just re-transfers the whole object with backoff in between.
     throw new FilesError(
       "Provider",
-      `${providerLabel}: the server ignored the requested byte range (HTTP ${status}, expected 206 Partial Content). The object's host does not support range requests.`
+      `${providerLabel}: the server ignored the requested byte range (HTTP ${status}, expected 206 Partial Content). The object's host does not support range requests.`,
+      undefined,
+      { permanent: true }
     );
   }
 };
@@ -158,9 +163,13 @@ export const assertSlashDelimiter = (
   delimiter: string
 ): void => {
   if (delimiter !== "/") {
+    // `permanent`: a validation failure inside the retryable adapter call —
+    // the delimiter won't become supported on a retry.
     throw new FilesError(
       "Provider",
-      `${providerLabel}: only supports the "/" delimiter for folder listing`
+      `${providerLabel}: only supports the "/" delimiter for folder listing`,
+      undefined,
+      { permanent: true }
     );
   }
 };

@@ -19,6 +19,14 @@ export class FilesError extends Error {
    */
   readonly timedOut: boolean;
   /**
+   * `true` when the failure is deterministic — re-issuing the identical
+   * request can only fail the same way (a host that ignores `Range`, a
+   * delimiter the provider can't honor). `Provider`-coded errors are
+   * otherwise presumed transient and retried; this flag opts a specific
+   * failure out of that.
+   */
+  readonly permanent: boolean;
+  /**
    * The original provider error, preserved for debugging.
    *
    * **Logging note:** provider errors (especially from `@aws-sdk`) can carry
@@ -33,13 +41,14 @@ export class FilesError extends Error {
     code: FilesErrorCode,
     message: string,
     cause?: unknown,
-    opts?: { aborted?: boolean; timedOut?: boolean }
+    opts?: { aborted?: boolean; timedOut?: boolean; permanent?: boolean }
   ) {
     super(message);
     this.name = "FilesError";
     this.code = code;
     this.aborted = opts?.aborted === true;
     this.timedOut = opts?.timedOut === true;
+    this.permanent = opts?.permanent === true;
     this.cause = cause;
   }
 

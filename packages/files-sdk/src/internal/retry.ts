@@ -207,12 +207,15 @@ export const retryBackoff = (
 
 /**
  * Whether a failed attempt should be retried: under the attempt cap, a
- * transient `Provider` error, and not an abort (aborts and timeouts are
- * deliberate and never retried).
+ * transient `Provider` error, not an abort (aborts and timeouts are
+ * deliberate and never retried), and not flagged `permanent` (a
+ * deterministic failure re-issuing the request can't fix).
  */
 export const canRetry = (
   error: FilesError,
   attempt: number,
   maxAttempts: number
 ): boolean =>
-  attempt < maxAttempts && error.code === "Provider" && !error.aborted;
+  attempt < maxAttempts &&
+  error.code === "Provider" &&
+  !(error.aborted || error.permanent);
