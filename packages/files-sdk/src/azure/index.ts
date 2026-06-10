@@ -344,6 +344,11 @@ const createAzureResumableDriver = (
     },
     async probe(): Promise<{ committedParts: PartMeta[] }> {
       try {
+        // "Committed" here means "staged and skippable", not durable: Azure
+        // garbage-collects uncommitted blocks after ~7 days. That can't cause
+        // a silent gap — complete()'s commitBlockList names every block id,
+        // and Azure rejects the commit (InvalidBlockList) if any expired, so
+        // a stale resume fails loudly and a retry re-probes correctly.
         const list = await blockBlob.getBlockList("uncommitted");
         const committedParts: PartMeta[] = [];
         for (const block of list.uncommittedBlocks ?? []) {
