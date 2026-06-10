@@ -393,6 +393,27 @@ describe("tiering — tier() / tierOf()", () => {
       /nothing stored for "ghost"/u
     );
   });
+
+  test("tierOf()/tier() honor the instance prefix", async () => {
+    const hot = fakeAdapter();
+    const cold = fakeAdapter();
+    const files = createFiles({
+      adapter: hot,
+      plugins: [tiering({ cold, route: prefixRoute })],
+      prefix: "tenant1",
+    }) as Harness["files"];
+
+    // The wrap path stores under "tenant1/doc.txt" on the hot adapter.
+    await files.upload("doc.txt", "hello");
+    expect(await files.exists("doc.txt")).toBe(true);
+    // The extend path must address the same prefixed hot-tier key.
+    expect(await files.tierOf("doc.txt")).toBe("hot");
+
+    await files.tier("doc.txt", "cold");
+    expect(hot.has("tenant1/doc.txt")).toBe(false);
+    // The cold tier receives caller-facing keys (no prefix) by design.
+    expect(cold.has("doc.txt")).toBe(true);
+  });
 });
 
 describe("tiering — copy with a missing source under fallback", () => {

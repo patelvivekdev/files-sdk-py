@@ -1410,6 +1410,17 @@ export class Files<A extends Adapter = Adapter> {
     return this.#adapter;
   }
 
+  /**
+   * The instance's key prefix (normalized — no leading/trailing slashes), or
+   * `""` when none was configured. Plugins that build an internal
+   * {@link Files} over {@link Files.adapter} (e.g. `extend` methods that
+   * address the same store directly) must re-apply it, or their keys won't
+   * line up with operations that ran through the instance.
+   */
+  get prefix(): string {
+    return this.#prefix;
+  }
+
   readonly(): Files<A> {
     return new Files({
       ...this.#defaults,

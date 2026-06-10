@@ -322,8 +322,8 @@ const buildCursor = (
  * - Place it **last** (innermost) so body-transforming plugins
  *   (`encryption()`, `compression()`) wrap it and apply to **both** tiers.
  * - Address objects by caller-facing keys: the cold adapter does **not** receive
- *   the instance `prefix`, so configure its own bucket / container and avoid a
- *   client `prefix` on a tiering instance.
+ *   the instance `prefix` (configure its own bucket / container), while the hot
+ *   tier — including {@link TieringApi.tierOf} / {@link TieringApi.tier} — does.
  *
  * @param options `{ cold, route, fallback? }` — see {@link TieringOptions}.
  * @example
@@ -539,8 +539,16 @@ export const tiering = (options: TieringOptions): FilesPlugin<TieringApi> => {
     extend: (files) => {
       // The hot tier, addressed directly for the extend methods (which have no
       // `next`). Built over the instance's own adapter so it never re-enters the
-      // tiering wrap — `files.tierOf(...)` would otherwise recurse.
-      const hot = runnerFor(new Files({ adapter: files.adapter }));
+      // tiering wrap — `files.tierOf(...)` would otherwise recurse. The instance
+      // `prefix` must be re-applied here: the wrap path's hot runner goes
+      // through `next` (which prefixes), so without it tierOf()/tier() would
+      // address different hot-tier keys than every other operation.
+      const hot = runnerFor(
+        new Files({
+          adapter: files.adapter,
+          ...(files.prefix && { prefix: files.prefix }),
+        })
+      );
       return {
         tier: async (key, target) => {
           const current = await locate(hot, key);
