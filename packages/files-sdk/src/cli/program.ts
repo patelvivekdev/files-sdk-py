@@ -32,11 +32,13 @@ const pkg = createRequire(import.meta.url)("../../package.json") as {
 const VERSION = pkg.version;
 
 const intArg = (raw: string): number => {
-  const n = Number.parseInt(raw, 10);
-  if (!Number.isFinite(n)) {
+  // Strict: `parseInt` would silently truncate trailing garbage, turning
+  // `--part-size 5MB` into 5 bytes, `--timeout 1s` into 1ms, `--limit 1.9`
+  // into 1.
+  if (!/^-?\d+$/u.test(raw.trim())) {
     throw new TypeError(`expected an integer, got: ${raw}`);
   }
-  return n;
+  return Number.parseInt(raw, 10);
 };
 
 const collect = (value: string, prev: string[] | undefined): string[] => {

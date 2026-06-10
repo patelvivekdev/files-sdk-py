@@ -415,6 +415,34 @@ describe("cli/program parseAsync (fs end-to-end)", () => {
     ).rejects.toThrow(/expected an integer/u);
   });
 
+  test("intArg rejects trailing garbage instead of truncating it", async () => {
+    // `parseInt` would turn "5MB" into 5 — a 5-byte part size — silently.
+    await expect(
+      run(
+        "--provider",
+        "fs",
+        "--root",
+        root,
+        "--dry-run",
+        "list",
+        "--limit",
+        "5MB"
+      )
+    ).rejects.toThrow(/expected an integer/u);
+    await expect(
+      run(
+        "--provider",
+        "fs",
+        "--root",
+        root,
+        "--dry-run",
+        "list",
+        "--limit",
+        "1.9"
+      )
+    ).rejects.toThrow(/expected an integer/u);
+  });
+
   test("mcp action invokes startMcpServer on the injected mcp module", async () => {
     const before = mcpStartCalls;
     await run("--provider", "fs", "--root", root, "mcp");
