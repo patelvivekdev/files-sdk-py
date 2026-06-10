@@ -285,16 +285,22 @@ export const parseRange = (raw?: string): ByteRange | undefined => {
   return end === undefined ? { start } : { end, start };
 };
 
-export const parseJson = <T = unknown>(raw?: string): T | undefined => {
+export const parseJson = <T = unknown>(
+  raw?: string,
+  flag = "--config-json"
+): T | undefined => {
   if (!raw) {
     return undefined;
   }
   try {
     return JSON.parse(raw) as T;
   } catch (error) {
+    // Name the flag the user actually passed — this also parses transfer/
+    // sync `--to`, and blaming --config-json there sends them debugging the
+    // wrong flag.
     throw new FilesError(
       "Provider",
-      `invalid JSON in --config-json: ${(error as Error).message}`
+      `invalid JSON in ${flag}: ${(error as Error).message}`
     );
   }
 };

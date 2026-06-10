@@ -88,6 +88,11 @@ describe("cli/io", () => {
 
   test("parseJson throws FilesError on malformed JSON", () => {
     expect(() => parseJson("{bad")).toThrow(FilesError);
+    // The default attribution names --config-json…
+    expect(() => parseJson("{bad")).toThrow(/--config-json/u);
+    // …and callers parsing other flags name theirs (transfer/sync `--to`
+    // would otherwise blame a flag the user never passed).
+    expect(() => parseJson("{bad", "--to")).toThrow(/--to/u);
   });
 
   test("parseRange parses start-end and start- forms", () => {

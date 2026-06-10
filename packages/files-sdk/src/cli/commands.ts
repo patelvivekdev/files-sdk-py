@@ -610,7 +610,7 @@ export const runTransfer = async (opts: TransferCmdOpts): Promise<void> => {
   // The source comes from the standard global flags (so the global
   // --key-prefix scopes it); the destination is a separate provider, supplied
   // as a JSON blob of the same option shape.
-  const destConfig = parseJson<GlobalCliOptions>(opts.to);
+  const destConfig = parseJson<GlobalCliOptions>(opts.to, "--to");
   if (!destConfig || typeof destConfig !== "object") {
     throw new FilesError(
       "Provider",
@@ -674,7 +674,7 @@ export interface SyncCmdOpts extends CommonRunOpts {
 export const runSync = async (opts: SyncCmdOpts): Promise<void> => {
   // Same shape as `transfer`: the source comes from the global flags, the
   // destination is a separate provider supplied as a JSON blob.
-  const destConfig = parseJson<GlobalCliOptions>(opts.to);
+  const destConfig = parseJson<GlobalCliOptions>(opts.to, "--to");
   if (!destConfig || typeof destConfig !== "object") {
     throw new FilesError(
       "Provider",
