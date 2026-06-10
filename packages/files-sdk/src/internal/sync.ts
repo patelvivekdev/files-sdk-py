@@ -245,11 +245,25 @@ const runUploads = async (
         as: "stream",
         ...ctx.signalOpt,
       });
-      await dest.upload(destKey, body.stream(), {
-        contentType: body.type,
-        ...(body.metadata ? { metadata: body.metadata } : {}),
-        ...ctx.signalOpt,
-      });
+      const stream = body.stream();
+      try {
+        await dest.upload(destKey, stream, {
+          contentType: body.type,
+          ...(body.metadata ? { metadata: body.metadata } : {}),
+          ...ctx.signalOpt,
+        });
+      } catch (error) {
+        // The destination failed without draining the source — cancel the
+        // open stream so its HTTP response / file handle is released instead
+        // of leaking one per failed key. A locked stream is held by the
+        // failed consumer; nothing to release here.
+        if (!stream.locked) {
+          await stream.cancel().catch(() => {
+            // Best-effort cleanup — the per-key error is what matters.
+          });
+        }
+        throw error;
+      }
       ctx.report(file.key, "uploaded");
       return file.key;
     },

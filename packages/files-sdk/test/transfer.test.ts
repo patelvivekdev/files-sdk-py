@@ -124,6 +124,48 @@ describe("transfer", () => {
     expect(await dest.exists("bad.txt")).toBe(false);
   });
 
+  test("a failed destination upload cancels the open source stream", async () => {
+    let cancelled = 0;
+    const sourceAdapter = fakeAdapter();
+    const original = sourceAdapter.download.bind(sourceAdapter);
+    const source = new Files({
+      adapter: {
+        ...sourceAdapter,
+        async download(key: string, opts?: unknown): Promise<StoredFile> {
+          const file = await original(key, opts as never);
+          // Wrap the body in a stream whose cancellation we can observe —
+          // this is the HTTP response / fd that would leak per failed key.
+          return {
+            ...file,
+            stream: () =>
+              new ReadableStream<Uint8Array>({
+                cancel() {
+                  cancelled += 1;
+                },
+                start() {
+                  // Never enqueue: the destination fails before reading.
+                },
+              }),
+          };
+        },
+      },
+    });
+    const destAdapter = fakeAdapter();
+    const dest = new Files({
+      adapter: {
+        ...destAdapter,
+        upload: () => Promise.reject(new FilesError("Unauthorized", "denied")),
+      },
+    });
+    await source.upload("a.txt", "alpha");
+    await source.upload("b.txt", "beta");
+
+    const result = await transfer(source, dest);
+    expect(result.transferred).toEqual([]);
+    expect(result.errors).toHaveLength(2);
+    expect(cancelled).toBe(2);
+  });
+
   test("stopOnError bails at the first failure", async () => {
     const sourceAdapter = fakeAdapter();
     const original = sourceAdapter.download;

@@ -150,11 +150,26 @@ export const transfer = async (
         return key;
       }
       const file = await source.download(key, { as: "stream", ...signalOpt });
-      await dest.upload(destKey, file.stream(), {
-        contentType: file.type,
-        ...(file.metadata ? { metadata: file.metadata } : {}),
-        ...signalOpt,
-      });
+      const body = file.stream();
+      try {
+        await dest.upload(destKey, body, {
+          contentType: file.type,
+          ...(file.metadata ? { metadata: file.metadata } : {}),
+          ...signalOpt,
+        });
+      } catch (error) {
+        // The destination failed without draining the source (auth error,
+        // rejected metadata, a fail-closed plugin) — cancel the open stream
+        // so its HTTP response / file handle is released instead of leaking
+        // one per failed key on a large walk. A locked stream is held by the
+        // failed consumer; nothing to release here.
+        if (!body.locked) {
+          await body.cancel().catch(() => {
+            // Best-effort cleanup — the per-key error is what matters.
+          });
+        }
+        throw error;
+      }
       report(key, "transferred");
       return key;
     },
