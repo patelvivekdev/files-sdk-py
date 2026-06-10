@@ -1048,6 +1048,28 @@ describe("fs resumable uploads", () => {
     ).rejects.toThrow(/does not match/u);
   });
 
+  test("resuming a token with a doctored tempPath throws", async () => {
+    const root = await makeRoot();
+    const files = new Files({ adapter: fsAdapter({ root }) });
+    // A persisted token is outside the trust boundary: a tempPath pointing
+    // anywhere but `<root>/<key>.fls-part` must be rejected, or uploadAt/
+    // complete/discard would write, rename, and delete at that path.
+    const outside = path.join(root, "..", "escape.fls-part");
+    const token: ResumableUploadSession = {
+      contentType: "text/plain",
+      key: "mine.bin",
+      provider: "fs",
+      tempPath: outside,
+    };
+    await expect(
+      files.upload("mine.bin", "data", {
+        control: UploadControl.from(token),
+        multipart: { partSize: 4 },
+      })
+    ).rejects.toThrow(/temp path does not match/u);
+    await expect(fsp.stat(outside)).rejects.toThrow();
+  });
+
   test("resuming a non-fs token throws", async () => {
     const root = await makeRoot();
     const files = new Files({ adapter: fsAdapter({ root }) });

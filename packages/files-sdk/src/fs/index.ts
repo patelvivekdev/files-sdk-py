@@ -587,7 +587,7 @@ export const fs = (opts: FsAdapterOptions): FsAdapter => {
     raw: { root },
     resumableUpload(key, resumableOpts): OffsetResumableDriver {
       const bodyPath = resolveKeyPath(root, key);
-      let tempPath = bodyPath + RESUMABLE_SUFFIX;
+      const tempPath = bodyPath + RESUMABLE_SUFFIX;
       let contentType = "application/octet-stream";
       return {
         adopt(session: ResumableUploadSession) {
@@ -603,7 +603,18 @@ export const fs = (opts: FsAdapterOptions): FsAdapter => {
               "Resume token does not match this upload's key."
             );
           }
-          ({ tempPath } = session);
+          // The temp path is fully derived from the traversal-checked key, so
+          // never adopt the token's copy — a persisted token is outside the
+          // trust boundary, and a doctored `tempPath` would otherwise hand
+          // `uploadAt`/`complete`/`discard` writes, renames, and deletes at an
+          // arbitrary filesystem path. A mismatch also catches a token minted
+          // against a different adapter root.
+          if (session.tempPath !== tempPath) {
+            throw new FilesError(
+              "Provider",
+              "Resume token's temp path does not match this adapter's root."
+            );
+          }
           ({ contentType } = session);
         },
         async begin(meta): Promise<ResumableUploadSession> {
