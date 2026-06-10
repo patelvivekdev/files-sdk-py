@@ -113,21 +113,45 @@ const listMock = mock(
   (_path: string, _opts: { limit: number; offset: number }) =>
     Promise.resolve(ok([baseListItem("a/1.txt"), baseListItem("a/2.txt")]))
 );
-const listV2Mock = mock((_opts?: unknown) =>
-  Promise.resolve(
-    ok({
-      // `b` carries a full `key`; `c` has only a leaf name (key reconstructed).
-      folders: [{ key: "a/b/", name: "b" }, { name: "c" }],
-      hasNext: false,
-      objects: [
-        {
-          key: "a/1.txt",
-          metadata: baseListItem("a/1.txt").metadata,
-          name: "1.txt",
-        },
-      ],
-    })
-  )
+const listV2Mock = mock(
+  (opts?: {
+    with_delimiter?: boolean;
+    prefix?: string;
+    cursor?: string;
+    limit?: number;
+  }) => {
+    if (opts?.with_delimiter) {
+      return Promise.resolve(
+        ok({
+          // `b` carries a full `key`; `c` has only a leaf name (key reconstructed).
+          folders: [{ key: "a/b/", name: "b" }, { name: "c" }],
+          hasNext: false,
+          objects: [
+            {
+              key: "a/1.txt",
+              metadata: baseListItem("a/1.txt").metadata,
+              name: "1.txt",
+            },
+          ],
+        })
+      );
+    }
+    // Flat mode: object names are full keys; the nested one proves the listing
+    // is recursive (the legacy V1 list() would have missed it).
+    return Promise.resolve(
+      ok({
+        folders: [],
+        hasNext: false,
+        objects: [
+          { metadata: baseListItem("a/1.txt").metadata, name: "a/1.txt" },
+          {
+            metadata: baseListItem("a/nested/2.txt").metadata,
+            name: "a/nested/2.txt",
+          },
+        ],
+      })
+    );
+  }
 );
 const getPublicUrlMock = mock((path: string, opts?: { download?: unknown }) => {
   const qs = opts?.download
@@ -219,6 +243,7 @@ beforeEach(() => {
   removeMock.mockClear();
   copyMock.mockClear();
   listMock.mockClear();
+  listV2Mock.mockClear();
   getPublicUrlMock.mockClear();
   createSignedUrlMock.mockClear();
   createSignedUploadUrlMock.mockClear();
@@ -588,26 +613,31 @@ describe("supabase adapter", () => {
   });
 
   describe("list", () => {
-    test("forwards prefix/limit, defaults offset to 0, prefixes returned keys", async () => {
+    test("flat list goes through listV2 and returns full (nested) keys", async () => {
       const files = new Files({ adapter: makeAdapter() });
       const out = await files.list({ limit: 10, prefix: "a/" });
-      expect(out.items.map((i) => i.key)).toEqual(["a/a/1.txt", "a/a/2.txt"]);
-      const [listCall] = listMock.mock.calls;
-      if (!listCall) {
-        throw new Error("expected list");
+      // Names are full keys — including nested ones the legacy folder-scoped
+      // V1 list() never surfaced.
+      expect(out.items.map((i) => i.key)).toEqual([
+        "a/1.txt",
+        "a/nested/2.txt",
+      ]);
+      expect(listMock).not.toHaveBeenCalled();
+      const [v2Call] = listV2Mock.mock.calls;
+      if (!v2Call) {
+        throw new Error("expected listV2");
       }
-      expect(listCall[0]).toBe("a/");
-      expect(listCall[1]).toEqual({ limit: 10, offset: 0 });
+      expect(v2Call[0]).toEqual({ limit: 10, prefix: "a/" });
     });
 
-    test("keys from list prefix join correctly and round-trip through head/download", async () => {
+    test("keys from a flat list round-trip through head/download", async () => {
       const files = new Files({ adapter: makeAdapter() });
       const out = await files.list({ limit: 10, prefix: "a/" });
-      const [item] = out.items;
+      const item = out.items.at(-1);
       if (!item) {
         throw new Error("expected at least one item");
       }
-      expect(item.key).toBe("a/a/1.txt");
+      expect(item.key).toBe("a/nested/2.txt");
       await expect(files.head(item.key)).resolves.toBeDefined();
       await expect(files.download(item.key)).resolves.toBeDefined();
     });
@@ -630,34 +660,35 @@ describe("supabase adapter", () => {
       ).rejects.toMatchObject({ code: "Provider" });
     });
 
-    test("encodes next offset as cursor when page is full", async () => {
-      // Two items returned, limit 2 → full page → cursor "2".
-      const out = await makeAdapter().list({ limit: 2 });
-      expect(out.cursor).toBe("2");
+    test("emits the V2 cursor when the server reports more", async () => {
+      listV2Mock.mockImplementationOnce(() =>
+        Promise.resolve(
+          ok({
+            folders: [],
+            hasNext: true,
+            nextCursor: "tok-2",
+            objects: [
+              { metadata: baseListItem("a/1.txt").metadata, name: "a/1.txt" },
+            ],
+          })
+        )
+      );
+      const out = await makeAdapter().list({ limit: 1 });
+      expect(out.cursor).toBe("tok-2");
     });
 
-    test("omits cursor when page is short (final page)", async () => {
+    test("omits cursor on the final page", async () => {
       const out = await makeAdapter().list({ limit: 100 });
       expect(out.cursor).toBeUndefined();
     });
 
-    test("decodes cursor as offset and threads it back into list()", async () => {
-      await makeAdapter().list({ cursor: "100", limit: 50 });
-      const [listCall] = listMock.mock.calls;
-      if (!listCall) {
-        throw new Error("expected list");
+    test("threads the cursor back into listV2", async () => {
+      await makeAdapter().list({ cursor: "tok-2", limit: 50 });
+      const [v2Call] = listV2Mock.mock.calls;
+      if (!v2Call) {
+        throw new Error("expected listV2");
       }
-      expect(listCall[1]).toEqual({ limit: 50, offset: 100 });
-    });
-
-    test("rejects a non-numeric cursor", async () => {
-      try {
-        await makeAdapter().list({ cursor: "abc" });
-        throw new Error("should have thrown");
-      } catch (error) {
-        expect(error).toBeInstanceOf(FilesError);
-        expect((error as FilesError).message).toMatch(/cursor/u);
-      }
+      expect(v2Call[0]).toEqual({ cursor: "tok-2", limit: 50 });
     });
 
     test("items expose lazy bodies that fetch via download()", async () => {
@@ -1049,7 +1080,7 @@ describe("supabase adapter", () => {
     });
 
     test("list error propagates as FilesError", async () => {
-      listMock.mockImplementationOnce(() =>
+      listV2Mock.mockImplementationOnce(() =>
         Promise.resolve(fail(403, "Unauthorized", "denied"))
       );
       try {
@@ -1105,8 +1136,8 @@ describe("supabase adapter", () => {
     test("list forwards the signal as FetchParameters", async () => {
       const { signal } = new AbortController();
       await new Files({ adapter: makeAdapter() }).list({ signal });
-      // list(path, options, parameters) — parameters is the 3rd arg.
-      expect(sigOf(listMock, 2)?.signal).toBe(signal);
+      // listV2(options, parameters) — parameters is the 2nd arg.
+      expect(sigOf(listV2Mock, 1)?.signal).toBe(signal);
     });
   });
 });

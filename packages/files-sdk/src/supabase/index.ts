@@ -1,7 +1,6 @@
 import { Buffer } from "node:buffer";
 
 import { StorageClient } from "@supabase/storage-js";
-import type { FileObject } from "@supabase/storage-js";
 
 import type {
   Adapter,
@@ -556,9 +555,34 @@ export const supabase = (opts: SupabaseAdapterOptions): SupabaseAdapter => {
       );
     },
     async list(options): Promise<ListResult> {
-      // The legacy list() is offset-based and folds folders in as zero-size
-      // rows; listV2 with_delimiter returns objects and folders separately
-      // with a real cursor. Nested so the flat `list` stays simple.
+      // Both shapes go through the V2 search API. The legacy V1 list() is
+      // folder-scoped and non-recursive — it returns only the direct
+      // children of the prefix-as-folder, with subfolders folded in as
+      // zero-size placeholder rows — so a flat listing of a bucket with
+      // nested keys would miss every nested object and surface phantom
+      // zero-byte "files" for the folders. listV2 without a delimiter is a
+      // plain string-prefix scan over full keys, with a real cursor.
+      const v2Item = (
+        obj: { metadata?: unknown; key?: string; name: string },
+        fullKey: string
+      ): StoredFile => {
+        const meta = (obj.metadata ?? {}) as SupabaseListItemMetadata;
+        return createStoredFile(
+          {
+            ...(meta.eTag && { etag: stripEtag(meta.eTag) }),
+            key: fullKey,
+            ...(meta.lastModified !== undefined && {
+              lastModified: toMs(meta.lastModified),
+            }),
+            ...(stringifyMetadata(meta as Record<string, unknown>) && {
+              metadata: stringifyMetadata(meta as Record<string, unknown>),
+            }),
+            size: meta.size ?? meta.contentLength ?? 0,
+            type: meta.mimetype ?? "application/octet-stream",
+          },
+          { factory: () => downloadAsBytes(fullKey), kind: "lazy" }
+        );
+      };
       const listFolded = async (delimiter: string): Promise<ListResult> => {
         assertSlashDelimiter("supabase", delimiter);
         const { data, error } = await bucketRef.listV2(
@@ -576,25 +600,9 @@ export const supabase = (opts: SupabaseAdapterOptions): SupabaseAdapter => {
         const trimmedPrefix = options?.prefix?.replace(/\/$/u, "");
         const fullPath = (name: string, key?: string): string =>
           key ?? (trimmedPrefix ? `${trimmedPrefix}/${name}` : name);
-        const items: StoredFile[] = data.objects.map((obj) => {
-          const meta = (obj.metadata ?? {}) as SupabaseListItemMetadata;
-          const fullKey = fullPath(obj.name, obj.key);
-          return createStoredFile(
-            {
-              ...(meta.eTag && { etag: stripEtag(meta.eTag) }),
-              key: fullKey,
-              ...(meta.lastModified !== undefined && {
-                lastModified: toMs(meta.lastModified),
-              }),
-              ...(stringifyMetadata(meta as Record<string, unknown>) && {
-                metadata: stringifyMetadata(meta as Record<string, unknown>),
-              }),
-              size: meta.size ?? meta.contentLength ?? 0,
-              type: meta.mimetype ?? "application/octet-stream",
-            },
-            { factory: () => downloadAsBytes(fullKey), kind: "lazy" }
-          );
-        });
+        const items: StoredFile[] = data.objects.map((obj) =>
+          v2Item(obj, fullPath(obj.name, obj.key))
+        );
         const prefixes = data.folders.map((folder) => {
           const raw = fullPath(folder.name, folder.key);
           return raw.endsWith("/") ? raw : `${raw}/`;
@@ -608,61 +616,25 @@ export const supabase = (opts: SupabaseAdapterOptions): SupabaseAdapter => {
       if (options?.delimiter) {
         return await listFolded(options.delimiter);
       }
-      const limit = options?.limit ?? DEFAULT_LIST_LIMIT;
-      const offset = options?.cursor ? Number(options.cursor) : 0;
-      if (!Number.isFinite(offset) || offset < 0) {
-        throw new FilesError(
-          "Provider",
-          `supabase: invalid list cursor "${options?.cursor}" — expected a non-negative integer.`
-        );
-      }
-      const { data, error } = await bucketRef.list(
-        options?.prefix ?? "",
+      const { data, error } = await bucketRef.listV2(
         {
-          limit,
-          offset,
+          limit: options?.limit ?? DEFAULT_LIST_LIMIT,
+          ...(options?.prefix && { prefix: options.prefix }),
+          ...(options?.cursor && { cursor: options.cursor }),
         },
         fetchParams(options?.signal)
       );
       if (error) {
         throw mapSupabaseError(error);
       }
-      const fileObjects = (data ?? []) as FileObject[];
-      const items: StoredFile[] = fileObjects.map((item) => {
-        const meta = (item.metadata ?? {}) as SupabaseListItemMetadata;
-        // list() prefixes the key with the listed prefix on the server
-        // side, but the returned `name` is *just* the leaf — re-prefix
-        // here so callers get a key that round-trips through the other
-        // methods (download/head/delete).
-        const fullKey = options?.prefix
-          ? `${options.prefix.replace(/\/$/u, "")}/${item.name}`
-          : item.name;
-        return createStoredFile(
-          {
-            ...(meta.eTag && { etag: stripEtag(meta.eTag) }),
-            key: fullKey,
-            ...(meta.lastModified !== undefined && {
-              lastModified: toMs(meta.lastModified),
-            }),
-            ...(stringifyMetadata(meta as Record<string, unknown>) && {
-              metadata: stringifyMetadata(meta as Record<string, unknown>),
-            }),
-            size: meta.size ?? meta.contentLength ?? 0,
-            type: meta.mimetype ?? "application/octet-stream",
-          },
-          {
-            factory: () => downloadAsBytes(fullKey),
-            kind: "lazy",
-          }
-        );
-      });
-      // Supabase's V1 list is offset/limit, not cursor-based. Encode the
-      // next offset as a numeric string cursor. Only emit it when we got
-      // a full page — a short page means no more rows.
-      const nextOffset = offset + items.length;
+      // Flat-mode object names are already full keys (`key` when the server
+      // provides it is the same path).
+      const items: StoredFile[] = data.objects.map((obj) =>
+        v2Item(obj, obj.key ?? obj.name)
+      );
       return {
         items,
-        ...(items.length === limit && { cursor: String(nextOffset) }),
+        ...(data.hasNext && data.nextCursor && { cursor: data.nextCursor }),
       };
     },
     name: "supabase",
