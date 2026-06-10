@@ -156,6 +156,38 @@ describe("cache plugin — url", () => {
 
     expect(calls.url).toHaveLength(2);
   });
+
+  test("caps a url cached without expiresIn at the default signature lifetime", async () => {
+    let now = 1000;
+    const { adapter, calls } = counting();
+    // ttl 0 disables time-based expiry — but the adapter still signed with a
+    // finite default, so the entry must not outlive that signature.
+    const files = withCache({ clock: () => now, ttl: 0 }, adapter);
+    await files.upload("a.txt", "hello");
+
+    await files.url("a.txt");
+    now += 3600 * 1000 + 1;
+    await files.url("a.txt");
+
+    expect(calls.url).toHaveLength(2);
+  });
+
+  test("the assumed default signature lifetime is configurable", async () => {
+    let now = 1000;
+    const { adapter, calls } = counting();
+    // The adapter is configured to sign 10s URLs by default — tell the cache.
+    const files = withCache(
+      { clock: () => now, defaultUrlExpiresIn: 10, ttl: 60_000 },
+      adapter
+    );
+    await files.upload("a.txt", "hello");
+
+    await files.url("a.txt");
+    now += 10_001;
+    await files.url("a.txt");
+
+    expect(calls.url).toHaveLength(2);
+  });
 });
 
 describe("cache plugin — download", () => {

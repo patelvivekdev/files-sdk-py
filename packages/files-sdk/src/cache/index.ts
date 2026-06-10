@@ -7,6 +7,7 @@ import type {
   StoredFile,
   StoredFileMeta,
 } from "../index.js";
+import { DEFAULT_URL_EXPIRES_IN } from "../internal/core.js";
 
 /** The read verbs {@link cache} can serve from its store. */
 export type CacheableOperation = "head" | "url" | "download";
@@ -107,6 +108,15 @@ export interface CacheOptions {
    * deterministic expiry in tests.
    */
   clock?: () => number;
+  /**
+   * The signature lifetime (in seconds) assumed for a `url()` call that omits
+   * `expiresIn`. The adapter signs such calls with its own default, which the
+   * plugin can't see — so cached entries are capped at this value to keep the
+   * "never served past its signature" guarantee. Defaults to `3600` (the
+   * SDK-wide default URL expiry); set it to match your adapter when you've
+   * configured a different `defaultUrlExpiresIn` there.
+   */
+  defaultUrlExpiresIn?: number;
 }
 
 /**
@@ -252,6 +262,8 @@ const rangeSignature = (range?: { start: number; end?: number }): string =>
 export const cache = (options: CacheOptions = {}): FilesPlugin<CacheApi> => {
   const ttl = options.ttl ?? DEFAULT_TTL;
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
+  const defaultUrlExpiresIn =
+    options.defaultUrlExpiresIn ?? DEFAULT_URL_EXPIRES_IN;
   const clock = options.clock ?? Date.now;
   const store =
     options.store ??
@@ -324,10 +336,10 @@ export const cache = (options: CacheOptions = {}): FilesPlugin<CacheApi> => {
     }
     stats.misses += 1;
     const value = await next(op);
-    const capMs =
-      op.options?.expiresIn === undefined
-        ? undefined
-        : op.options.expiresIn * 1000;
+    // The signature-lifetime cap must apply even when the caller omits
+    // `expiresIn` — the adapter still signs with a finite default — or a
+    // long/disabled `ttl` would keep serving the URL past its signature.
+    const capMs = (op.options?.expiresIn ?? defaultUrlExpiresIn) * 1000;
     await putRecord(op.key, (prev) => ({
       ...prev,
       urls: {
