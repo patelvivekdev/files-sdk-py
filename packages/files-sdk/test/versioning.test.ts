@@ -328,6 +328,68 @@ describe("versioning plugin — bulk operations", () => {
   });
 });
 
+describe("versioning plugin — nested keys", () => {
+  test("versions() of a key excludes a nested key's snapshots", async () => {
+    const files = withVersioning();
+    await files.upload("a", "a-v1");
+    await files.upload("a", "a-v2");
+    await files.upload("a/b", "ab-v1");
+    await files.upload("a/b", "ab-v2");
+
+    const ofA = await files.versions("a");
+    expect(ofA).toHaveLength(1);
+    expect(await bodyOf(files, ofA[0]?.key ?? "")).toBe("a-v1");
+    const ofAb = await files.versions("a/b");
+    expect(ofAb).toHaveLength(1);
+    expect(await bodyOf(files, ofAb[0]?.key ?? "")).toBe("ab-v1");
+  });
+
+  test("restore() of a key never picks up a nested key's snapshot", async () => {
+    const files = withVersioning();
+    await files.upload("a", "a-v1");
+    await files.upload("a", "a-v2");
+    // Snapshotted *after* a's versions, so its id would sort newest if it
+    // leaked into a's history.
+    await files.upload("a/b", "ab-v1");
+    await files.upload("a/b", "ab-v2");
+
+    await files.restore("a");
+    expect(await bodyOf(files, "a")).toBe("a-v1");
+  });
+
+  test("rejects a versionId containing a slash", async () => {
+    const files = withVersioning();
+    await files.upload("a", "a-v1");
+    await files.upload("a", "a-v2");
+    await files.upload("a/b", "ab-v1");
+    await files.upload("a/b", "ab-v2");
+
+    const [nested] = await files.versions("a/b");
+    await expect(files.restore("a", `b/${nested?.versionId}`)).rejects.toThrow(
+      /version ids never contain/u
+    );
+  });
+
+  test("pruning a key leaves a nested key's snapshots alone", async () => {
+    const files = withVersioning({ limit: 1 });
+    // a/b accrues two snapshots first, so they'd be counted (and the parent's
+    // own snapshot pruned) if the nested dir leaked into a's listing.
+    for (const value of ["1", "2", "3"]) {
+      await files.upload("a/b", value);
+    }
+    await files.upload("a", "a-v1");
+    await files.upload("a", "a-v2");
+
+    const ofA = await files.versions("a");
+    expect(ofA).toHaveLength(1);
+    expect(await bodyOf(files, ofA[0]?.key ?? "")).toBe("a-v1");
+    // a/b's own history is intact (limit applies per key: newest survivor).
+    const ofAb = await files.versions("a/b");
+    expect(ofAb).toHaveLength(1);
+    expect(await bodyOf(files, ofAb[0]?.key ?? "")).toBe("2");
+  });
+});
+
 describe("versioning plugin — error propagation", () => {
   test("surfaces a non-NotFound error from the snapshot head", async () => {
     const inner = fakeAdapter();

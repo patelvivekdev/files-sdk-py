@@ -105,6 +105,19 @@ const versionId = (file: StoredFile): string => {
   return `${time}-${tag}`;
 };
 
+/**
+ * The version id of a key listed under its own version directory, or
+ * `undefined` when the listed key belongs to a nested key. Version dirs nest —
+ * `a`'s dir is a prefix of `a/b`'s — so a listing of `.versions/a/` also
+ * returns `.versions/a/b/<id>`. A snapshot of `key` itself is exactly
+ * `dir + <id>` with no further slashes; anything deeper belongs to a nested
+ * key and must not be counted, restored, or pruned as a version of `key`.
+ */
+const ownVersionId = (listedKey: string, dir: string): string | undefined => {
+  const id = listedKey.slice(dir.length);
+  return id.includes("/") ? undefined : id;
+};
+
 /** Recover the source object's last-modified time from a {@link versionId}. */
 const timeOf = (id: string): number => {
   const dash = id.indexOf("-");
@@ -186,19 +199,20 @@ export const versioning = (
     next: PluginNext,
     max: number
   ): Promise<void> => {
+    const dir = versionsDirFor(key);
     const { items } = await next({
       kind: "list",
-      options: { prefix: versionsDirFor(key) },
+      options: { prefix: dir },
     });
-    if (items.length <= max) {
+    const own = items
+      .map((file) => file.key)
+      .filter((listedKey) => ownVersionId(listedKey, dir) !== undefined);
+    if (own.length <= max) {
       return;
     }
     // Version keys sort chronologically (padded-time prefix), so the front of
     // the sorted list is the oldest.
-    const excess = items
-      .map((file) => file.key)
-      .toSorted()
-      .slice(0, items.length - max);
+    const excess = own.toSorted().slice(0, own.length - max);
     for (const versionKey of excess) {
       await next({ key: versionKey, kind: "delete" });
     }
@@ -281,7 +295,10 @@ export const versioning = (
         ...(cursor !== undefined && { cursor }),
       });
       for (const item of items) {
-        const id = item.key.slice(dir.length);
+        const id = ownVersionId(item.key, dir);
+        if (id === undefined) {
+          continue;
+        }
         out.push({
           key: item.key,
           lastModified: timeOf(id),
@@ -302,6 +319,14 @@ export const versioning = (
     requested?: string
   ): Promise<StoredFile> => {
     let id = requested;
+    if (id !== undefined && id.includes("/")) {
+      // A slash would address into a nested key's version dir (a version of
+      // "a/b" via restore("a", "b/<id>")) — never a version of `key` itself.
+      throw new FilesError(
+        "Provider",
+        `versioning: invalid versionId "${id}" — version ids never contain "/"`
+      );
+    }
     if (id === undefined) {
       const all = await listVersions(files, key);
       const [newest] = all;
