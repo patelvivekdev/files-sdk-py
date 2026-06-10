@@ -58,7 +58,11 @@ export interface DropboxAdapterOptions {
   /**
    * Default expiry, in seconds, for the temporary download links returned by
    * `url()` when neither `publicByDefault` nor `publicBaseUrl` is set.
-   * Capped at 14400 (4 hours, the Dropbox maximum). Defaults to 3600.
+   * **Validated only**: `filesGetTemporaryLink` takes no expiry parameter, so
+   * every link actually lives ~4 hours (14400s, the Dropbox fixed lifetime)
+   * regardless of what's requested — values above 14400 throw, values below
+   * are accepted but the link still outlives them. Don't rely on a short
+   * `expiresIn` as a security control with this adapter. Defaults to 3600.
    */
   defaultUrlExpiresIn?: number;
   /**
