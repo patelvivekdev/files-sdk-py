@@ -2,6 +2,7 @@ import { AUDIT_SCENE_DURATION } from "./audit-scene";
 import { CACHE_SCENE_DURATION } from "./cache-scene";
 import { FAILOVER_SCENE_DURATION } from "./failover-scene";
 import { GALLERY_SCENE_DURATION } from "./gallery-scene";
+import { NEON_SCENE_DURATION } from "./neon-scene";
 import { SIGNED_URL_SCENE_DURATION } from "./signed-url-scene";
 import { SOFT_DELETE_SCENE_DURATION } from "./soft-delete-scene";
 import { TIERING_SCENE_DURATION } from "./tiering-scene";
@@ -13,7 +14,8 @@ const INTRO_DURATION = 110;
 const OUTRO_DURATION = 75;
 
 const INTRO_FROM = 0;
-const GALLERY_FROM = INTRO_FROM + INTRO_DURATION;
+const NEON_FROM = INTRO_FROM + INTRO_DURATION;
+const GALLERY_FROM = NEON_FROM + NEON_SCENE_DURATION;
 const SOFT_DELETE_FROM = GALLERY_FROM + GALLERY_SCENE_DURATION;
 const TIERING_FROM = SOFT_DELETE_FROM + SOFT_DELETE_SCENE_DURATION;
 const FAILOVER_FROM = TIERING_FROM + TIERING_SCENE_DURATION;
@@ -29,6 +31,7 @@ export const TIMING = {
   failover: { duration: FAILOVER_SCENE_DURATION, from: FAILOVER_FROM },
   gallery: { duration: GALLERY_SCENE_DURATION, from: GALLERY_FROM },
   intro: { duration: INTRO_DURATION, from: INTRO_FROM },
+  neon: { duration: NEON_SCENE_DURATION, from: NEON_FROM },
   outro: { duration: OUTRO_DURATION, from: OUTRO_FROM },
   signedUrl: { duration: SIGNED_URL_SCENE_DURATION, from: SIGNED_URL_FROM },
   softDelete: { duration: SOFT_DELETE_SCENE_DURATION, from: SOFT_DELETE_FROM },

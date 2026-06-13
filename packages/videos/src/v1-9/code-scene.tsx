@@ -36,6 +36,7 @@ interface CodeSceneProps {
   title: string;
   filename: string;
   duration: number;
+  eyebrow?: string;
   highlightLines?: readonly number[];
   width?: number;
 }
@@ -45,6 +46,7 @@ export const CodeScene: React.FC<CodeSceneProps> = ({
   title,
   filename,
   duration,
+  eyebrow,
   highlightLines,
   width = 1100,
 }) => {
@@ -89,7 +91,7 @@ export const CodeScene: React.FC<CodeSceneProps> = ({
         transform: `translateY(${enterLift + exitLift}px)`,
       }}
     >
-      <SceneTitle title={title} />
+      <SceneTitle eyebrow={eyebrow} title={title} />
       <CodeWindow
         budget={budget}
         filename={filename}

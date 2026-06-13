@@ -7,6 +7,7 @@ import { AuditScene } from "./audit-scene";
 import { CacheScene } from "./cache-scene";
 import { FailoverScene } from "./failover-scene";
 import { GalleryScene } from "./gallery-scene";
+import { NeonScene } from "./neon-scene";
 import { SignedUrlScene } from "./signed-url-scene";
 import { SoftDeleteScene } from "./soft-delete-scene";
 import { TieringScene } from "./tiering-scene";
@@ -14,6 +15,7 @@ import { TIMING } from "./timings";
 import { ZipScene } from "./zip-scene";
 
 const SCENES = [
+  { Component: NeonScene, key: "neon" as const },
   { Component: GalleryScene, key: "gallery" as const },
   { Component: SoftDeleteScene, key: "softDelete" as const },
   { Component: TieringScene, key: "tiering" as const },
@@ -35,7 +37,7 @@ export const FilesSdk19: React.FC = () => (
       <IntroScene
         command="npm i files-sdk@1.9.0"
         durationInFrames={TIMING.intro.duration}
-        tagline="seven new plugins · now fifteen in total"
+        tagline="a Neon adapter · seven new plugins"
         version="v1.9"
       />
     </Sequence>
