@@ -1,0 +1,47 @@
+name: Live tests
+
+# Live tests hit real providers and require credentials, so they must never run
+# on `pull_request` from forks (where secrets aren't exposed anyway, and where a
+# malicious PR could try to exfiltrate them). They run only on `workflow_dispatch`
+# — a maintainer triggers them manually from the Actions tab, against a branch
+# they've chosen (typically `main` after a PR has merged). The job runs trusted
+# in-repo code only, so credentials are never exposed to fork-controlled code.
+#
+# Credentials come from repo secrets; the per-adapter env gate in
+# `test/live-helper.ts` skips any suite whose secrets are absent.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        name: Install Bun
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build SDK
+        run: bun run build --filter files-sdk
+
+      - name: Run live tests
+        working-directory: packages/files-sdk
+        env:
+          LIVE_TESTS: "1"
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          S3_LIVE_BUCKET: ${{ secrets.S3_LIVE_BUCKET }}
+        # `.live.test` is a substring path filter (Bun filters are substrings,
+        # not globs), so it matches every `*.live.test.ts` suite. A filter that
+        # matches nothing exits non-zero, so a broken filter fails loudly rather
+        # than silently running zero tests.
+        run: bun test .live.test
