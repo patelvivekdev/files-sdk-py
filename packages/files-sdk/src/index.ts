@@ -6,6 +6,14 @@ import {
 } from "./internal/core.js";
 import { FilesError } from "./internal/errors.js";
 import { globMatcher, globPrefix } from "./internal/glob.js";
+import {
+  buildReceipt,
+  bufferedBodyBytes,
+  receiptOpFor,
+  resolveReceiptsConfig,
+  sha256Hex,
+} from "./internal/receipts.js";
+import type { Receipt, ReceiptsConfig } from "./internal/receipts.js";
 import { runResumableUpload } from "./internal/resumable.js";
 import type {
   ResumableDriver,
@@ -33,6 +41,7 @@ export type {
   ResumableUploadSession,
   UploadControlStatus,
 } from "./internal/resumable.js";
+export type { Receipt, ReceiptOp } from "./internal/receipts.js";
 export type { BodySource, StoredFileMeta } from "./internal/stored-file.js";
 export { createStoredFile } from "./internal/stored-file.js";
 export {
@@ -846,6 +855,15 @@ export interface FilesActionEvent {
   error?: FilesError;
   /** Wall-clock duration of the public call, in milliseconds. */
   durationMs: number;
+  /**
+   * A provenance {@link Receipt} for the call, present **only** when the
+   * `receipts` option is on and `type` is a mutating verb (`upload`, `delete`,
+   * `copy`, `move`) that **succeeded**. Absent on reads, on failures, on
+   * `signedUploadUrl`, and on every instance with receipts off — so an existing
+   * `onAction` consumer that never opted in sees the exact payload it always
+   * has. See {@link FilesOptions.receipts}.
+   */
+  receipt?: Receipt;
 }
 
 /**
@@ -909,6 +927,28 @@ export interface FilesOptions<A extends Adapter> extends OperationOptions {
   readonly?: boolean;
   /** Observability callbacks — see {@link FilesHooks}. */
   hooks?: FilesHooks;
+  /**
+   * Opt into provenance {@link Receipt}s for mutating calls (`upload`, `delete`,
+   * `copy`, `move`). **Off by default** — when unset or `false`, the instance
+   * behaves exactly as before: no receipt is built and nothing is hashed.
+   *
+   * - `true` — attach a {@link Receipt} (without `sha256`) to the success
+   *   {@link FilesActionEvent} of each mutating call. Every field is derived
+   *   from work the SDK already does, so this adds no per-call cost.
+   * - `{ sha256: true }` — additionally fingerprint the upload body, taken
+   *   **as passed to `upload()`** (before any plugin transform). This is the one
+   *   field with a real per-call cost, so it stays off until asked for by name.
+   *   The `sha256` is present only on an `upload` of a buffered body; a
+   *   streaming upload (which the SDK never buffers) omits it. With a
+   *   body-transforming plugin (`encryption`, `compression`) the stored bytes
+   *   differ from this hash, but it matches what `download` returns.
+   *
+   * Receipts ride on the existing {@link FilesHooks.onAction} event as an
+   * additive `receipt` field, so reading them is `new Files({ receipts: true,
+   * hooks: { onAction: (e) => e.receipt && record(e.receipt) } })` — no new
+   * operation, callback, or return-shape change.
+   */
+  receipts?: boolean | { sha256?: boolean };
   /**
    * Ordered list of {@link FilesPlugin}s wrapping this instance. `plugins[0]`
    * is the outermost layer of the onion. For plugins that add methods via
@@ -1199,6 +1239,10 @@ export class Files<A extends Adapter = Adapter> {
   readonly #hooks: FilesHooks | undefined;
   readonly #isReadOnly: boolean;
   readonly #prefix: string;
+  /** The normalized `receipts` option — see {@link FilesOptions.receipts}. */
+  readonly #receipts: ReceiptsConfig;
+  /** The `receipts` option as supplied, carried verbatim into {@link Files.readonly}. */
+  readonly #receiptsOption: FilesOptions<A>["receipts"];
   /** The plugin list as supplied, carried verbatim into {@link Files.readonly}. */
   readonly #plugins: readonly FilesPlugin[] | undefined;
   /**
@@ -1215,12 +1259,15 @@ export class Files<A extends Adapter = Adapter> {
       prefix,
       readonly: readOnly,
       plugins,
+      receipts,
       ...defaults
     } = opts;
     this.#adapter = adapter;
     this.#hooks = hooks;
     this.#isReadOnly = readOnly === true;
     this.#prefix = normalizePrefix(prefix);
+    this.#receiptsOption = receipts;
+    this.#receipts = resolveReceiptsConfig(receipts);
     this.#defaults = defaults;
     this.#plugins = plugins;
     // A generic `wrap` can't be folded without per-call type parameters, so
@@ -1453,7 +1500,11 @@ export class Files<A extends Adapter = Adapter> {
    * when neither hook is set, so the no-hooks path stays cheap. `onRetry` is
    * emitted separately, from {@link Files.#run}.
    */
-  async #action<T>(ctx: ActionContext, fn: () => Promise<T>): Promise<T> {
+  async #action<T>(
+    ctx: ActionContext,
+    fn: () => Promise<T>,
+    sha256Of?: () => Promise<string | undefined>
+  ): Promise<T> {
     const hooks = this.#hooks;
     if (!(hooks?.onAction || hooks?.onError)) {
       return fn();
@@ -1461,12 +1512,31 @@ export class Files<A extends Adapter = Adapter> {
     const startedAt = Date.now();
     try {
       const result = await fn();
-      emitHook(hooks.onAction, {
-        ...ctx,
-        durationMs: Date.now() - startedAt,
-        result,
-        status: "success",
-      });
+      const settledAt = Date.now();
+      const durationMs = settledAt - startedAt;
+      if (hooks.onAction) {
+        // The fingerprint is resolved here — on the success path, and only when
+        // an `onAction` is present to receive it — so a missing receipt
+        // consumer, or an upload that failed, never reads or hashes the body.
+        // `sha256Of` swallows its own read/hash errors: a receipt must never
+        // break the operation it observes.
+        const sha256 =
+          this.#receipts.sha256 && sha256Of ? await sha256Of() : undefined;
+        const receipt = this.#makeReceipt(
+          ctx,
+          result,
+          durationMs,
+          settledAt,
+          sha256
+        );
+        emitHook(hooks.onAction, {
+          ...ctx,
+          durationMs,
+          result,
+          status: "success",
+          ...(receipt && { receipt }),
+        });
+      }
       return result;
     } catch (error) {
       const wrapped = FilesError.wrap(error);
@@ -1480,6 +1550,50 @@ export class Files<A extends Adapter = Adapter> {
       });
       throw wrapped;
     }
+  }
+
+  /**
+   * Build the provenance {@link Receipt} for a settled mutating call, or
+   * `undefined` when receipts are off or the verb isn't one a receipt describes
+   * (reads, `signedUploadUrl`). Every field but `sha256` is derived from what
+   * the action already holds — the caller-facing key (`ctx.key` for
+   * `upload` / `delete`, `ctx.to` for `copy` / `move`), the adapter name, and
+   * `bytes` / `etag` read off a single-`upload` {@link UploadResult}. `sha256`
+   * is the only value passed in pre-computed, and only by the upload path.
+   */
+  #makeReceipt(
+    ctx: ActionContext,
+    result: unknown,
+    durationMs: number,
+    ts: number,
+    sha256?: string
+  ): Receipt | undefined {
+    if (!this.#receipts.enabled) {
+      return;
+    }
+    const op = receiptOpFor(ctx.type);
+    // Receipts describe content landing at a key. `copy` / `move` report the
+    // destination; everything else reports its own key. The bulk array forms
+    // carry `keys` rather than `key` and aggregate many results, so they don't
+    // map onto a single per-object receipt — skip them.
+    const key = op === "copy" || op === "move" ? ctx.to : ctx.key;
+    if (op === undefined || key === undefined) {
+      return;
+    }
+    const upload =
+      op === "upload" && result !== null && typeof result === "object"
+        ? (result as Partial<UploadResult>)
+        : undefined;
+    return buildReceipt({
+      durationMs,
+      key,
+      op,
+      provider: this.#adapter.name,
+      ts,
+      ...(typeof upload?.size === "number" && { bytes: upload.size }),
+      ...(typeof upload?.etag === "string" && { etag: upload.etag }),
+      ...(sha256 !== undefined && { sha256 }),
+    });
   }
 
   get raw(): A["raw"] {
@@ -1536,6 +1650,9 @@ export class Files<A extends Adapter = Adapter> {
       hooks: this.#hooks,
       prefix: this.#prefix || undefined,
       readonly: true,
+      ...(this.#receiptsOption !== undefined && {
+        receipts: this.#receiptsOption,
+      }),
       // Carry plugins so the read-only clone keeps the same onion and surface;
       // `extend` re-runs in the clone's constructor.
       ...(this.#plugins && { plugins: this.#plugins }),
@@ -1562,12 +1679,38 @@ export class Files<A extends Adapter = Adapter> {
 
   #writeAction<T>(
     ctx: ActionContext & { type: WriteActionType },
-    fn: () => Promise<T>
+    fn: () => Promise<T>,
+    sha256Of?: () => Promise<string | undefined>
   ): Promise<T> {
-    return this.#action(ctx, () => {
-      this.#assertWritable(ctx.type);
-      return fn();
-    });
+    return this.#action(
+      ctx,
+      () => {
+        this.#assertWritable(ctx.type);
+        return fn();
+      },
+      sha256Of
+    );
+  }
+
+  /**
+   * The SHA-256 to stamp on a single `upload`'s receipt, or `undefined` when
+   * the body is a stream the SDK won't buffer, or reading/hashing it fails.
+   * This is the **only** per-call cost the receipts feature can incur; it's
+   * invoked from {@link Files.#action} on the success path, gated on
+   * `receipts: { sha256: true }`. A read or digest error degrades to no
+   * fingerprint rather than rejecting — a receipt must never break the upload
+   * it describes.
+   */
+  async #uploadSha256(body: Body): Promise<string | undefined> {
+    if (!(this.#receipts.enabled && this.#receipts.sha256)) {
+      return;
+    }
+    try {
+      const bytes = await bufferedBodyBytes(body);
+      return bytes === undefined ? undefined : await sha256Hex(bytes);
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -1609,11 +1752,17 @@ export class Files<A extends Adapter = Adapter> {
       key: keyOrItems,
       type: "upload",
     };
-    return this.#writeAction(ctx, () =>
-      this.#dispatch(
-        { body, key: keyOrItems, kind: "upload", options: opts },
-        (op) => this.#perform(op)
-      )
+    // The body is handed to the adapter untouched. Any `sha256` is taken from it
+    // lazily on the success path (see `#action`), so an upload with no receipt
+    // consumer — or one that fails — never reads or hashes the body.
+    return this.#writeAction(
+      ctx,
+      () =>
+        this.#dispatch(
+          { body, key: keyOrItems, kind: "upload", options: opts },
+          (op) => this.#perform(op)
+        ),
+      () => this.#uploadSha256(body)
     );
   }
 
